@@ -1,0 +1,20 @@
+site                              n    median p95    median max  ratio min  ratio max   |p16| p95   |p84| p95
+a1[0]                               72       0.09444        0.1536     0.9132       1.16      0.1586      0.1757
+c                                   72        0.1163        0.1773     0.9116      1.082       0.156      0.1452
+delta_r[0]                          72       0.09444        0.1536     0.9132       1.16      0.1586      0.1757
+depths[0]                           72        0.1066        0.1523     0.9018       1.12      0.1465       0.142
+rors[0]                             72        0.1066        0.1523     0.9019       1.12      0.1466      0.1418
+total_error                         72             0             0          1          1           0           0
+u1                                  72             0             0          1          1           0           0
+u2                                  72             0             0          1          1           0           0
+v                                   72         0.119        0.1642     0.8997      1.112      0.2022      0.1614
+
+Calibrated gates
+site class                         median limit   sigma-ratio interval
+depth/rors                               0.1599   [0.8501, 1.176]
+trend c,v                                0.1785   [0.8561, 1.168]
+noise log_jitter/total_error                0.1   [0.9524, 1.05]
+other                                    0.1417   [0.8207, 1.219]
+
+Saved pooled reference: /scratch/midway3/tfairnington/accel_gpu_results/272_harmonica_pooled_gate/references/WASP-94_NIRISS_SOSS_order1_R20_low_resolution_inputs_ch0_24_pooled_joint_nuts.pkl
+Saved noise floor: /scratch/midway3/tfairnington/accel_gpu_results/272_harmonica_pooled_gate/references/WASP-94_NIRISS_SOSS_order1_R20_low_resolution_inputs_ch0_24_pooled_joint_nuts_noise_floor.json

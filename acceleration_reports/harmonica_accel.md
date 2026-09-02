@@ -172,3 +172,33 @@ Machine-readable results:
   cadence/width, compilation is 43% of TA0.95 wall; persistent compilation
   reuse may improve repeat runs, but no unmeasured warm-cache speedup is
   claimed.
+
+## Addendum (2026-09-02 15:30): multi-seed pooled gate — PASS
+
+Queue script `272_harmonica_pooled_gate.sh` ran two more joint-NUTS seeds
+(`--seed 1`, `--seed 2`, 1000/1000, same R20 dump, same V100 allocation) and
+pooled them with the seed-0 run from 271 into a 3-seed reference
+(`/scratch/midway3/tfairnington/accel_gpu_results/272_harmonica_pooled_gate/references/`,
+3000 draws x 24 channels). `tools/reference_noise_floor.py` calibrated gates
+from the seed-to-seed scatter (`harmonica_pooled_noise_floor.txt`):
+median-shift limit 0.160σ depth/rors, 0.179σ trends, 0.142σ other
+(`delta_r`, `a1`); sigma-ratio intervals [0.85, 1.18] / [0.86, 1.17] / [0.82, 1.22].
+The exact joint sampler's own seed-to-seed depth shift reaches 0.152σ, which
+is why the flat 0.1σ gate above rejected it.
+
+Against the pooled reference, over all 24 channels x {depths, delta_r, c, v}:
+
+| Candidate | max shift depth | max shift delta_r | max shift c / v | σ-ratio range | failed rows | weighted depth offset (ppm) |
+|---|---:|---:|---:|---:|---:|---:|
+| joint seed 1 (control, in pool) | 0.065 | 0.075 | 0.090 / 0.096 | 0.93–1.06 | 0 | −0.08 |
+| joint seed 2 (control, in pool) | 0.070 | 0.072 | 0.086 / 0.064 | 0.94–1.06 | 0 | +0.11 |
+| Laplace NUTS TA 0.95 | 0.100 | 0.106 | 0.105 / 0.121 | 0.93–1.10 | 0 | −0.00 |
+| Laplace NUTS TA 0.99 | 0.075 | 0.104 | 0.087 / 0.074 | 0.91–1.10 | 0 | +0.08 |
+
+Both Laplace candidates pass every calibrated row (0/96 failures each) with
+sub-0.1 ppm weighted depth offsets. Controls are members of the pool and so
+sit slightly closer than an independent chain would; the Laplace runs are
+independent of the pool. Conclusion: Laplace-metric independent NUTS at
+TA 0.95 (4.46x, zero divergences) is fidelity-safe for this Harmonica
+configuration. Unmeasured parameterizations (truncated `q`, higher-order
+odd coefficients, per-channel jitter) still need their own check before use.
