@@ -1,0 +1,49 @@
+# CPU harness copy of GJ3470_nrs1_g395h_config.yaml.
+planet:
+  name: GJ-3470
+  period: 3.33665240
+  duration: 0.08
+  t0: 60741.2705
+  b: 0.47
+  rprs: 0.0764
+
+stellar:
+  feh: 0.20
+  teff: 3650
+  logg: 4.658
+  teff_sigma: 50
+  logg_sigma: 0.035
+  feh_sigma: 0.1
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+  ld_prior_min_sigma: 1.0e-4
+
+instrument: 'NIRSPEC/G395H'
+order: null
+nrs: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'GJ3470_G395H_NRS1_STELLARINFORMEDLD_POWER2_ELINEAR_ACCEL'
+fits_file: 'GJ3470_nrs1_box_spectra_fullres.fits'
+resolution:
+  high: 300
+  low: 20
+flags:
+  vmap_chunk: 40
+  detrending_type: 'linear'
+  interpolate_trend: false
+  interpolate_ld: false
+  ld_prior: 'stellarprior'
+  need_lowres: true
+  ld_profile: 'power2'
+  mask_start: 'jnp.min(t)'
+  mask_end: 'jnp.min(t) + 0.007'
+  mask_integrations_start: null
+  whitelight_num_warmup: 50
+  whitelight_num_samples: 50
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "cpu"
+

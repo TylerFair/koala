@@ -1,0 +1,56 @@
+fits_file: HAT-P-65_nrs1_box_spectra_fullres_PRISM_V1.fits
+flags:
+  analysis_stage: highres
+  chunk_mode: parallel
+  chunk_parallel_job_count: 2
+  compile_box: true
+  detrending_type: explinear
+  fix_ld: true
+  interpolate_ld: false
+  interpolate_trend: false
+  jax_compilation_cache_dir: /scratch/midway3/tfairnington/jax_cache/speed_p2_prism_serial
+  ld_profile: power2
+  mask_integrations_start: null
+  need_lowres: false
+  random_seed: 555
+  spectro_jitter_prior: lognormal
+  spectro_mass_matrix: laplace
+  spectro_min_depth_ess: 400
+  spectro_sampler: independent_nuts
+  transit_engine: jaxoplanet
+  vmap_chunk: 21
+  whitelight_laplace_target_accept: 0.99
+  whitelight_laplace_warmup: 200
+  whitelight_mass_matrix: laplace
+  whitelight_max_divergences: 0
+  whitelight_max_extra_blocks: 3
+  whitelight_min_ess: 400
+  whitelight_num_samples: 20
+  whitelight_num_warmup: 20
+  chunk_parallel_job_index: 1
+host_device: gpu
+input_dir: FITS
+instrument: NIRSPEC/PRISM
+nrs: 1
+order: null
+outlier_clip:
+  spectroscopic_sigma: 4
+  whitelight_sigma: 4
+output_dir: HAT-P-65_PRISM_P2_SPEED_PARALLEL_HIGH
+path: /scratch/midway3/tfairnington/
+planet:
+  b: 0.464
+  duration: 0.17688375
+  name: HAT-P-65
+  period: 2.60544751
+  rprs: 0.1006
+  t0: 60470.72
+resolution:
+  high: 50
+  low: 10
+stellar:
+  feh: 0.1
+  ld_data_path: ../exotic_ld_data
+  ld_model: stagger
+  logg: 4.18
+  teff: 5835

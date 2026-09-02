@@ -1,0 +1,57 @@
+# Auto-generated config for WASP-12
+# Transit time (t0) automatically assigned: 59770.835
+
+planet:
+  name: WASP-12
+  period: 1.091418901
+  duration: 0.125
+  t0: 60000.0
+  b: 0.424
+  rprs: 0.1178
+
+stellar:
+  feh: 0.12
+  teff: 6265.0
+  logg: 4.11
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/PRISM'
+order: #
+nrs: 1
+#wavelength_filter:
+#  wl_min: 2.0
+#  wl_max: 5.0
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'WASP-12_PRISM_NRS1_GAUSSIANLD_POWER2_LINEAR'
+fits_file: 'WASP-12_nrs1_box_spectra_fullres.fits'
+resolution:
+  high: 'native'
+  low: 20
+flags:
+  detrending_type: 'linear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: False
+  need_lowres: True
+  ld_profile: 'power2'
+  mask_start: 'jnp.min(t)'
+  mask_end: 'jnp.min(t)+0.007'
+  mask_integrations_start: None
+  vmap_chunk: 40
+  #mask_integrations_end:
+  #time_binning:
+  #enabled: False
+  #dt_seconds: 20
+  #method: 'mean'
+
+  #whitelight: 'True'
+
+  #spectroscopic: 'False'
+
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "cpu"

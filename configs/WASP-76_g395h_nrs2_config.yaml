@@ -1,0 +1,48 @@
+# Auto-generated config for WASP-76
+# Transit time (t0) automatically assigned: 60908.975
+
+planet:
+  name: WASP-76
+  period: 1.80988158
+  duration: 0.15635833333333335
+  t0: 60679.115
+  b: 0.103
+  rprs: 0.10873
+
+stellar:
+  feh: 0.20
+  teff: 6366.0
+  logg: 4.12
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/G395H'
+nrs: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'WASP-76_G395H_NRS1_GAUSSIANLD_POWER2_LINEAR'
+fits_file: 'WASP-76_nrs1_box_spectra_fullres.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  vmap_chunk: 40
+  detrending_type: 'linear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: False
+  need_lowres: True
+  ld_profile: 'power2'
+  #spot_center: 60908.955
+  #spot_width: 0.005
+  #spot_amp: 0.001
+  mask_start: 'jnp.min(t)'
+  mask_end: 'jnp.min(t) + 0.007'
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

@@ -1,0 +1,59 @@
+planet:
+  name: HAT-P-26
+  period: 4.2345002
+  duration: 0.1023
+  t0: 60110.305
+  b: 0.355
+  rprs: 0.0737
+stellar:
+  feh: 0.01
+  teff: 5001
+  logg: 4.21
+  teff_sigma: 61
+  logg_sigma: 0.15
+  feh_sigma: 0.04
+  ld_model: stagger
+  ld_data_path: ../exotic_ld_data
+  ld_prior_min_sigma: 0.0001
+  ld_prior_cache_dir: /scratch/midway3/tfairnington/accel_parity/20260902a/HAT-P-26_G395H_NRS1_STELLARINFORMEDLD_POWER2_LINEAR/shared_ld_prior_cache
+instrument: NIRSPEC/G395H
+order: null
+nrs: 1
+path: /scratch/midway3/tfairnington/
+input_dir: FITS
+output_dir: HAT-P-26_G395H_NRS1_STELLARINFORMEDLD_POWER2_LINEAR_PARITY_20260902a_A
+fits_file: HAT-P-26_nrs1_box_spectra_fullres_G395H.fits
+resolution:
+  high: reference
+  low: 20
+  reference_grid: prism_template.csv
+flags:
+  vmap_chunk: 40
+  detrending_type: linear
+  interpolate_trend: false
+  interpolate_ld: false
+  ld_prior: stellarprior
+  need_lowres: true
+  ld_profile: power2
+  mask_start: jnp.min(t)
+  mask_end: jnp.min(t) + 0.007
+  mask_integrations_start: None
+  spectro_laplace_hessian_method: finite_difference
+  spectro_laplace_fd_relative_step: 0.0002
+  spectro_laplace_trust_radius: 5.0
+  spectro_laplace_warmup: 150
+  spectro_laplace_start_at_map: true
+  spectro_laplace_fuse_program: true
+  spectro_jitter_prior: lognormal
+  lowres_num_samples: 2000
+  highres_num_samples: 2000
+  spectro_sampler: independent_nuts
+  spectro_mass_matrix: laplace
+  spectro_laplace_target_accept: 0.95
+  spectro_laplace_max_tree_depth: 6
+  whitelight_num_warmup: 1000
+  whitelight_num_samples: 1000
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+host_device: gpu

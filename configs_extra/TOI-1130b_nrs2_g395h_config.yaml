@@ -1,0 +1,46 @@
+# Auto-generated config for WASP-127
+# Transit time (t0) automatically assigned: 60072.6
+
+planet:
+  name: TOI-1130b
+  period: 4.074554
+  duration: 0.0958
+  t0: 60542.56
+  b: 0.518
+  rprs: 0.0480
+
+stellar:
+  feh: 0.11
+  teff: 4360.0
+  logg: 4.55
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/G395H'
+order: #
+nrs: 2
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'TOI-1130b_G395H_NRS2_GAUSSIANLD_POWER2_LINEAR'
+fits_file: 'TOI-1130b_nrs2_box_spectra_fullres_G395H.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  vmap_chunk: 40
+  detrending_type: 'linear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: False
+  need_lowres: True
+  ld_profile: 'power2'
+  mask_start: 'jnp.min(t)'
+  mask_end: 'jnp.min(t) + 0.007'
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

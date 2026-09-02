@@ -1,0 +1,40 @@
+{
+  "comparison": {
+    "mean_step_reduction_factor": 0.9287677023885015,
+    "wall_speedup": 1.0708248904092919
+  },
+  "jitter_fixed": {
+    "divergences": 0,
+    "mean_accept_prob": 0.9315430028784607,
+    "steps": {
+      "max": 31,
+      "mean": 18.924,
+      "median": 15.0,
+      "p05": 7.0,
+      "p25": 15.0,
+      "p75": 31.0,
+      "p95": 31.0,
+      "shape": [
+        500
+      ]
+    },
+    "wall_seconds": 30.576299496999127
+  },
+  "jitter_free": {
+    "divergences": 1,
+    "mean_accept_prob": 0.8887591339866877,
+    "steps": {
+      "max": 47,
+      "mean": 17.576,
+      "median": 15.0,
+      "p05": 7.0,
+      "p25": 15.0,
+      "p75": 15.0,
+      "p95": 31.0,
+      "shape": [
+        500
+      ]
+    },
+    "wall_seconds": 32.74186255799577
+  }
+}

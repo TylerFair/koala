@@ -1,0 +1,52 @@
+# Auto-generated config for HAT-P-65 Visit 1
+# Transit time (t0) automatically assigned: 60470.72
+
+planet:
+  name: HAT-P-65
+  period: 2.60544751
+  duration: 0.17688375
+  t0: 60470.72
+  b: 0.464
+  rprs: 0.1006
+
+stellar:
+  feh: 0.1
+  teff: 5835
+  logg: 4.18
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/PRISM'
+order: #
+nrs: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'HAT-P-65_PRISM_NRS1_V1_FIXEDLD_POWER2_EXPLINEAR'
+fits_file: 'HAT-P-65_nrs1_box_spectra_fullres_PRISM_V1.fits'
+resolution:
+  high: 'native'
+  low: 20
+flags:
+  vmap_chunk: 40
+  detrending_type: 'explinear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: True
+  need_lowres: True
+  ld_profile: 'power2'
+  #mask_start:
+  #mask_end:
+  mask_integrations_start: None
+  #mask_integrations_end:
+#time_binning:
+  #enabled: False
+  #dt_seconds: 20
+  #method: 'mean'
+  #whitelight: 'False'
+  #spectroscopic: 'False'
+
+outlier_clip:
+  whitelight_sigma: 4
+  spectroscopic_sigma: 4
+
+host_device: "gpu"

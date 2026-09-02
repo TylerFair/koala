@@ -1,0 +1,44 @@
+# Auto-generated config for WASP-96
+# Transit time (t0) automatically assigned: 59751.325
+
+planet:
+  name: WASP-96
+  period: 3.4252567
+  duration: 0.10257400833333334
+  t0: 59751.325
+  b: 0.724
+  rprs: 0.11986
+
+stellar:
+  feh: 0.24
+  teff: 5678.0
+  logg: 4.40
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRISS/SOSS'
+order: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'WASP-96_SOSS_ORDER1_GAUSSIANLD_POWER2_LINEAR'
+fits_file: 'WASP-96_box_spectra_fullres.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  detrending_type: 'linear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: False
+  need_lowres: True
+  ld_profile: 'power2'
+  mask_start: 'jnp.min(t)'
+  mask_end: 'jnp.min(t) + 0.007'
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 4
+  spectroscopic_sigma: 4
+
+host_device: "gpu"

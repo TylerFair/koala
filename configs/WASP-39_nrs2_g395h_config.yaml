@@ -1,0 +1,48 @@
+# Auto-generated config for WASP-39
+# Transit time (t0) automatically assigned: 59791.105
+
+planet:
+  name: WASP-39
+  period: 4.0552842
+  duration: 0.11693087083333333
+  t0: 59791.105
+  b: 0.4498
+  rprs: 0.1457
+
+stellar:
+  feh: -0.03
+  teff: 5400.0
+  logg: 4.39
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/G395H'
+order: #
+nrs: 2
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'WASP-39_G395H_NRS2_GAUSSIANLD_POWER2_LINEAR_DISCONTINUITY'
+fits_file: 'WASP-39_nrs2_box_spectra_fullres_G395H.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  vmap_chunk: 40
+  detrending_type: 'linear_discontinuity'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: False
+  need_lowres: True
+  ld_profile: 'power2'
+  t_jump_guess: 59791.125
+  jump_guess: -0.0005
+  mask_start: 'jnp.min(t)'
+  mask_end: 'jnp.min(t) + 0.007'
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

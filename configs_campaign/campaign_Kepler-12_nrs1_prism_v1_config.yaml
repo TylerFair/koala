@@ -1,0 +1,46 @@
+planet:
+  name: Kepler-12
+  period: 4.43796263
+  duration: 0.19656926666666666
+  t0: 60493.28
+  b: 0.069
+  rprs: 0.117936
+stellar:
+  feh: 0.03
+  teff: 5926
+  logg: 4.01
+  teff_sigma: 60
+  logg_sigma: 0.1
+  feh_sigma: 0.04
+  ld_model: stagger
+  ld_data_path: ../exotic_ld_data
+  ld_prior_min_sigma: 0.0001
+instrument: NIRSPEC/PRISM
+order: null
+nrs: 1
+path: /scratch/midway3/tfairnington/
+input_dir: FITS
+output_dir: Kepler-12_PRISM_NRS1_V1_STELLARINFORMEDLD_POWER2_EXPLINEAR_CAMPAIGN
+fits_file: Kepler-12_nrs1_box_spectra_fullres_PRISM_V1.fits
+resolution:
+  high: native
+  low: 20
+flags:
+  detrending_type: explinear
+  interpolate_trend: false
+  interpolate_ld: false
+  ld_prior: stellarprior
+  need_lowres: true
+  ld_profile: power2
+  mask_start: 60422.3097284
+  mask_end: 60422.3099674
+  mask_integrations_start: None
+  vmap_chunk: 50
+  whitelight_num_warmup: 1000
+  whitelight_num_samples: 1000
+  spectro_jitter_prior: lognormal
+  save_whitelight_trace: false
+outlier_clip:
+  whitelight_sigma: 4
+  spectroscopic_sigma: 4
+host_device: gpu

@@ -1,0 +1,45 @@
+# Auto-generated config for HAT-P-18
+# Transit time (t0) automatically assigned: 59743.353393
+
+planet:
+  name: HAT-P-18
+  period: 5.50802941
+  duration: 0.10999997916666666
+  t0: 60861.49
+  b: 0.148
+  rprs: 0.1356
+  #  ecc: 0.084 # Eccentricity (used by harmonica engine)
+  #omega: 2.094 # Argument of periastron [radians] (used by harmonica engine)
+stellar:
+  feh: 0.10
+  teff: 4803
+  logg: 4.57
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'MIRI/LRS'
+nrs: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'HAT-P-18_MIRI_LRS_UNIFORMLD_POWER2_EXPLINEAR_PIX6_OLDTEFF'
+fits_file: 'HAT-P-18_lrs_box_spectra_fullres.fits'
+#resolution:
+pixels: 
+  high: 6 #'reference'
+  low: 20
+  #reference_grid: 'prism_template.csv'
+flags:
+  transit_engine: 'jaxoplanet'
+  detrending_type: 'explinear'
+  interpolate_trend: False
+  interpolate_ld: False
+  ld_prior: 'uniform'
+  need_lowres: True
+  ld_profile: 'power2'
+  mask_integrations_start: 30
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

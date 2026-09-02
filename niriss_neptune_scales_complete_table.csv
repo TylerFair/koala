@@ -1,0 +1,57 @@
+planet_name,point_type,published,has_features,observed_niriss,observed_nirspec_nircam,spec_category,teq_K,y_snr_relative_5H,y_snr_absolute_5H,radius_earthradii,mass_earthmass,jmag,rstar_rsun,transit_dur_hours
+TOI 544b,blue_circle,False,False,False,False,other,1058.0,1.3452,1.2701,2.018,2.89,8.592,0.623,1.21
+TOI 2015b,blue_circle,False,False,False,False,other,531.0,0.9564,0.903,3.309,9.2,11.118,0.3273,0.9876
+TOI 4438b,blue_circle,False,False,False,False,other,435.0,1.2573,1.187,2.52,5.4,9.695,0.372,2.021
+TOI 1266b,blue_circle,False,False,False,False,other,414.0,1.1274,1.0645,2.52,4.46,9.706,0.4232,2.071
+TOI 270c,blue_circle,False,False,False,False,other,489.0,1.1709,1.1055,2.355,6.15,9.099,0.378,1.6632
+G 9 40b,blue_circle,False,False,False,False,other,440.0,0.8611,0.813,1.9,4.0,10.058,0.3026,1.693
+TOI 1201b,blue_circle,False,False,False,False,other,705.0,0.8303,0.7839,2.415,6.28,9.528,0.508,1.747
+TOI 1266c,blue_circle,False,False,False,False,other,351.0,0.6332,0.5978,1.98,3.17,9.706,0.4232,1.951
+TOI 1759b,blue_circle,False,False,False,False,other,453.0,0.9514,0.8982,3.14,10.8,8.771,0.597,3.23
+TOI 969b,blue_circle,False,False,False,False,other,1078.0,0.6811,0.6431,2.765,9.1,9.596,0.671,1.519
+TOI 663b,blue_circle,False,False,False,False,other,739.0,0.6415,0.6056,2.27,4.45,10.448,0.512,1.6636
+TOI 663c,blue_circle,False,False,False,False,other,607.0,0.723,0.6826,2.26,3.65,10.448,0.512,2.1639
+TOI 178e,blue_circle,False,False,False,False,other,605.0,0.6926,0.6539,2.207,3.86,9.372,0.651,2.501
+TOI 269b,blue_circle,False,False,False,False,other,575.0,0.4591,0.4335,2.77,8.8,10.909,0.398,0.9308
+K2 25b,blue_circle,False,False,False,False,other,494.0,0.3777,0.3566,3.44,24.5,11.303,0.2932,0.7637
+K2 266d,blue_circle,False,False,False,False,other,538.0,0.5605,0.5292,2.93,8.9,9.611,0.703,3.408
+TOI 824b,blue_circle,False,False,False,False,other,1257.0,0.4637,0.4378,2.926,18.467,9.145,0.695,1.1534
+TOi 65401,blue_circle,False,False,False,False,other,798.0,0.4275,0.4036,2.378,8.71,10.744,0.43,1.2
+TOI 1470b,blue_circle,False,False,False,False,other,725.0,0.4056,0.3829,2.18,7.32,10.154,0.469,1.28
+ROSS 176b,blue_circle,False,False,False,False,other,682.0,0.4325,0.4083,1.84,4.57,9.243,0.569,1.66
+K2 3b,blue_circle,False,False,False,False,other,501.0,0.5165,0.4876,2.078,5.11,9.421,0.546,2.6406
+TOI 178f,blue_circle,False,False,False,False,other,525.0,0.324,0.3059,2.287,7.72,9.372,0.651,2.348
+TOI 1260b,blue_circle,False,False,False,False,other,872.0,0.4297,0.4057,2.41,8.56,9.698,0.672,2.06
+TOI 406c,blue_circle,False,False,False,False,other,368.0,0.2355,0.2223,1.32,2.08,9.695,0.41,1.05
+TOI 1695b,blue_circle,False,False,False,False,other,688.0,0.3119,0.2945,1.9,6.36,9.64,0.515,1.311
+TOI 1634b,blue_circle,False,False,False,False,other,920.0,0.3562,0.3363,1.773,7.57,9.484,0.45,1.0358
+K2-18 b,red_star_purple_outline,True,True,True,False,clear,279.6,0.507,0.4787,2.2754,8.5814,9.763,0.411,2.7
+TOI-270 d,red_star_purple_outline,True,True,True,False,clear,379.9,1.4542,1.373,2.1633,4.7674,9.099,0.38,2.2
+GJ 9827 d,red_star_purple_outline,True,True,True,False,clear,671.8,1.0,0.9442,2.0176,3.1783,7.984,0.602,1.2
+LHS-1140 b,red_circle_purple_outline,True,False,True,False,other,226.0,1.0145,0.9579,1.7295,5.5938,9.612,0.214,2.1
+TOI-421 b,red_star_purple_outline,True,True,True,False,clear,1012.5,0.9303,0.8783,2.6453,6.9922,8.547,0.866,1.1
+GJ-3090 b,red_circle_purple_outline,True,False,True,False,other,708.0,0.8758,0.8269,2.0737,3.4961,8.168,0.518,1.2
+HAT-P-11 b,red_star,False,True,True,False,clear,869.5,2.3339,2.2035,4.8199,25.7441,7.608,0.755,2.4
+TOI-1130 b,red_star,False,True,True,False,clear,809.3,0.7794,0.7359,3.6541,19.3875,9.055,0.695,2.1
+HD 15337 b,red_circle,False,False,False,False,other,996.3,0.3848,0.3633,1.715,7.3101,7.553,0.848,2.5
+HD 15337 c,red_circle,False,False,False,False,other,644.2,0.6055,0.5717,2.4548,8.2635,7.553,0.848,2.2
+TOI-178 d,red_circle_filled,False,False,False,False,flat,676.3,1.4984,1.4148,2.5556,2.8605,9.372,0.656,2.2
+TOI-178 g,red_circle,False,False,False,False,other,467.9,1.586,1.4974,3.3066,3.8139,9.372,0.676,2.2
+TOI-260 b,red_circle,False,False,False,False,other,499.9,0.7182,0.6781,1.715,3.8139,7.376,0.607,2.1
+TOI-125 b,red_circle,False,False,False,False,other,1030.6,0.5511,0.5203,2.7238,9.5349,9.466,0.851,3.0
+TOI-4010 b,red_circle,False,False,False,False,other,1450.9,0.4384,0.4139,3.1049,11.124,10.649,0.855,1.8
+TOI-125 c,red_circle,False,False,False,False,other,822.5,0.6409,0.6051,2.7574,6.6744,9.466,0.851,2.9
+TOI-178 d,orange_circle_filled,False,False,False,True,flat,676.3,1.4984,1.4148,2.5556,2.8605,9.372,0.656,2.2
+TOI-1468 c,orange_circle_filled,False,False,False,True,flat,337.8,0.6034,0.5697,2.0625,5.4031,9.343,0.369,1.8
+LTT 3780 c,orange_circle_filled,False,False,False,True,flat,358.8,0.6695,0.6321,2.3315,7.6279,9.007,0.377,1.5
+TOI-1231 b,orange_star,False,True,False,True,clear,326.7,1.2968,1.2244,3.7662,15.2558,8.876,0.471,3.3
+LP 791-18 c,orange_star,False,True,False,True,clear,343.9,1.0817,1.0213,2.4436,6.9922,11.559,0.171,1.2
+TOI-836 b,orange_circle_filled_purple_outline,True,False,False,True,flat,872.2,0.6914,0.6528,1.7038,4.4496,7.58,0.678,1.7
+TOI-776 b,orange_circle_filled_purple_outline,True,False,False,True,flat,514.7,0.5925,0.5594,1.7934,4.4496,8.483,0.538,2.4
+TOI-776 c,orange_circle_filled_purple_outline,True,False,False,True,flat,415.6,0.5897,0.5567,2.0512,6.0387,8.483,0.538,3.0
+GJ 1214 b,orange_circle_filled_purple_outline,True,False,False,True,flat,549.1,3.317,3.1318,2.6902,6.3566,9.75,0.211,0.9
+TOI-836 c,orange_circle_filled_purple_outline,True,False,False,True,flat,654.2,1.0571,0.998,2.6117,9.5349,7.58,0.678,2.5
+GJ 3470 b,orange_star_purple_outline,True,True,False,True,clear,651.3,2.6333,2.4863,4.1473,13.9844,8.794,0.5,1.9
+mu_2.3,reference_line,False,False,False,False,reference,,7.8261,7.389,,,,,
+mu_10.0,reference_line,False,False,False,False,reference,,1.8,1.6995,,,,,
+mu_18.0,reference_line,False,False,False,False,reference,,1.0,0.9442,,,,,

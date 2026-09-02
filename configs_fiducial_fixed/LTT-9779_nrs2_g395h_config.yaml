@@ -1,0 +1,46 @@
+# Auto-generated config for LTT-9779
+# Transit time (t0) automatically assigned: 60600.8
+
+planet:
+  name: LTT-9779
+  period: 0.7920641
+  duration: 0.01941666666666667
+  t0: 60600.8
+  b: 0.5
+  rprs: 0.0455
+
+stellar:
+  feh: 0.251
+  teff: 5397
+  logg: 4.269
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/G395H'
+order: #
+nrs: 2
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'LTT-9779_G395H_NRS2_FIXEDLD_POWER2_QUADRATIC'
+fits_file: 'LTT-9779_nrs2_box_spectra_fullres_G395H.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  vmap_chunk: 40
+  detrending_type: 'quadratic'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: True
+  need_lowres: True
+  ld_profile: 'power2'
+  mask_start: [cut_phase_to_transit, 60600.6736, 60600.799399]
+  mask_end: [cut_phase_to_transit, 60600.6871 , 60600.799812]
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

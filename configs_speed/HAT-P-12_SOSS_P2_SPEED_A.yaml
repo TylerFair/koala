@@ -1,0 +1,63 @@
+fits_file: HAT-P-12_box_spectra_fullres.fits
+flags:
+  detrending_type: spot
+  interpolate_ld: false
+  interpolate_trend: false
+  ld_prior: stellarprior
+  ld_profile: power2
+  mask_end: 60115.325
+  mask_integrations_start: null
+  mask_start: 60115.25
+  need_lowres: true
+  spot_amp: 0.001
+  spot_center: 60115.47
+  spot_width: 0.005
+  vmap_chunk: 40
+  whitelight_num_samples: 1000
+  whitelight_num_warmup: 50
+  random_seed: 555
+  whitelight_mass_matrix: laplace
+  whitelight_laplace_warmup: 200
+  whitelight_laplace_target_accept: 0.9
+  whitelight_laplace_max_tree_depth: 10
+  whitelight_laplace_hessian_method: finite_difference
+  whitelight_min_ess: 400
+  whitelight_max_divergences: 0
+  whitelight_max_extra_blocks: 3
+  spectro_sampler: independent_nuts
+  spectro_mass_matrix: laplace
+  spectro_jitter_prior: lognormal
+  spectro_min_depth_ess: 400
+  compile_box: false
+  jax_compilation_cache_dir: /scratch/midway3/tfairnington/jax_cache/speed_p2_HAT-P-12_SOSS_P2_cold
+  save_whitelight_trace: true
+host_device: gpu
+input_dir: FITS
+instrument: NIRISS/SOSS
+order: 1
+outlier_clip:
+  spectroscopic_sigma: 5
+  whitelight_sigma: 5
+output_dir: HAT-P-12_SOSS_P2_SPEED_A
+path: /scratch/midway3/tfairnington/
+planet:
+  b: 0.343
+  duration: 0.090375
+  name: HAT-P-12
+  period: 3.21305762
+  rprs: 0.1406
+  t0: 60115.45
+resolution:
+  high: reference
+  low: 20
+  reference_grid: prism_template.csv
+stellar:
+  feh: -0.28
+  feh_sigma: 0.04
+  ld_data_path: ../exotic_ld_data
+  ld_model: stagger
+  ld_prior_min_sigma: 0.0001
+  logg: 4.22
+  logg_sigma: 0.26
+  teff: 4779
+  teff_sigma: 108

@@ -1,0 +1,66 @@
+# Auto-generated config for HAT-P-65 Visit 1
+# Transit time (t0) automatically assigned: 60470.72
+
+planet:
+  name: HAT-P-65
+  period: 2.60544751
+  duration: 0.17688375
+  t0: 60470.72
+  b: 0.464
+  rprs: 0.1006
+  a_rs: 5.18
+  ecc: 0.0
+  omega: 0.0
+stellar:
+  feh: 0.1
+  teff: 5835
+  logg: 4.18
+  teff_sigma: 51
+  logg_sigma: 0.1
+  feh_sigma: 0.08
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+  ld_prior_min_sigma: 1.0e-4
+
+instrument: 'NIRSPEC/PRISM'
+order: #
+nrs: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'ASYMM_HAT-P-65_PRISM_NRS1_V1_STELLARINFORMEDLD_POWER2_EXPLINEAR'
+fits_file: 'HAT-P-65_nrs1_box_spectra_fullres_PRISM_V1.fits'
+resolution:
+  high: 50 #'native'
+  low: 10
+flags:
+  transit_engine: 'harmonica'
+  harmonica_max_order: 1
+  spectro_sampling_mode: 'independent'
+  # PRISM has 40,787 cadences; 40 simultaneous Harmonica quadratic lanes
+  # exceeds RTX6000 memory. Four is the validated conservative GPU width.
+  vmap_chunk: 4
+  harmonica_spectro_parameterization: 'delta_r'
+  harmonica_spectro_fit_jitter: False
+  harmonica_spectro_odd_frac_sigma: 0.1
+  detrending_type: 'explinear'
+  interpolate_trend: False
+  interpolate_ld: False
+  ld_prior: 'fixed'
+  need_lowres: True
+  ld_profile: 'quadratic'
+  #mask_start:
+  #mask_end:
+  mask_integrations_start: None
+  #mask_integrations_end:
+#time_binning:
+  #enabled: False
+  #dt_seconds: 20
+  #method: 'mean'
+  #whitelight: 'False'
+  #spectroscopic: 'False'
+
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

@@ -1,0 +1,47 @@
+planet:
+  name: WASP-96
+  period: 3.42525674
+  duration: 0.10257400833333334
+  t0: 59751.325
+  b: 0.724
+  rprs: 0.11986
+stellar:
+  feh: 0.43
+  teff: 5781
+  logg: 4.48
+  teff_sigma: 69
+  logg_sigma: 0.11
+  feh_sigma: 0.05
+  ld_model: stagger
+  ld_data_path: ../exotic_ld_data
+  ld_prior_min_sigma: 0.0001
+  ld_prior_cache_dir: /scratch/midway3/tfairnington/accel_parity/20260902a/WASP-96_SOSS_ORDER1_STELLARINFORMEDLD_POWER2_LINEAR/shared_ld_prior_cache
+instrument: NIRISS/SOSS
+order: 1
+path: /scratch/midway3/tfairnington/
+input_dir: FITS
+output_dir: WASP-96_SOSS_ORDER1_STELLARINFORMEDLD_POWER2_LINEAR_PARITY_20260902a_C
+fits_file: WASP-96_box_spectra_fullres.fits
+resolution:
+  high: reference
+  low: 20
+  reference_grid: prism_template.csv
+flags:
+  vmap_chunk: 40
+  detrending_type: linear
+  interpolate_trend: false
+  interpolate_ld: false
+  ld_prior: stellarprior
+  need_lowres: true
+  ld_profile: power2
+  mask_start: jnp.min(t)
+  mask_end: jnp.min(t) + 0.007
+  mask_integrations_start: None
+  spectro_sampler: laplace_is
+  spectro_jitter_prior: lognormal
+  whitelight_num_warmup: 1000
+  whitelight_num_samples: 1000
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+host_device: gpu

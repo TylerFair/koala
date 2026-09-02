@@ -1,0 +1,52 @@
+# Auto-generated config for KELT-7
+# Transit time (t0) automatically assigned: 60363.9
+
+planet:
+  name: KELT-7
+  period: 2.7347656
+  duration: 0.13354166666666667
+  t0: 60363.9
+  b: 0.593
+  rprs: 0.091
+
+stellar:
+  feh: 0.14
+  teff: 6789
+  logg: 4.23
+  teff_sigma: 50
+  logg_sigma: 0.1
+  feh_sigma: 0.08
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+  ld_prior_min_sigma: 1.0e-4
+
+instrument: 'NIRSPEC/G395H'
+order: #
+nrs: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'KELT-7_G395H_NRS1_STELLARINFORMEDLD_POWER2_LINEAR_DISCONTINUITY'
+fits_file: 'KELT-7_nrs1_box_spectra_fullres_G395H.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  vmap_chunk: 40
+  detrending_type: 'linear_discontinuity'
+  interpolate_trend: False
+  interpolate_ld: False
+  ld_prior: 'stellarprior'
+  need_lowres: True
+  ld_profile: 'power2'
+  t_jump_guess: 60363.874
+  jump_guess: -0.0005
+  #mask_start:
+  #mask_end:
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

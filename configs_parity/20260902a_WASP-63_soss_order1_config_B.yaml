@@ -1,0 +1,63 @@
+planet:
+  name: WASP-63
+  period: 4.37808205
+  duration: 0.22458740833333335
+  t0: 60216.06
+  b: 0.18
+  rprs: 0.078
+stellar:
+  feh: 0.26
+  teff: 5676
+  logg: 4.12
+  teff_sigma: 40
+  logg_sigma: 0.06
+  feh_sigma: 0.03
+  ld_model: stagger
+  ld_data_path: ../exotic_ld_data
+  ld_prior_min_sigma: 0.0001
+  ld_prior_cache_dir: /scratch/midway3/tfairnington/accel_parity/20260902a/WASP-63_SOSS_ORDER1_STELLARINFORMEDLD_POWER2_EXPLINEAR/shared_ld_prior_cache
+instrument: NIRISS/SOSS
+order: 1
+path: /scratch/midway3/tfairnington/
+input_dir: FITS
+output_dir: WASP-63_SOSS_ORDER1_STELLARINFORMEDLD_POWER2_EXPLINEAR_PARITY_20260902a_B
+fits_file: WASP-63_box_spectra_fullres.fits
+resolution:
+  high: reference
+  low: 20
+  reference_grid: prism_template.csv
+flags:
+  vmap_chunk: 40
+  detrending_type: explinear
+  interpolate_trend: false
+  interpolate_ld: false
+  ld_prior: stellarprior
+  need_lowres: true
+  ld_profile: power2
+  mask_start:
+  - 60215.0
+  - 60216.225
+  mask_end:
+  - 60215.84
+  - 60216.3
+  mask_integrations_start: None
+  spectro_laplace_hessian_method: finite_difference
+  spectro_laplace_fd_relative_step: 0.0002
+  spectro_laplace_trust_radius: 5.0
+  spectro_laplace_warmup: 150
+  spectro_laplace_start_at_map: true
+  spectro_laplace_fuse_program: true
+  spectro_jitter_prior: lognormal
+  lowres_num_samples: 2000
+  highres_num_samples: 2000
+  spectro_sampler: independent_hmc
+  spectro_mass_matrix: laplace
+  spectro_laplace_target_accept: 0.85
+  spectro_hmc_num_steps: 8
+  spectro_hmc_trajectory_jitter: 0.25
+  whitelight_num_warmup: 1000
+  whitelight_num_samples: 1000
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+host_device: gpu

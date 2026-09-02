@@ -1,0 +1,52 @@
+# config.yaml
+
+planet:
+  name: TOI-125b       # needs to match directory where Stage 3 files are stored, i.e. 'TOI1130b_NIRSPEC'
+  period:     4.65382     # fixed 
+  duration:   0.1234       # prior
+  t0:         60582.99    # prior, needs to be estimated from whitelight glance
+  b:          0.27         # prior
+  rprs:      0.0295       # prior
+
+stellar:
+  feh:   -0.02
+  teff:  5320
+  logg:  4.516
+  ld_model: "phoenix"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/G395H'
+order: # 1
+nrs: 2            # 1 or 2
+path: 'spectra/TOI-125'
+input_dir: 'NIRSPEC' # where the calints files are stored relative to path
+output_dir: 'NRS2_FIXEDLD_LINEAR' # where the output files are stored relative to path
+fits_file: 'TOI-125b_nrs2_box_spectra_fullres.fits'
+
+resolution:
+  high: 300 # instrument resolution to bin spectroscopic curves, can be an integer or 'native' for native resolution. 
+  low:  20 #  instrument resolution to bin spectroscopic curves [optional: not triggered if not low-res flag]
+
+flags:
+  detrending_type: 'linear'  # Type of detrending: 
+                               # linear = offset + linear with time term,
+                                # gp = whitelight gp on CPU which is subtracted from multiwavelength, and then linear on GPU, 
+                                # explinear = linear with Aexp(-t/tau) ramp. 
+  interpolate_trend: False # Option to interpolate trend coefficients from low res to high res | defaults to False
+  interpolate_ld: False # Option to interpolate LD coefficients from low res ot high res | defaults to false
+  fix_ld: True
+  need_lowres: True # Option to fit low res first if other flags are false to clip spectroscopic outliers, reccommended
+  #mask_start: 60112.85 # Used to specify time at which spot crossing occurs to remove, can also be lists for N masks [1000, 1005]
+  #mask_end: 60112.856  # Used to specify time at which spot crossing ends to remove, can also be lists for N masks [1000, 1005]
+    #spot_amp: 0.001
+    #spot_center: 60112.8
+    #spot_width: 0.001
+outlier_clip:
+  whitelight_sigma:   4 # sigma to clip outliers from whitelight residual 
+  spectroscopic_sigma: 4 # sigma to clip outliers from spectroscopic residuals
+
+host_device: "cpu"      # 'gpu' or "cpu" | reminder, if using gpu you need jax[cuda]<=0.4.31, cpu needs jax[cpu]<=0.4.31
+
+
+
+

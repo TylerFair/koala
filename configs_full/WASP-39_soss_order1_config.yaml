@@ -1,0 +1,44 @@
+# Auto-generated config for WASP-39
+# Transit time (t0) automatically assigned: 59787.055
+
+planet:
+  name: WASP-39
+  period: 4.0552842
+  duration: 0.11693087083333333
+  t0: 59787.055
+  b: 0.4498
+  rprs: 0.1457
+
+stellar:
+  feh: -0.03
+  teff: 5400.0
+  logg: 4.39
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRISS/SOSS'
+order: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'WASP-39_SOSS_ORDER1_GAUSSIANLD_POWER2_LINEAR'
+fits_file: 'WASP-39_box_spectra_fullres.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  detrending_type: 'linear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: False
+  need_lowres: True
+  ld_profile: 'power2'
+  mask_start: 'jnp.min(t)'
+  mask_end: 'jnp.min(t) + 0.007'
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 4
+  spectroscopic_sigma: 4
+
+host_device: "gpu"

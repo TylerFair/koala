@@ -1,0 +1,55 @@
+# Auto-generated config for WASP-127
+# Transit time (t0) automatically assigned: 60072.6
+
+planet:
+  name: TOI-1130b
+  period: 4.074554
+  duration: 0.0958
+  t0: 60542.56
+  b: 0.518
+  rprs: 0.0480
+  a_rs: 11.95013004 # Derived from this config's transit geometry
+  ecc: 0.052162 # NASA Exoplanet Archive PSCompPars, queried 2026-08-11
+  omega: 2.462834107 # radians; PSCompPars pl_orblper
+
+stellar:
+  feh: -0.07
+  teff: 4609
+  logg: 4.12
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/G395H'
+order: #
+nrs: 2
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'ASYMM_TOI-1130b_G395H_NRS2_FIXEDLD_QUADRATIC_LINEAR'
+fits_file: 'TOI-1130b_nrs2_box_spectra_fullres_G395H.fits'
+resolution:
+  high: 100 # NIRSpec harmonica high-resolution fit
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  transit_engine: 'harmonica'
+  harmonica_max_order: 1
+  spectro_sampling_mode: 'independent'
+  vmap_chunk: 4
+  harmonica_spectro_parameterization: 'delta_r'
+  harmonica_spectro_fit_jitter: False
+  harmonica_spectro_odd_frac_sigma: 0.1
+  detrending_type: 'linear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: True
+  need_lowres: False
+  ld_profile: 'quadratic'
+  mask_start: 'jnp.min(t)'
+  mask_end: 'jnp.min(t) + 0.007'
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

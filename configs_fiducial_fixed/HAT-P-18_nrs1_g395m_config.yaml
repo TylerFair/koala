@@ -1,0 +1,46 @@
+# Auto-generated config for HAT-P-18
+# Transit time (t0) automatically assigned: 60795.39
+
+planet:
+  name: HAT-P-18
+  period: 5.50802941
+  duration: 0.10999997916666666
+  t0: 60795.39
+  b: 0.148
+  rprs: 0.1356
+
+stellar:
+  feh: 0.06
+  teff: 4710
+  logg: 4.17
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/G395M'
+order: 1
+nrs: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'HAT-P-18_G395M_NRS1_FIXEDLD_POWER2_LINEAR'
+fits_file: 'HAT-P-18_nrs1_box_spectra_fullres_G395M.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  vmap_chunk: 40
+  detrending_type: 'linear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: True
+  need_lowres: True
+  ld_profile: 'power2'
+  mask_start: 60795.15
+  mask_end: 60795.26
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

@@ -1,0 +1,49 @@
+# Auto-generated config for WASP-107
+# Transit time (t0) automatically assigned: 60118.45
+
+planet:
+  name: WASP-107
+  period: 5.7214876
+  duration: 0.11470000000000001
+  t0: 60118.45
+  b: 0.139
+  rprs: 0.142988
+
+stellar:
+  feh: -0.02
+  teff: 4488
+  logg: 4.15
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/G395H'
+order: #
+nrs: 2
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'WASP-107_G395H_NRS2_FIXEDLD_POWER2_SPOT'
+fits_file: 'WASP-107_nrs2_box_spectra_fullres_G395H.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  vmap_chunk: 40
+  detrending_type: 'spot'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: True
+  need_lowres: True
+  ld_profile: 'power2'
+  spot_center: 60118.458
+  spot_width: 0.005
+  spot_amp: 0.001
+  mask_start: 60118.2
+  mask_end: 60118.285
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

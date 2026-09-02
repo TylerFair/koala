@@ -1,0 +1,47 @@
+# Auto-generated config for WASP-94
+# Transit time (t0) automatically assigned: 60595.21
+
+planet:
+  name: WASP-94
+  period: 3.9502001
+  duration: 0.189675
+  t0: 60595.21518
+  b: 0.15
+  rprs: 0.107
+  a_rs: 7.3 # Semi-major axis / stellar radius (used by harmonica engine)
+  ecc: 0.0 # Eccentricity (used by harmonica engine)
+  omega: 0.0 # Argument of periastron [radians] (used by harmonica engine)
+stellar:
+  feh: 0.37
+  teff: 6217
+  logg: 4.27
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRISS/SOSS'
+order: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'WASP-94_SOSS_ORDER1_WIDEGAUSSIANLD_POWER2_LINEAR'
+fits_file: 'WASP-94_box_spectra_fullres.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  vmap_chunk: 40
+  detrending_type: 'linear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: False
+  need_lowres: True
+  ld_profile: 'power2'
+  mask_start: 'jnp.min(t)'
+  mask_end: 'jnp.min(t) + 0.0208'
+  #mask_integrations_start: 300
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

@@ -1,0 +1,44 @@
+# config.yaml
+
+planet:
+  name: TOI421b       # needs to match directory where Stage 3 files are stored, i.e. 'TOI1130b_NIRSPEC'
+  period:     5.197576     # fixed 
+  duration:   0.0454       # prior
+  t0:         60254.74   # prior, needs to be estimated from whitelight glance
+  b:          0.942         # prior
+  rprs:      0.0279       # prior
+
+stellar:
+  feh:   -0.044
+  teff:  5291
+  logg:  4.48
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRISS/SOSS'
+order: 1 
+nrs: None              # 1 or 2
+path: 'spectra/TOI-421/'
+input_dir: 'NIRISS' # where the calints files are stored relative to path
+output_dir: 'ORDER1_FIXEDLD_ANDNEWER' # where the output files are stored relative to path
+fits_file: 'TOI-421b_box_spectra_fullres.fits'
+resolution:
+  high: 30 # nm resolution to bin spectroscopic curves
+  low:  10 # nm resolution to bin spectroscopic curves [optional: not triggered if not low-res]
+
+flags:
+  detrending_type: 'linear'
+  interpolate_trend: False # Option to interpolate trend coefficients from low res to high res | defaults to False
+  interpolate_ld: False # Option to interpolate LD coefficients from low res ot high res | defaults to false
+  fix_ld: True
+  need_lowres: True # Option to fit low res first if other flags are false to clip spectroscopic outliers, reccommended
+outlier_clip:
+  whitelight_sigma:   4 # sigma to clip outliers from whitelight residual 
+  spectroscopic_sigma: 4 # sigma to clip outliers from spectroscopic residuals
+  mask_integrations_start: 620
+
+host_device: "gpu"      # 'gpu' or "cpu" | reminder, if using gpu you need jax[cuda]<=0.4.31, cpu needs jax[cpu]<=0.4.31
+
+
+
+

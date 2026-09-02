@@ -1,0 +1,54 @@
+# Auto-generated config for WASP-63
+# Transit time (t0) automatically assigned: 60216.06
+
+planet:
+  name: WASP-63
+  period: 4.37808205
+  duration: 0.22458740833333335
+  t0: 60216.06
+  b: 0.18
+  rprs: 0.078
+  a_rs: 6.626267124 # Derived from this config's transit geometry
+  ecc: 0.0 # NASA Exoplanet Archive PSCompPars, queried 2026-08-11
+  omega: 0.0 # radians; PSCompPars pl_orblper
+
+stellar:
+  feh: 0.26
+  teff: 5676
+  logg: 4.12
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRISS/SOSS'
+order: 2
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'ASYMM_WASP-63_SOSS_ORDER2_FIXEDLD_QUADRATIC_EXPLINEAR'
+fits_file: 'WASP-63_box_spectra_fullres.fits'
+resolution:
+  high: 50 # NIRISS harmonica high-resolution fit
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  transit_engine: 'harmonica'
+  harmonica_max_order: 1
+  spectro_sampling_mode: 'independent'
+  vmap_chunk: 4
+  harmonica_spectro_parameterization: 'delta_r'
+  harmonica_spectro_fit_jitter: False
+  harmonica_spectro_odd_frac_sigma: 0.1
+  detrending_type: 'explinear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: True
+  need_lowres: False
+  ld_profile: 'quadratic'
+  mask_start: [60215.0, 60216.225]
+  mask_end: [60215.84, 60216.3]
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

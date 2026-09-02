@@ -1,0 +1,44 @@
+# Auto-generated config for KELT-7
+# Transit time (t0) automatically assigned: 60722.15
+
+planet:
+  name: KELT-7
+  period: 2.7347651
+  duration: 0.13354166666666667
+  t0: 60722.15
+  b: 0.593
+  rprs: 0.091
+
+stellar:
+  feh: 0.14
+  teff: 6767.9
+  logg: 4.10
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRISS/SOSS'
+order: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'KELT-7_SOSS_ORDER1_GAUSSIANLD_POWER2_LINEAR'
+fits_file: 'KELT-7_box_spectra_fullres.fits'
+resolution:
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  detrending_type: 'linear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: False
+  need_lowres: True
+  ld_profile: 'power2'
+  #mask_start:
+  #mask_end:
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 4
+  spectroscopic_sigma: 4
+
+host_device: "gpu"

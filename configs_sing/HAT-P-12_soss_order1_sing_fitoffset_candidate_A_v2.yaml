@@ -1,0 +1,39 @@
+planet: {name: HAT-P-12, period: 3.21305762, duration: 0.090375, t0: 60115.45, b: 0.343, rprs: 0.1406}
+stellar:
+  {feh: -0.28, teff: 4779, logg: 4.22, teff_sigma: 108, logg_sigma: 0.26,
+   feh_sigma: 0.04, ld_model: stagger, ld_data_path: ../exotic_ld_data,
+   ld_mu_min: 0.2}
+instrument: NIRISS/SOSS
+order: 1
+path: /scratch/midway3/tfairnington/
+input_dir: FITS
+output_dir: HAT-P-12_SOSS_ORDER1_SING_FITOFFSET_CANDIDATE_A_V2
+fits_file: HAT-P-12_box_spectra_fullres.fits
+resolution: {high: reference, low: 20, reference_grid: prism_template.csv}
+flags:
+  vmap_chunk: 40
+  detrending_type: spot
+  interpolate_trend: false
+  interpolate_ld: false
+  ld_prior: sing
+  ld_profile: quadratic
+  ld_sing_offset: fit
+  ld_sing_calibration_warmup: 150
+  ld_sing_calibration_samples: 300
+  ld_sing_calibration_min_ess: 100
+  need_lowres: true
+  spectro_sampler: independent_nuts
+  spectro_mass_matrix: laplace
+  spectro_laplace_hessian_method: finite_difference
+  spectro_laplace_warmup: 150
+  spectro_laplace_target_accept: 0.95
+  spectro_laplace_max_tree_depth: 6
+  lowres_num_samples: 1000
+  highres_num_samples: 1000
+  spot_center: 60115.47
+  spot_width: 0.005
+  spot_amp: 0.001
+  mask_start: 60115.25
+  mask_end: 60115.325
+outlier_clip: {whitelight_sigma: 5, spectroscopic_sigma: 5}
+host_device: gpu

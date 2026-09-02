@@ -1,0 +1,54 @@
+# Auto-generated config for HAT-P-11
+# Transit time (t0) automatically assigned: 60895.99
+
+planet:
+  name: HAT-P-11
+  period: 4.887802443
+  duration: 0.0981875
+  t0: 60895.99
+  b: 0.209
+  rprs: 0.0585
+  a_rs: 14.25296324 # Derived from this config's transit geometry
+  ecc: 0.251 # NASA Exoplanet Archive PSCompPars, queried 2026-08-11
+  omega: 0.4886921906 # radians; PSCompPars pl_orblper
+
+stellar:
+  feh: 0.12
+  teff: 4692
+  logg: 3.99
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRISS/SOSS'
+order: 1
+path: '/scratch/midway3/tfairnington/'
+input_dir: 'FITS'
+output_dir: 'ASYMM_HAT-P-11_SOSS_ORDER1_FIXEDLD_QUADRATIC_LINEAR'
+fits_file: 'HAT-P-11_box_spectra_fullres.fits'
+resolution:
+  high: 50 # NIRISS harmonica high-resolution fit
+  low: 20
+  reference_grid: 'prism_template.csv'
+flags:
+  transit_engine: 'harmonica'
+  harmonica_max_order: 1
+  spectro_sampling_mode: 'independent'
+  vmap_chunk: 4
+  harmonica_spectro_parameterization: 'delta_r'
+  harmonica_spectro_fit_jitter: False
+  harmonica_spectro_odd_frac_sigma: 0.1
+  detrending_type: 'linear'
+  interpolate_trend: False
+  interpolate_ld: False
+  fix_ld: True
+  need_lowres: False
+  ld_profile: 'quadratic'
+  mask_start: [60895.85, 60896.075]
+  mask_end: [60895.88, 60896.15]
+  mask_integrations_start: None
+  #mask_integrations_end:
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

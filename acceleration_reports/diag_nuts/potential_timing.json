@@ -1,0 +1,261 @@
+{
+  "float64": 1,
+  "platform": "TFRT_CPU_0",
+  "rows": [
+    {
+      "active_window_cadences": 46,
+      "active_window_fraction": 0.2,
+      "cadences": 230,
+      "channels": 1,
+      "forward": {
+        "compile_and_first_seconds": 0.8072181710012956,
+        "max_seconds": 0.00015307700232369825,
+        "median_seconds": 0.00012318649896769784,
+        "min_seconds": 0.00011898099910467863,
+        "repeats": 10,
+        "seconds": [
+          0.00015307700232369825,
+          0.00012475800031097606,
+          0.00012194499868201092,
+          0.0001204859945573844,
+          0.00012442799925338477,
+          0.00013728899648413062,
+          0.00012665000394918025,
+          0.00012115600111428648,
+          0.00011898099910467863,
+          0.00012026700278511271
+        ]
+      },
+      "per_channel_forward_seconds": 0.00012318649896769784,
+      "per_channel_value_plus_gradient_seconds": 0.00048037800297606736,
+      "value_plus_gradient": {
+        "compile_and_first_seconds": 2.2868094949953957,
+        "max_seconds": 0.0006034840043867007,
+        "median_seconds": 0.00048037800297606736,
+        "min_seconds": 0.00040928099770098925,
+        "repeats": 10,
+        "seconds": [
+          0.0005205269990256056,
+          0.00040928099770098925,
+          0.000464304001070559,
+          0.0006034840043867007,
+          0.0005071260020486079,
+          0.0004964520048815757,
+          0.00041332899854751304,
+          0.0005011149987694807,
+          0.0004181680051260628,
+          0.00046226799895521253
+        ]
+      },
+      "value_plus_gradient_over_forward": 3.8995994447576017
+    },
+    {
+      "active_window_cadences": 46,
+      "active_window_fraction": 0.2,
+      "cadences": 230,
+      "channels": 40,
+      "forward": {
+        "compile_and_first_seconds": 1.253722907997144,
+        "max_seconds": 0.003453605000686366,
+        "median_seconds": 0.003394756498892093,
+        "min_seconds": 0.0033549489962751977,
+        "repeats": 10,
+        "seconds": [
+          0.0033690549971652217,
+          0.0034477860026527196,
+          0.0033918179979082197,
+          0.0033994870027527213,
+          0.0033577330032130703,
+          0.0033549489962751977,
+          0.003453605000686366,
+          0.003406363997783046,
+          0.0033976949998759665,
+          0.003391547994397115
+        ]
+      },
+      "per_channel_forward_seconds": 8.486891247230232e-05,
+      "per_channel_value_plus_gradient_seconds": 0.0001655147749261232,
+      "value_plus_gradient": {
+        "compile_and_first_seconds": 3.1008103159983875,
+        "max_seconds": 0.06273436199990101,
+        "median_seconds": 0.006620590997044928,
+        "min_seconds": 0.0063410030052182265,
+        "repeats": 10,
+        "seconds": [
+          0.006667522000498138,
+          0.0567170790018281,
+          0.006387729001289699,
+          0.006501297000795603,
+          0.006732997004291974,
+          0.0063410030052182265,
+          0.006573659993591718,
+          0.0063915850041667,
+          0.06273436199990101,
+          0.006973901996389031
+        ]
+      },
+      "value_plus_gradient_over_forward": 1.950240318917016
+    },
+    {
+      "active_window_cadences": 412,
+      "active_window_fraction": 0.2001943634596696,
+      "cadences": 2058,
+      "channels": 1,
+      "forward": {
+        "compile_and_first_seconds": 1.392102618003264,
+        "max_seconds": 0.0006276880012592301,
+        "median_seconds": 0.000546933999430621,
+        "min_seconds": 0.0005239289966993965,
+        "repeats": 10,
+        "seconds": [
+          0.0005497079982887954,
+          0.0005555910029215738,
+          0.0005707919990527444,
+          0.0005331950014806353,
+          0.0005239289966993965,
+          0.0005513220021384768,
+          0.0006276880012592301,
+          0.0005441600005724467,
+          0.0005437910003820434,
+          0.0005264130013529211
+        ]
+      },
+      "per_channel_forward_seconds": 0.000546933999430621,
+      "per_channel_value_plus_gradient_seconds": 0.0020065495009475853,
+      "value_plus_gradient": {
+        "compile_and_first_seconds": 2.404075300997647,
+        "max_seconds": 0.002448151004500687,
+        "median_seconds": 0.0020065495009475853,
+        "min_seconds": 0.0019370119989616796,
+        "repeats": 10,
+        "seconds": [
+          0.002017559003434144,
+          0.002448151004500687,
+          0.0019663499988382682,
+          0.002035024001088459,
+          0.0019955399984610267,
+          0.0019535530009306967,
+          0.0020463740002014674,
+          0.0020478229998843744,
+          0.001954614999704063,
+          0.0019370119989616796
+        ]
+      },
+      "value_plus_gradient_over_forward": 3.6687232884342156
+    },
+    {
+      "active_window_cadences": 412,
+      "active_window_fraction": 0.2001943634596696,
+      "cadences": 2058,
+      "channels": 40,
+      "forward": {
+        "compile_and_first_seconds": 1.48451830400154,
+        "max_seconds": 0.07993110000097658,
+        "median_seconds": 0.009572545499395346,
+        "min_seconds": 0.008074534001934808,
+        "repeats": 10,
+        "seconds": [
+          0.008677978999912739,
+          0.06913499400252476,
+          0.010261818002618384,
+          0.008883272996172309,
+          0.014278399001341313,
+          0.06821154700446641,
+          0.008477005998429377,
+          0.008074534001934808,
+          0.07993110000097658,
+          0.008652732001792174
+        ]
+      },
+      "per_channel_forward_seconds": 0.00023931363748488365,
+      "per_channel_value_plus_gradient_seconds": 0.0022233179999602724,
+      "value_plus_gradient": {
+        "compile_and_first_seconds": 3.193691417000082,
+        "max_seconds": 0.09196738299942808,
+        "median_seconds": 0.0889327199984109,
+        "min_seconds": 0.015256737999152392,
+        "repeats": 10,
+        "seconds": [
+          0.015859139995882288,
+          0.08943689499574248,
+          0.015256737999152392,
+          0.09061246499913977,
+          0.09196738299942808,
+          0.016172218005522154,
+          0.0900584560004063,
+          0.09160287700069603,
+          0.01758387900190428,
+          0.08842854500107933
+        ]
+      },
+      "value_plus_gradient_over_forward": 9.290394075852486
+    },
+    {
+      "active_window_cadences": 8157,
+      "active_window_fraction": 0.19999019295363718,
+      "cadences": 40787,
+      "channels": 1,
+      "forward": {
+        "compile_and_first_seconds": 1.1467132730031153,
+        "max_seconds": 0.0033277949987677857,
+        "median_seconds": 0.003275499999290332,
+        "min_seconds": 0.0031661690009059384,
+        "repeats": 3,
+        "seconds": [
+          0.0033277949987677857,
+          0.003275499999290332,
+          0.0031661690009059384
+        ]
+      },
+      "per_channel_forward_seconds": 0.003275499999290332,
+      "per_channel_value_plus_gradient_seconds": 0.008580760993936565,
+      "value_plus_gradient": {
+        "compile_and_first_seconds": 3.0897526189946802,
+        "max_seconds": 0.0812160519999452,
+        "median_seconds": 0.008580760993936565,
+        "min_seconds": 0.008309721997648012,
+        "repeats": 3,
+        "seconds": [
+          0.008580760993936565,
+          0.008309721997648012,
+          0.0812160519999452
+        ]
+      },
+      "value_plus_gradient_over_forward": 2.6196797422670333
+    },
+    {
+      "active_window_cadences": 8157,
+      "active_window_fraction": 0.19999019295363718,
+      "cadences": 40787,
+      "channels": 40,
+      "forward": {
+        "compile_and_first_seconds": 2.1898280570021598,
+        "max_seconds": 0.5770288010025979,
+        "median_seconds": 0.5206613929985906,
+        "min_seconds": 0.5127506500066374,
+        "repeats": 3,
+        "seconds": [
+          0.5206613929985906,
+          0.5770288010025979,
+          0.5127506500066374
+        ]
+      },
+      "per_channel_forward_seconds": 0.013016534824964765,
+      "per_channel_value_plus_gradient_seconds": 0.029959497275012837,
+      "value_plus_gradient": {
+        "compile_and_first_seconds": 5.184926752997853,
+        "max_seconds": 1.1987971699927584,
+        "median_seconds": 1.1983798910005135,
+        "min_seconds": 1.1267354209994664,
+        "repeats": 3,
+        "seconds": [
+          1.1267354209994664,
+          1.1987971699927584,
+          1.1983798910005135
+        ]
+      },
+      "value_plus_gradient_over_forward": 2.3016492236899104
+    }
+  ],
+  "timing_scope": "jitted complete NumPyro potential: transforms, priors, streamed power-2 transit, linear trend, jitter, likelihood"
+}

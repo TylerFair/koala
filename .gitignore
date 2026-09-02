@@ -1,0 +1,46 @@
+# --- generated / caches ---
+__pycache__/
+*.pyc
+*.egg-info/
+*.swp
+.DS_Store
+.codex/
+.agents/
+;
+
+# --- bulk data and binary products (kept on disk, not in git) ---
+*.fits
+*.pkl
+*.npz
+*.h5
+*.hdf5
+*.tgz
+*.tar.gz
+spectra/
+logs/
+exotic_ld_data/
+harmonica_bell-main/
+LIGHTCURVE_AND_SPECTRA_PLOTS/
+STELLARINFORMED_PUBLICATION_PLOTS/
+plots_v1/
+supplementary_lightcurve_products/
+ASYMM_*/
+POWER2_FREEUNIFORM_LINEAR/
+harmonictest_new/
+w94/
+wl_validation/
+wl_validation_p2/
+working/
+working_harmonica/
+working_models/
+working_scripts/
+tempconfigs/
+old_configs/
+
+# --- job logs ---
+*.err
+*.out
+*.log
+*.sbatch
+acceleration_reports/gpu_queue/done/
+acceleration_reports/gpu_queue/running/
