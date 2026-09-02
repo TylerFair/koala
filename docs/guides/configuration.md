@@ -70,7 +70,7 @@ python fit_jwst.py -c config.yaml
 | `whitelight_log_likelihood_batch_size` | int / 64 | Draw batch for likelihood evaluation |
 | `<stage>_num_warmup`, `<stage>_num_samples` | int / 1000, 1000 | `whitelight`, `lowres`, or `highres` MCMC lengths |
 | `spectro_max_tree_depth`, `spectro_target_accept` | int,float / 10, model default | Generic NUTS controls; stage prefixes override |
-| `spectro_hmc_num_steps`, `spectro_hmc_trajectory_jitter` | int,float / 16, 0 | HMC trajectory controls; stage prefixes override |
+| `spectro_hmc_num_steps`, `spectro_hmc_trajectory_jitter` | int,float / 8, 0.25 | HMC trajectory controls; stage prefixes override |
 | `spectro_gradient_diagnostic` | string / `first` | `off`, `first`, or `each` |
 | `spectro_gradient_diagnostic_strict` | bool / false | Abort on gradient diagnostic failure |
 | `spectro_min_depth_ess`, `spectro_max_divergences` | int / 400, 0 | Spectroscopic quality gate |
@@ -81,8 +81,153 @@ python fit_jwst.py -c config.yaml
 | `bin_time`, `bin_dt_seconds`, `bin_method` | bool,float,string / false, config value, `mean` | Flag-level time-binning controls |
 | `bin_whitelight`, `bin_spectroscopic` | bool / inherited | Apply time binning to either stage |
 
-Laplace metric controls accept generic `spectro_laplace_*` and stage-specific `lowres_laplace_*`/`highres_laplace_*`: `warmup` (150), `target_accept` (0.95 for NUTS), `max_tree_depth` (10), `start_at_map` (false), `hessian_method` (`exact`), `fd_relative_step` (2e-4), `fuse_program` (false), `trust_radius` (5), and `map_decrement_tolerance` (1e-4). White-light equivalents are `whitelight_mass_matrix`, `whitelight_laplace_warmup` (200), `target_accept` (0.9), `max_tree_depth` (10), `trust_radius` (5), and `hessian_method` (`finite_difference`).
+Laplace metric controls accept generic `spectro_laplace_*` and stage-specific `lowres_laplace_*`/`highres_laplace_*`: `warmup` (150), `target_accept` (0.95 for NUTS; 0.99 for PRISM or explinear), `max_tree_depth` (5; 6 for PRISM), `start_at_map` (true), `hessian_method` (`finite_difference`), `fd_relative_step` (2e-4), `fuse_program` (false), `trust_radius` (5), and `map_decrement_tolerance` (1e-4). White-light equivalents are `whitelight_mass_matrix`, `whitelight_laplace_warmup` (200), `target_accept` (0.9; 0.99 for PRISM), `max_tree_depth` (10), `trust_radius` (5), and `hessian_method` (`finite_difference`).
 
 Laplace importance sampling accepts generic, `spectro_`, `lowres_`, or `highres_` prefixed `laplace_is_*` keys: `output` (`imh`), `num_draws` (4096), `rounds` (2), `draw_chunk_size` (256), `student_df` (3), `scale_inflation` (1.5), `wide_fraction` (0), `wide_scale` (3), `map_maxiter` (200), `map_tol` (1e-4), `trust_radius` (5), `khat_threshold` (0.7), `min_ess` (400), `min_ess_fraction` (0.2), `min_imh_acceptance` (0.2), `imh_thin` (8), `fallback` (true), and `force` (false).
 
 Harmonica adds `harmonica_max_order` (1), `harmonica_spectro_parameterization` (`delta_r`), `harmonica_spectro_fit_jitter` (true), `harmonica_spectro_odd_frac_sigma` (0.1), and legacy `harmonica_wl_parameterization`. Stage prefixes `harmonica_wl`, `harmonica_lr`, and `harmonica_hr` accept `dense_mass`, `regularize_mass_matrix`, `max_tree_depth`, and `target_accept`. Sing adds `ld_sing_offset`, `ld_sing_offset_path`, `ld_sing_calibration_warmup` (1000), `ld_sing_calibration_samples` (1000), and `ld_sing_calibration_min_ess`.
+
+## Minimal configuration
+
+This is the smallest practical stellar-informed SOSS configuration.
+
+```yaml
+planet: {name: Target, period: 3.0, duration: 0.1, t0: 60000.0, b: 0.4, rprs: 0.1}
+stellar: {feh: 0.0, teff: 5500, logg: 4.4, teff_sigma: 50, logg_sigma: 0.1, feh_sigma: 0.1, ld_model: stagger, ld_data_path: ../exotic_ld_data}
+instrument: NIRISS/SOSS
+order: 1
+path: .
+input_dir: FITS
+output_dir: TARGET_RESULTS
+fits_file: target_box_spectra_fullres.fits
+resolution: {high: 100, low: 20}
+flags: {detrending_type: linear, ld_profile: power2, ld_prior: informed}
+outlier_clip: {whitelight_sigma: 5, spectroscopic_sigma: 5}
+host_device: gpu
+```
+
+All sampler production defaults are applied when they are absent.
+
+## Full worked configuration
+
+The following example exposes the common stage, sampler, and cache controls.
+
+```yaml
+planet:
+  name: Target
+  period: 3.0
+  duration: 0.10
+  t0: 60000.0
+  b: 0.4
+  rprs: 0.1
+  ecc: 0.0
+  omega: 0.0
+stellar:
+  feh: 0.0
+  teff: 5500
+  logg: 4.4
+  teff_sigma: 50
+  logg_sigma: 0.1
+  feh_sigma: 0.1
+  ld_model: stagger
+  ld_prior_model: stagger
+  ld_data_path: ../exotic_ld_data
+  ld_mu_min: 0.1
+  ld_prior_n_grid: 5
+  ld_prior_nsigma: 3
+  ld_prior_min_sigma: 1.0e-4
+instrument: NIRSPEC/G395H
+nrs: 1
+order: null
+path: /scratch/account/user/
+input_dir: FITS
+output_dir: TARGET_G395H_NRS1
+fits_file: target_nrs1_box_spectra_fullres_G395H.fits
+resolution:
+  high: 100
+  low: 20
+  reference_grid: prism_template.csv
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+time_binning:
+  enabled: false
+  dt_seconds: 20
+  method: mean
+  whitelight: false
+  spectroscopic: false
+flags:
+  analysis_stage: all
+  chunk_mode: serial
+  random_seed: 555
+  compile_box: true
+  jax_compilation_cache_dir: /scratch/account/user/jax_cache
+  detrending_type: linear
+  trend_inference: sampled_uniform
+  transit_engine: jaxoplanet
+  param_method: duration
+  ld_profile: power2
+  ld_prior: informed
+  interpolate_ld: false
+  interpolate_trend: false
+  need_lowres: true
+  whitelight_geometry_estimator: posterior_median
+  whitelight_log_likelihood_batch_size: 64
+  whitelight_mass_matrix: laplace
+  whitelight_laplace_warmup: 200
+  whitelight_laplace_target_accept: 0.9
+  whitelight_laplace_max_tree_depth: 10
+  whitelight_min_ess: 400
+  whitelight_max_divergences: 0
+  whitelight_max_extra_blocks: 3
+  spectro_sampler: independent_nuts
+  spectro_mass_matrix: laplace
+  spectro_jitter_prior: lognormal
+  spectro_jitter_prior_center: 0.5
+  spectro_jitter_prior_scale: 2.0
+  spectro_laplace_warmup: 150
+  spectro_laplace_target_accept: 0.95
+  spectro_laplace_max_tree_depth: 5
+  spectro_laplace_hessian_method: finite_difference
+  spectro_laplace_start_at_map: true
+  spectro_hmc_num_steps: 8
+  spectro_hmc_trajectory_jitter: 0.25
+  spectro_min_depth_ess: 400
+  spectro_max_divergences: 0
+  lowres_num_warmup: 1000
+  lowres_num_samples: 1000
+  highres_num_warmup: 1000
+  highres_num_samples: 1000
+  vmap_chunk: 40
+  spectro_gradient_diagnostic: first
+  spectro_gradient_diagnostic_strict: false
+  transit_window_optimization: auto
+  jaxoplanet_kernel: auto
+host_device: gpu
+```
+
+## Precedence rules
+
+Stage-specific keys override generic spectroscopic keys.
+
+For example, `highres_laplace_target_accept` overrides `spectro_laplace_target_accept` only at high resolution.
+
+Environment variables override `analysis_stage`, `chunk_mode`, and the random seed where documented.
+
+An explicit YAML value overrides a production `setdefault` value.
+
+## Configuration checks
+
+Use YAML booleans `true` and `false`, not quoted strings.
+
+Ensure `nrs` is present for every NIRSpec mode.
+
+Ensure `order` is present for SOSS.
+
+Specify either `resolution` or `pixels`.
+
+Check that `fits_file` resolves below `path/input_dir`.
+
+Keep a new `output_dir` for a scientifically different fit.
+
+Review the startup log: it prints the selected transit engine, trend, LD mode, and sampler settings.
