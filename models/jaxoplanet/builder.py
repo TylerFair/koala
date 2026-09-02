@@ -6,6 +6,7 @@ import numpy as np
 
 from ..common import get_I_power2
 from ..linear_marginalization import marginalized_log_likelihood_and_conditional
+from ..ld_parameterization import Power2MaxtedTransform, QuadraticKippingTransform
 from ..trend_marginal import build_marginalized_trend_design
 from ..detrend import (
     COMPUTE_KERNELS,
@@ -143,10 +144,13 @@ def derive_geometry(wl_samples, period, ecc=0.0, omega=0.0):
 
 def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic',
                             ld_mode='free', param_method='duration',
-                            jaxoplanet_kernel='auto'):
+                            jaxoplanet_kernel='auto',
+                            ld_parameterization='coefficients'):
     """Jaxoplanet white-light model with duration- or a_rs-based geometry."""
     if param_method not in ('duration', 'a_rs'):
         raise ValueError(f"Unknown param_method: {param_method}")
+    if ld_parameterization not in {'coefficients', 'decorrelated'}:
+        raise ValueError("ld_parameterization must be 'coefficients' or 'decorrelated'.")
     selected_kernel = _resolve_builder_kernel(
         jaxoplanet_kernel, ld_profile, param_method, ld_mode=ld_mode
     )
@@ -236,12 +240,23 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     u_sigma = jnp.asarray(prior_params.get('u_sigma', jnp.array([0.2, 0.2])), dtype=jnp.float64)
                 u_sigma = jnp.broadcast_to(u_sigma, u_prior.shape)
                 u_sigma = jnp.clip(u_sigma, 1e-6, None)
-                u = numpyro.sample(
-                    "u",
-                    dist.TruncatedNormal(loc=u_prior, scale=u_sigma, low=0.0, high=1.0).to_event(1),
-                )
+                coefficient_prior = dist.TruncatedNormal(
+                    loc=u_prior, scale=u_sigma, low=0.0, high=1.0
+                ).to_event(1)
+                if ld_parameterization == 'decorrelated' and ld_mode in {'free', 'widegaussian'}:
+                    q = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
+                        coefficient_prior, QuadraticKippingTransform()))
+                    u = numpyro.deterministic('u', QuadraticKippingTransform().inv(q))
+                else:
+                    u = numpyro.sample("u", coefficient_prior)
             elif ld_mode == 'uniform':
-                u = numpyro.sample("u", dist.Uniform(0.0, 1.0).expand([2]).to_event(1))
+                coefficient_prior = dist.Uniform(0.0, 1.0).expand([2]).to_event(1)
+                if ld_parameterization == 'decorrelated':
+                    q = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
+                        coefficient_prior, QuadraticKippingTransform()))
+                    u = numpyro.deterministic('u', QuadraticKippingTransform().inv(q))
+                else:
+                    u = numpyro.sample("u", coefficient_prior)
             elif ld_mode == 'fixed':
                 u = numpyro.deterministic("u", jnp.asarray(prior_params['u'], dtype=jnp.float64))
             else:
@@ -257,11 +272,31 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     u_sigma = jnp.asarray(prior_params.get('u_sigma', jnp.array([0.2, 0.2])), dtype=jnp.float64)
                 u_sigma = jnp.broadcast_to(u_sigma, u_prior.shape)
                 u_sigma = jnp.clip(u_sigma, 1e-6, None)
-                c1 = numpyro.sample('c1', dist.TruncatedNormal(u_prior[0], u_sigma[0], low=0.0, high=1.0))
-                c2 = numpyro.sample('c2', dist.TruncatedNormal(u_prior[1], u_sigma[1], low=0.001, high=1.0))
+                coefficient_prior = dist.TruncatedNormal(
+                    u_prior, u_sigma, low=jnp.asarray([0.0, 0.001]), high=1.0
+                ).to_event(1)
+                if ld_parameterization == 'decorrelated' and ld_mode in {'free', 'widegaussian'}:
+                    h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
+                        coefficient_prior, Power2MaxtedTransform()))
+                    coefficients = Power2MaxtedTransform().inv(h)
+                    c1 = numpyro.deterministic('c1', coefficients[0])
+                    c2 = numpyro.deterministic('c2', coefficients[1])
+                else:
+                    c1 = numpyro.sample('c1', dist.TruncatedNormal(
+                        u_prior[0], u_sigma[0], low=0.0, high=1.0))
+                    c2 = numpyro.sample('c2', dist.TruncatedNormal(
+                        u_prior[1], u_sigma[1], low=0.001, high=1.0))
             elif ld_mode == 'uniform':
-                c1 = numpyro.sample('c1', dist.Uniform(0.0, 1.0))
-                c2 = numpyro.sample('c2', dist.Uniform(0.0, 1.0))
+                coefficient_prior = dist.Uniform(0.0, 1.0).expand([2]).to_event(1)
+                if ld_parameterization == 'decorrelated':
+                    h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
+                        coefficient_prior, Power2MaxtedTransform()))
+                    coefficients = Power2MaxtedTransform().inv(h)
+                    c1 = numpyro.deterministic('c1', coefficients[0])
+                    c2 = numpyro.deterministic('c2', coefficients[1])
+                else:
+                    c1 = numpyro.sample('c1', dist.Uniform(0.0, 1.0))
+                    c2 = numpyro.sample('c2', dist.Uniform(0.0, 1.0))
             elif ld_mode == 'fixed':
                 c1 = numpyro.deterministic('c1', u_prior[0])
                 c2 = numpyro.deterministic('c2', u_prior[1])
@@ -373,7 +408,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                             jaxoplanet_kernel='auto',
                             jitter_prior='log_uniform',
                             jitter_prior_scale=2.0,
-                            jitter_prior_center=0.5):
+                            jitter_prior_center=0.5,
+                            ld_parameterization='coefficients'):
     """Jaxoplanet spectroscopic model with WL-fixed duration- or a_rs-based geometry.
 
     ``jitter_prior`` selects the prior on the per-channel white-noise jitter:
@@ -390,6 +426,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
     """
     if param_method not in {'duration', 'a_rs'}:
         raise ValueError(f"Unknown param_method: {param_method}")
+    if ld_parameterization not in {'coefficients', 'decorrelated'}:
+        raise ValueError("ld_parameterization must be 'coefficients' or 'decorrelated'.")
     if jitter_prior not in {'log_uniform', 'lognormal'}:
         raise ValueError(f"Unknown jitter_prior: {jitter_prior}")
     jitter_prior_scale = float(jitter_prior_scale)
@@ -534,10 +572,21 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     if ld_mode == 'informed' and sigma_u_ld is None:
                         raise ValueError("ld_mode='informed' requires sigma_u_ld.")
                     u_scale = sigma_u_ld if sigma_u_ld is not None else 0.2
-                    u = numpyro.sample(
-                        'u',
-                        dist.TruncatedNormal(loc=mu_u_ld, scale=u_scale, low=0.0, high=1.0).to_event(1),
-                    )
+                    u_prior_dist = dist.TruncatedNormal(
+                        loc=mu_u_ld, scale=u_scale, low=0.0, high=1.0
+                    ).to_event(1)
+                    if ld_parameterization == 'decorrelated' and ld_mode in {'free', 'widegaussian'}:
+                        q = numpyro.sample(
+                            'ld_decorrelated',
+                            dist.TransformedDistribution(
+                                u_prior_dist, QuadraticKippingTransform()
+                            ),
+                        )
+                        u = numpyro.deterministic(
+                            'u', QuadraticKippingTransform().inv(q)
+                        )
+                    else:
+                        u = numpyro.sample('u', u_prior_dist)
             elif ld_profile == 'power2':
                 if ld_mode == 'informed' and sigma_u_ld is None:
                     raise ValueError("ld_mode='informed' requires sigma_u_ld.")
@@ -546,8 +595,25 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 sigma_u_ld = jnp.asarray(sigma_u_ld, dtype=jnp.float64)
                 sigma_u_ld = jnp.broadcast_to(sigma_u_ld, mu_u_ld.shape)
                 sigma_u_ld = jnp.clip(sigma_u_ld, 1e-6, None)
-                c1 = numpyro.sample('c1', dist.TruncatedNormal(mu_u_ld[:, 0], sigma_u_ld[:, 0], low=0.0, high=1.0))
-                c2 = numpyro.sample('c2', dist.TruncatedNormal(mu_u_ld[:, 1], sigma_u_ld[:, 1], low=0.001, high=1.0))
+                coefficient_prior = dist.TruncatedNormal(
+                    mu_u_ld, sigma_u_ld,
+                    low=jnp.asarray([0.0, 0.001]), high=1.0,
+                ).to_event(1)
+                if ld_parameterization == 'decorrelated' and ld_mode in {'free', 'widegaussian'}:
+                    h = numpyro.sample(
+                        'ld_decorrelated',
+                        dist.TransformedDistribution(
+                            coefficient_prior, Power2MaxtedTransform()
+                        ),
+                    )
+                    coefficients = Power2MaxtedTransform().inv(h)
+                    c1 = numpyro.deterministic('c1', coefficients[:, 0])
+                    c2 = numpyro.deterministic('c2', coefficients[:, 1])
+                else:
+                    c1 = numpyro.sample('c1', dist.TruncatedNormal(
+                        mu_u_ld[:, 0], sigma_u_ld[:, 0], low=0.0, high=1.0))
+                    c2 = numpyro.sample('c2', dist.TruncatedNormal(
+                        mu_u_ld[:, 1], sigma_u_ld[:, 1], low=0.001, high=1.0))
                 if selected_kernel != "native_power2":
                     profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
                     u = (P_LD @ (1.0 - profs).T).T
@@ -555,10 +621,25 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 raise ValueError(f"Unknown ld_profile: {ld_profile}")
         elif ld_mode == 'uniform':
             if ld_profile == 'quadratic':
-                u = numpyro.sample('u', dist.Uniform(0.0, 1.0).expand([num_lcs, 2]).to_event(1))
+                coefficient_prior = dist.Uniform(0.0, 1.0).expand([num_lcs, 2]).to_event(1)
+                if ld_parameterization == 'decorrelated':
+                    q = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
+                        coefficient_prior, QuadraticKippingTransform()))
+                    u = numpyro.deterministic('u', QuadraticKippingTransform().inv(q))
+                else:
+                    u = numpyro.sample('u', coefficient_prior)
             elif ld_profile == 'power2':
-                c1 = numpyro.sample('c1', dist.Uniform(0.0, 1.0).expand([num_lcs]))
-                c2 = numpyro.sample('c2', dist.Uniform(0.0, 1.0).expand([num_lcs]))
+                coefficient_prior = dist.Uniform(0.0, 1.0).expand([num_lcs, 2]).to_event(1)
+                if ld_parameterization == 'decorrelated':
+                    h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
+                        coefficient_prior, Power2MaxtedTransform()))
+                    coefficients = Power2MaxtedTransform().inv(h)
+                    c1 = numpyro.deterministic('c1', coefficients[:, 0])
+                    c2 = numpyro.deterministic('c2', coefficients[:, 1])
+                else:
+                    coefficients = numpyro.sample('ld_coefficients', coefficient_prior)
+                    c1 = numpyro.deterministic('c1', coefficients[:, 0])
+                    c2 = numpyro.deterministic('c2', coefficients[:, 1])
                 if selected_kernel != "native_power2":
                     profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
                     u = (P_LD @ (1.0 - profs).T).T

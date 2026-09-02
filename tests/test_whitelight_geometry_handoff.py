@@ -31,7 +31,7 @@ def _normal_location_model(t, yerr, y=None):
 def test_whitelight_laplace_flag_defaults_and_validation():
     defaults = _resolve_whitelight_laplace_options({})
     assert defaults == {
-        "mass_matrix": "adaptive",
+        "mass_matrix": "laplace",
         "warmup": 200,
         "target_accept": 0.9,
         "max_tree_depth": 10,

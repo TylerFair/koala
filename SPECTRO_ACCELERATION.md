@@ -15,6 +15,30 @@ benchmark on the same GPU model, cadence count, sampler, and trend treatment as
 the intended fit.  A width manifest is emitted only when its divergence, ESS,
 and measured-memory gates pass.
 
+## Production defaults (2026-09-02)
+
+With no sampler flags, spectroscopy uses per-channel Laplace-metric NUTS and
+white light uses a Laplace metric with its existing adaptive fallback. SOSS,
+G395H, G395M, and G140H use white-light target acceptance 0.90; PRISM uses
+0.99. Spectroscopy uses 0.95 and tree depth 5, except PRISM and explinear use
+0.99 and PRISM uses depth 6. The shared Laplace controls are 150 warmup steps,
+finite-difference Hessians, trust radius 5, depth ESS at least 400, and zero
+divergences.
+
+If a Laplace-NUTS lane fails, only that lane is rerun with exact HMC-8 using
+25% trajectory jitter and target acceptance 0.85, then with legacy adaptive
+joint NUTS if needed. Selecting `spectro_sampler: independent_hmc` reverses
+the first two samplers. Checkpoints, chunk diagnostics, and transmission CSVs
+record `sampler_used` per wavelength channel. These are all exact MCMC paths.
+
+Exponential-linear spectroscopic trends now fix their timescale to the
+white-light posterior median by default; set
+`spectro_fixed_timescale_trends: false` for the historical free-timescale
+model. `spectro_ld_parameterization` and `whitelight_ld_parameterization`
+accept `coefficients` (current default) or `decorrelated`; the latter uses the
+exact induced physical-coefficient prior in the Maxted power-2 or Kipping
+quadratic coordinates.
+
 ## Recommended first configuration
 
 Add these values under `flags:` in a copy of a science configuration:

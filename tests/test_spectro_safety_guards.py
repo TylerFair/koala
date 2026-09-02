@@ -6,6 +6,8 @@ os.environ.setdefault("JAX_ENABLE_X64", "1")
 import jax
 import jax.numpy as jnp
 import pytest
+import numpyro
+import numpyro.distributions as dist
 
 import fit_jwst
 from models.channel_batching import (
@@ -109,3 +111,47 @@ def test_sampling_stage_rejects_plan_from_another_workload():
             channel_batch_plan=plan,
             gradient_diagnostic_mode="off",
         )
+
+
+def test_sampler_swap_order_is_directional_and_ends_adaptive():
+    assert fit_jwst._spectro_sampler_swap_order("independent_nuts") == (
+        "independent_hmc", "joint_nuts"
+    )
+    assert fit_jwst._spectro_sampler_swap_order("independent_hmc") == (
+        "independent_nuts", "joint_nuts"
+    )
+
+
+def _tiny_radius_model(t, yerr, y=None):
+    rors = numpyro.sample("rors", dist.Uniform(0.02, 0.3))
+    numpyro.sample("obs", dist.Normal(rors[:, None], yerr), obs=y)
+
+
+def test_tiny_exact_model_selectively_swaps_nuts_to_hmc(tmp_path, monkeypatch):
+    gate_calls = []
+
+    def forced_gate(samples, diagnostics_path, min_depth_ess, max_divergences):
+        gate_calls.append(diagnostics_path)
+        failed = jnp.asarray([0], dtype=int) if len(gate_calls) == 1 else jnp.asarray([], dtype=int)
+        return failed, {
+            "depth_ess_per_channel": [999.0],
+            "num_divergences_per_channel": [0],
+        }
+
+    monkeypatch.setattr(fit_jwst, "_spectro_failed_lanes", forced_gate)
+    t = jnp.arange(4.0)
+    samples = fit_jwst.get_samples_chunked(
+        _tiny_radius_model, jax.random.PRNGKey(92), t,
+        jnp.full((1, 4), 0.08), jnp.full((1, 4), 0.12),
+        {"rors": jnp.asarray([0.1])}, chunk_size=1,
+        nuts_kwargs={"mass_matrix": "laplace", "laplace_warmup": 10,
+                     "laplace_map_iterations": 4},
+        mcmc_kwargs={"num_warmup": 10, "num_samples": 20},
+        output_dir=str(tmp_path), checkpoint_prefix="tiny",
+        sampler_backend="independent_nuts", spectro_min_depth_ess=1,
+    )
+    assert samples["rors"].shape == (20, 1)
+    assert samples.sampler_used == ["independent_hmc"]
+    checkpoint = next((tmp_path / "chunks").glob("*.pkl"))
+    loaded = fit_jwst._load_chunk_samples(checkpoint)
+    assert loaded.sampler_used == ["independent_hmc"]

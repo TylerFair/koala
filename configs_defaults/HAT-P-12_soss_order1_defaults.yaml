@@ -1,0 +1,45 @@
+planet:
+  name: HAT-P-12
+  period: 3.21305762
+  duration: 0.090375
+  t0: 60115.45
+  b: 0.343
+  rprs: 0.1406
+stellar:
+  feh: -0.28
+  teff: 4779
+  logg: 4.22
+  teff_sigma: 108
+  logg_sigma: 0.26
+  feh_sigma: 0.04
+  ld_model: stagger
+  ld_data_path: ../exotic_ld_data
+  ld_prior_min_sigma: 1.0e-4
+instrument: NIRISS/SOSS
+order: 1
+path: /scratch/midway3/tfairnington/
+input_dir: FITS
+output_dir: accel_gpu_results/280_defaults_soss/accel_defaults/HAT-P-12_soss_order1_defaults
+fits_file: HAT-P-12_box_spectra_fullres.fits
+resolution:
+  high: reference
+  low: 20
+  reference_grid: prism_template.csv
+flags:
+  vmap_chunk: 40
+  detrending_type: spot
+  interpolate_trend: false
+  interpolate_ld: false
+  ld_prior: stellarprior
+  need_lowres: true
+  ld_profile: power2
+  spot_center: 60115.47
+  spot_width: 0.005
+  spot_amp: 0.001
+  mask_start: 60115.25
+  mask_end: 60115.325
+  mask_integrations_start: null
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+host_device: gpu

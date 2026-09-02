@@ -1,0 +1,19 @@
+planet: {name: WASP-52, period: 1.74978117, duration: 0.07787931666666667, t0: 60248.125, b: 0.598, rprs: 0.1646}
+stellar:
+  {feh: 0.17, teff: 5073, logg: 4.36, teff_sigma: 63, logg_sigma: 0.15,
+   feh_sigma: 0.03, ld_model: stagger, ld_data_path: ../exotic_ld_data,
+   ld_prior_min_sigma: 1.0e-4}
+instrument: NIRSPEC/G395H
+nrs: 1
+path: /scratch/midway3/tfairnington/
+input_dir: FITS
+output_dir: accel_gpu_results/282_defaults_g395h_retry/accel_defaults/WASP-52_nrs1_g395h_defaults
+fits_file: WASP-52_nrs1_box_spectra_fullres_G395H.fits
+resolution: {high: reference, low: 20, reference_grid: prism_template.csv}
+flags:
+  {vmap_chunk: 40, detrending_type: linear, interpolate_trend: false,
+   interpolate_ld: false, ld_prior: stellarprior, need_lowres: true,
+   ld_profile: power2, mask_start: 60247.9, mask_end: 60247.98,
+   mask_integrations_start: null}
+outlier_clip: {whitelight_sigma: 5, spectroscopic_sigma: 5}
+host_device: gpu

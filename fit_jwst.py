@@ -978,8 +978,8 @@ HARMONICA_CHANNEL_VARYING_MODEL_KWARGS = (
     "sigma_u_ld",
 )
 
-CHUNK_CHECKPOINT_SCHEMA_VERSION = 3
-CHUNK_CHECKPOINT_TARGET_REVISION = "pointwise-yerr-direct-quadratic-rng-v3"
+CHUNK_CHECKPOINT_SCHEMA_VERSION = 4
+CHUNK_CHECKPOINT_TARGET_REVISION = "production-defaults-sampler-swap-v4"
 SAMPLING_WORKLOAD_SCHEMA_VERSION = 1
 SPECTRO_GRADIENT_DIAGNOSTIC_SCHEMA_VERSION = 1
 SCIENCE_ARTIFACT_SCHEMA_VERSION = 1
@@ -1280,6 +1280,8 @@ def _chunk_checkpoint_fingerprint(
     channel_varying_kwargs,
     checkpoint_signature,
     model_kwargs,
+    spectro_min_depth_ess=0.0,
+    spectro_max_divergences=0,
 ):
     """Fingerprint the posterior target, inputs, and sampling configuration."""
     hasher = hashlib.sha256()
@@ -1308,6 +1310,8 @@ def _chunk_checkpoint_fingerprint(
             "y": indiv_y,
             "init_params": init_params,
             "model_kwargs": model_kwargs,
+            "spectro_min_depth_ess": float(spectro_min_depth_ess),
+            "spectro_max_divergences": int(spectro_max_divergences),
         },
     )
     return hasher.hexdigest()
@@ -1960,9 +1964,20 @@ def _chunk_checkpoint_path(checkpoint_dir, checkpoint_prefix, start, end):
     return os.path.join(checkpoint_dir, f"{checkpoint_prefix}_chunk_{start}_{end}.pkl")
 
 
+class _SamplerSamples(dict):
+    """Sample mapping carrying non-array per-channel sampler provenance."""
+
+    def __init__(self, *args, sampler_used=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sampler_used = None if sampler_used is None else list(sampler_used)
+
+
 def _load_chunk_samples(chunk_file):
     with open(chunk_file, 'rb') as f:
-        return pickle.load(f)
+        payload = pickle.load(f)
+    if isinstance(payload, dict) and "samples" in payload and "sampler_used" in payload:
+        return _SamplerSamples(payload["samples"], sampler_used=payload["sampler_used"])
+    return payload
 
 
 def _gradient_diagnostic_path(chunk_file):
@@ -2070,7 +2085,57 @@ def _concatenate_chunk_samples(samples_chunks):
     for key in samples_chunks[0].keys():
         arrays = [chunk[key] for chunk in samples_chunks]
         samples[key] = np.concatenate(arrays, axis=1)
-    return samples
+    sampler_used = []
+    for chunk in samples_chunks:
+        provenance = getattr(chunk, "sampler_used", None)
+        if provenance is None:
+            sampler_used = []
+            break
+        sampler_used.extend(provenance)
+    return _SamplerSamples(samples, sampler_used=sampler_used or None)
+
+
+def _spectro_failed_lanes(samples, diagnostics_path, min_depth_ess, max_divergences):
+    """Return failed lanes and auditable gate metrics for an exact-MCMC run."""
+    depth_values = samples.get("depths")
+    if depth_values is None and "rors" in samples:
+        depth_values = jnp.asarray(samples["rors"]) ** 2
+    if depth_values is None:
+        return np.asarray([], dtype=int), {"depth_ess_per_channel": None,
+                                           "num_divergences_per_channel": None}
+    depth_values = np.asarray(jax.device_get(depth_values))
+    lane_ess = []
+    for lane in range(depth_values.shape[1]):
+        value = jnp.asarray(depth_values[:, lane])
+        ess = numpyro.diagnostics.effective_sample_size(value[None, ...])
+        lane_ess.append(float(np.nanmin(np.asarray(jax.device_get(ess)))))
+    divergences = np.zeros(depth_values.shape[1], dtype=int)
+    if diagnostics_path is not None and os.path.isfile(diagnostics_path):
+        with open(diagnostics_path, "r", encoding="utf-8") as stream:
+            payload = json.load(stream)
+        per_lane = payload.get("num_divergences_per_channel")
+        if per_lane is not None and len(per_lane) == depth_values.shape[1]:
+            divergences = np.asarray(per_lane, dtype=int)
+        elif int(payload.get("num_divergences", 0)) > int(max_divergences):
+            # A joint diagnostic cannot localize the event, so conservatively
+            # reject every lane in that selective attempt.
+            divergences[:] = int(payload["num_divergences"])
+    failed = np.flatnonzero(
+        (np.asarray(lane_ess) < float(min_depth_ess))
+        | (divergences > int(max_divergences))
+    )
+    return failed, {
+        "depth_ess_per_channel": lane_ess,
+        "num_divergences_per_channel": divergences.tolist(),
+    }
+
+
+def _spectro_sampler_swap_order(primary):
+    if primary == "independent_nuts":
+        return ("independent_hmc", "joint_nuts")
+    if primary == "independent_hmc":
+        return ("independent_nuts", "joint_nuts")
+    return ()
 
 
 def _resolve_parallel_chunk_job(parallel_job_count=None, parallel_job_index=None):
@@ -2116,6 +2181,7 @@ def get_samples_chunked(
     gradient_diagnostic_mode="off",
     gradient_diagnostic_strict=False,
     spectro_min_depth_ess=0.0,
+    spectro_max_divergences=0,
     _joint_mcmc_runner_cache=None,
     _independent_mcmc_runner_cache=None,
     **model_kwargs,
@@ -2178,6 +2244,8 @@ def get_samples_chunked(
             channel_varying_kwargs=channel_varying_kwargs,
             checkpoint_signature=checkpoint_signature,
             model_kwargs=model_kwargs,
+            spectro_min_depth_ess=spectro_min_depth_ess,
+            spectro_max_divergences=spectro_max_divergences,
         )
         checkpoint_prefix = (
             f"{logical_checkpoint_prefix}_cfg{checkpoint_fingerprint[:12]}"
@@ -2488,92 +2556,134 @@ def get_samples_chunked(
                 "'laplace_is'}; "
                 f"received {sampler_backend!r}."
             )
-        if sampler_backend in {
-            "independent_nuts", "independent_hmc", "laplace_is"
-        } and float(spectro_min_depth_ess) > 0:
-            depth_values = samples_chunk.get("depths", None)
-            if depth_values is None and "rors" in samples_chunk:
-                depth_values = jnp.asarray(samples_chunk["rors"]) ** 2
-            if depth_values is not None:
-                depth_values = np.asarray(jax.device_get(depth_values))
-                lane_ess = []
-                for lane in range(depth_values.shape[1]):
-                    values = jnp.asarray(depth_values[:, lane])
-                    lane_site_ess = numpyro.diagnostics.effective_sample_size(
-                        values[None, ...]
-                    )
-                    lane_ess.append(
-                        float(np.nanmin(np.asarray(jax.device_get(lane_site_ess))))
-                    )
-                failed = np.flatnonzero(
-                    np.asarray(lane_ess) < float(spectro_min_depth_ess)
+        sampler_used = [sampler_backend] * (end - start)
+        gate_attempts = []
+        if sampler_backend in {"independent_nuts", "independent_hmc"}:
+            failed, gate = _spectro_failed_lanes(
+                samples_chunk, diagnostics_path, spectro_min_depth_ess,
+                spectro_max_divergences,
+            )
+            gate_attempts.append({"sampler": sampler_backend, **gate})
+            for attempt_index, fallback_backend in enumerate(
+                _spectro_sampler_swap_order(sampler_backend), start=1
+            ):
+                if not failed.size:
+                    break
+                selected = failed.copy()
+                print(
+                    f"  chunk {start}:{end} - gate failed in local lanes "
+                    f"{selected.tolist()}; re-running only those lanes with "
+                    f"{fallback_backend}."
                 )
-                if failed.size:
-                    print(
-                        f"  chunk {start}:{end} - depth ESS below "
-                        f"{spectro_min_depth_ess} in local lanes {failed.tolist()}; "
-                        "falling back selectively to Laplace NUTS."
-                    )
-                    from models.independent_nuts import get_samples_independent
 
-                    def _select_lanes(value):
-                        try:
-                            array = jnp.asarray(value)
-                        except (TypeError, ValueError):
-                            return value
-                        if array.ndim and array.shape[0] == end - start:
-                            return array[failed]
+                def _select_lanes(value):
+                    try:
+                        array = jnp.asarray(value)
+                    except (TypeError, ValueError):
                         return value
+                    if array.ndim and array.shape[0] == end - start:
+                        return array[selected]
+                    return value
 
-                    fallback_init = {
-                        name: _select_lanes(value)
-                        for name, value in init_chunk.items()
-                    }
-                    fallback_kwargs = {
-                        name: _select_lanes(value)
-                        if name in channel_varying_set else value
-                        for name, value in kwargs_chunk.items()
-                    }
-                    fallback_nuts = dict(nuts_kwargs or {})
-                    # HMC-only trajectory controls are invalid for the
-                    # selective independent-NUTS fallback.
+                fallback_init = {name: _select_lanes(value)
+                                 for name, value in init_chunk.items()}
+                fallback_kwargs = {
+                    name: (_select_lanes(value)
+                           if name in channel_varying_set else value)
+                    for name, value in kwargs_chunk.items()
+                }
+                fallback_path = (
+                    None if diagnostics_path is None else
+                    diagnostics_path.replace(
+                        ".json", f".swap{attempt_index}_{fallback_backend}.json"
+                    )
+                )
+                fallback_nuts = dict(nuts_kwargs or {})
+                if fallback_backend == "independent_hmc":
+                    from models.independent_hmc import get_samples_independent_hmc
+                    fallback_nuts.pop("max_tree_depth", None)
+                    fallback_nuts.pop("laplace_max_tree_depth", None)
+                    fallback_nuts.update(
+                        mass_matrix="laplace", laplace_warmup=150,
+                        laplace_target_accept=0.85,
+                        laplace_start_at_map=True, num_steps=8,
+                        trajectory_jitter=0.25,
+                    )
+                    fallback = get_samples_independent_hmc(
+                        model, jax.random.fold_in(key_chunk, 99173 + attempt_index),
+                        t, yerr_chunk[selected], y_chunk[selected], fallback_init,
+                        nuts_kwargs=fallback_nuts, mcmc_kwargs=mcmc_kwargs,
+                        diagnostics_path=fallback_path, lane_width=chunk_size,
+                        channel_varying_kwargs=varying_for_chunk, **fallback_kwargs,
+                    )
+                elif fallback_backend == "independent_nuts":
+                    from models.independent_nuts import get_samples_independent
                     fallback_nuts.pop("num_steps", None)
                     fallback_nuts.pop("trajectory_jitter", None)
                     fallback_nuts.update(
-                        mass_matrix="laplace",
-                        laplace_warmup=150,
-                        laplace_target_accept=0.95,
-                        laplace_max_tree_depth=10,
+                        mass_matrix="laplace", laplace_warmup=150,
+                        laplace_target_accept=(
+                            0.99 if float((nuts_kwargs or {}).get(
+                                "laplace_target_accept", 0.95)) >= 0.99 else 0.95
+                        ),
                         laplace_start_at_map=True,
                     )
                     fallback = get_samples_independent(
-                        model,
-                        jax.random.fold_in(key_chunk, 99173),
-                        t,
-                        yerr_chunk[failed],
-                        y_chunk[failed],
-                        fallback_init,
-                        nuts_kwargs=fallback_nuts,
-                        mcmc_kwargs=mcmc_kwargs,
-                        diagnostics_path=(
-                            None if diagnostics_path is None
-                            else diagnostics_path.replace(
-                                ".json", ".depth_ess_fallback.json"
-                            )
-                        ),
-                        lane_width=chunk_size,
-                        channel_varying_kwargs=varying_for_chunk,
-                        **fallback_kwargs,
+                        model, jax.random.fold_in(key_chunk, 99173 + attempt_index),
+                        t, yerr_chunk[selected], y_chunk[selected], fallback_init,
+                        nuts_kwargs=fallback_nuts, mcmc_kwargs=mcmc_kwargs,
+                        diagnostics_path=fallback_path, lane_width=chunk_size,
+                        channel_varying_kwargs=varying_for_chunk, **fallback_kwargs,
                     )
-                    samples_chunk = {
-                        name: jnp.asarray(values).at[:, failed].set(fallback[name])
-                        for name, values in samples_chunk.items()
+                else:
+                    adaptive_nuts = {
+                        key: value for key, value in fallback_nuts.items()
+                        if key in {"dense_mass", "regularize_mass_matrix",
+                                   "target_accept_prob", "max_tree_depth"}
                     }
+                    adaptive_nuts.update(target_accept_prob=0.95)
+                    fallback = get_samples(
+                        model, jax.random.fold_in(key_chunk, 99173 + attempt_index),
+                        t, yerr_chunk[selected], y_chunk[selected], fallback_init,
+                        nuts_kwargs=adaptive_nuts, mcmc_kwargs=mcmc_kwargs,
+                        diagnostics_path=fallback_path, **fallback_kwargs,
+                    )
+                fallback_failed, fallback_gate = _spectro_failed_lanes(
+                    fallback, fallback_path, spectro_min_depth_ess,
+                    spectro_max_divergences,
+                )
+                gate_attempts.append({
+                    "sampler": fallback_backend,
+                    "input_local_lanes": selected.tolist(),
+                    **fallback_gate,
+                })
+                samples_chunk = {
+                    name: jnp.asarray(values).at[:, selected].set(fallback[name])
+                    for name, values in samples_chunk.items()
+                }
+                for lane in selected:
+                    sampler_used[int(lane)] = fallback_backend
+                failed = selected[fallback_failed]
+            if failed.size:
+                raise RuntimeError(
+                    f"chunk {start}:{end} failed the spectroscopic ESS/divergence "
+                    f"gate after adaptive NUTS in local lanes {failed.tolist()}"
+                )
+        samples_chunk = _SamplerSamples(samples_chunk, sampler_used=sampler_used)
         _annotate_sampler_diagnostics(
             diagnostics_path,
             sampling_workload_fingerprint=sampling_workload_fingerprint,
             sampler_backend=sampler_backend,
         )
+        if diagnostics_path is not None and os.path.isfile(diagnostics_path):
+            with open(diagnostics_path, "r", encoding="utf-8") as stream:
+                diagnostic_payload = json.load(stream)
+            diagnostic_payload["sampler_used"] = sampler_used
+            diagnostic_payload["sampler_gate_attempts"] = gate_attempts
+            temporary = f"{diagnostics_path}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+            with open(temporary, "w", encoding="utf-8") as stream:
+                json.dump(diagnostic_payload, stream, indent=2, sort_keys=True)
+            os.replace(temporary, diagnostics_path)
         samples_chunk = jax.device_get(samples_chunk)
         samples_chunks.append(samples_chunk)
 
@@ -2584,7 +2694,10 @@ def get_samples_chunked(
                 f"{chunk_file}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
             )
             with open(temporary_chunk, 'wb') as f:
-                pickle.dump(samples_chunk, f)
+                pickle.dump(
+                    {"samples": dict(samples_chunk),
+                     "sampler_used": samples_chunk.sampler_used}, f
+                )
             os.replace(temporary_chunk, chunk_file)
             print(f"  chunk {start}:{end} - SAVED checkpoint")
 
@@ -3003,8 +3116,8 @@ def _resolve_stage_mcmc_kwargs(flags, stage_name, default_warmup=1000, default_s
 
 
 def _resolve_whitelight_laplace_options(flags):
-    """Resolve opt-in white-light preconditioning without changing defaults."""
-    mass_matrix = str(flags.get("whitelight_mass_matrix", "adaptive")).lower()
+    """Resolve production white-light Laplace preconditioning controls."""
+    mass_matrix = str(flags.get("whitelight_mass_matrix", "laplace")).lower()
     if mass_matrix not in {"adaptive", "laplace"}:
         raise ValueError(
             "flags.whitelight_mass_matrix must be 'adaptive' or 'laplace'."
@@ -3066,7 +3179,7 @@ def _resolve_harmonica_stage_nuts_kwargs(
         "max_tree_depth": max_tree_depth,
         "target_accept_prob": target_accept,
     }
-    independent = str(flags.get('spectro_sampler', 'joint_nuts')).lower() in {
+    independent = str(flags.get('spectro_sampler', 'independent_nuts')).lower() in {
         'independent_nuts', 'independent_hmc'
     }
     if independent:
@@ -3075,7 +3188,7 @@ def _resolve_harmonica_stage_nuts_kwargs(
             stage_prefix,
             result,
             independent=True,
-            hmc=str(flags.get('spectro_sampler')).lower() == 'independent_hmc',
+            hmc=str(flags.get('spectro_sampler', 'independent_nuts')).lower() == 'independent_hmc',
         )
     return result
 
@@ -3334,6 +3447,7 @@ def _run_sampling_stage(
     gradient_diagnostic_mode="off",
     gradient_diagnostic_strict=False,
     spectro_min_depth_ess=0.0,
+    spectro_max_divergences=0,
     compile_box=False,
     dump_metadata=None,
     **model_kwargs,
@@ -3479,6 +3593,7 @@ def _run_sampling_stage(
                 gradient_diagnostic_mode=gradient_diagnostic_mode,
                 gradient_diagnostic_strict=gradient_diagnostic_strict,
                 spectro_min_depth_ess=spectro_min_depth_ess,
+                spectro_max_divergences=spectro_max_divergences,
                 **model_kwargs,
             )
         return get_samples_chunked(
@@ -3504,6 +3619,7 @@ def _run_sampling_stage(
             gradient_diagnostic_mode=gradient_diagnostic_mode,
             gradient_diagnostic_strict=gradient_diagnostic_strict,
             spectro_min_depth_ess=spectro_min_depth_ess,
+            spectro_max_divergences=spectro_max_divergences,
             **model_kwargs,
         )
     if str(gradient_diagnostic_mode).lower() != "off":
@@ -4192,6 +4308,11 @@ def save_results(wavelengths,wavelength_err,  samples, csv_filename):
         header_cols.append(f"depth_err{i:02d}")
         header_cols.append(f"depth_ppm{i:02d}")
         header_cols.append(f"depth_err_ppm{i:02d}")
+    sampler_used = getattr(samples, "sampler_used", None)
+    if sampler_used is not None:
+        if len(sampler_used) != len(wavelengths):
+            raise ValueError("sampler_used provenance does not match wavelength axis")
+        header_cols.append("sampler_used")
     header = ",".join(header_cols)
     output_cols = [wavelengths, wavelength_err]
     for i in range(n_planets):
@@ -4199,8 +4320,13 @@ def save_results(wavelengths,wavelength_err,  samples, csv_filename):
         output_cols.append(depth_err[:, i])
         output_cols.append(depth_ppm[:, i])
         output_cols.append(depth_err_ppm[:, i])
-    output_data = np.column_stack(output_cols)
-    np.savetxt(csv_filename, output_data, delimiter=",", header=header, comments="")
+    if sampler_used is None:
+        output_data = np.column_stack(output_cols)
+        np.savetxt(csv_filename, output_data, delimiter=",", header=header, comments="")
+    else:
+        frame = pd.DataFrame(np.column_stack(output_cols), columns=header_cols[:-1])
+        frame["sampler_used"] = sampler_used
+        _atomic_dataframe_csv(frame, csv_filename, index=False)
     print(f"Transmission spectroscopy data saved to {csv_filename}")
 
 def _coerce_wavelength_axis(wavelengths, wavelength_err=None):
@@ -5187,6 +5313,29 @@ def main():
     planet_cfg = cfg['planet']
     stellar_cfg = cfg['stellar']
     flags = cfg.get('flags', {})
+    # Production defaults validated by the 2026-09 acceleration campaign.
+    # setdefault preserves every explicit legacy/user selection.
+    is_prism = instrument == 'NIRSPEC/PRISM'
+    is_explinear = 'explinear' in str(flags.get('detrending_type', 'linear'))
+    flags.setdefault('spectro_sampler', 'independent_nuts')
+    flags.setdefault('spectro_mass_matrix', 'laplace')
+    flags.setdefault('spectro_laplace_warmup', 150)
+    flags.setdefault('spectro_laplace_target_accept', 0.99 if (is_prism or is_explinear) else 0.95)
+    flags.setdefault('spectro_laplace_max_tree_depth', 6 if is_prism else 5)
+    flags.setdefault('spectro_laplace_trust_radius', 5.0)
+    flags.setdefault('spectro_laplace_hessian_method', 'finite_difference')
+    flags.setdefault('spectro_laplace_start_at_map', True)
+    flags.setdefault('spectro_hmc_num_steps', 8)
+    flags.setdefault('spectro_hmc_trajectory_jitter', 0.25)
+    flags.setdefault('spectro_min_depth_ess', 400)
+    flags.setdefault('spectro_max_divergences', 0)
+    flags.setdefault('whitelight_mass_matrix', 'laplace')
+    flags.setdefault('whitelight_laplace_target_accept', 0.99 if is_prism else 0.9)
+    flags.setdefault('whitelight_min_ess', 400)
+    flags.setdefault('whitelight_max_divergences', 0)
+    flags.setdefault('whitelight_max_extra_blocks', 3)
+    flags.setdefault('whitelight_geometry_estimator', 'posterior_median')
+    flags.setdefault('spectro_fixed_timescale_trends', True)
     if bool(flags.get('compile_box', False)):
         compilation_cache_dir = str(
             flags.get(
@@ -5262,9 +5411,10 @@ def main():
         )
     transit_engine = flags.get('transit_engine', 'jaxoplanet')
     spectro_fixed_timescale_trends = bool(
-        flags.get('spectro_fixed_timescale_trends', False)
+        flags.get('spectro_fixed_timescale_trends', True)
     )
-    if spectro_fixed_timescale_trends and transit_engine != 'jaxoplanet':
+    if (spectro_fixed_timescale_trends and 'explinear' in detrending_type
+            and transit_engine != 'jaxoplanet'):
         raise ValueError(
             "flags.spectro_fixed_timescale_trends currently supports only "
             "flags.transit_engine='jaxoplanet'."
@@ -5274,7 +5424,7 @@ def main():
         transit_engine=transit_engine,
         detrending_type=detrending_type,
     )
-    spectro_sampler = str(flags.get('spectro_sampler', 'joint_nuts')).lower()
+    spectro_sampler = str(flags.get('spectro_sampler', 'independent_nuts')).lower()
     spectro_jitter_prior = str(flags.get('spectro_jitter_prior', 'lognormal')).lower()
     if spectro_jitter_prior not in {'log_uniform', 'lognormal'}:
         raise ValueError(
@@ -5287,6 +5437,20 @@ def main():
         raise ValueError(
             "flags.spectro_jitter_prior_scale and flags.spectro_jitter_prior_center must be > 0."
         )
+    spectro_ld_parameterization = str(
+        flags.get('spectro_ld_parameterization', 'coefficients')
+    ).lower()
+    whitelight_ld_parameterization = str(
+        flags.get('whitelight_ld_parameterization', 'coefficients')
+    ).lower()
+    for name, value in (
+        ('spectro_ld_parameterization', spectro_ld_parameterization),
+        ('whitelight_ld_parameterization', whitelight_ld_parameterization),
+    ):
+        if value not in {'coefficients', 'decorrelated'}:
+            raise ValueError(
+                f"flags.{name} must be 'coefficients' or 'decorrelated'."
+            )
     if spectro_sampler not in {
         'joint_nuts', 'independent_nuts', 'independent_hmc', 'laplace_is'
     }:
@@ -5297,7 +5461,7 @@ def main():
             f"Received '{spectro_sampler}'."
         )
     spectro_mass_matrix = str(
-        flags.get('spectro_mass_matrix', 'adaptive')
+        flags.get('spectro_mass_matrix', 'laplace')
     ).lower()
     if spectro_mass_matrix not in {'adaptive', 'laplace'}:
         raise ValueError(
@@ -5562,6 +5726,7 @@ def main():
             'ld_profile': ld_profile,
             'param_method': param_method,
             'jaxoplanet_kernel': jaxoplanet_kernel,
+            'ld_parameterization': whitelight_ld_parameterization,
         }
         _engine_spectro_kw = {
             'jitter_prior': spectro_jitter_prior,
@@ -5571,6 +5736,7 @@ def main():
             'param_method': param_method,
             'transit_window': transit_window_optimization,
             'jaxoplanet_kernel': jaxoplanet_kernel,
+            'ld_parameterization': spectro_ld_parameterization,
         }
         if trend_inference == 'gaussian_marginalized' and 'gp' in detrending_type:
             raise ValueError(
@@ -8122,6 +8288,7 @@ def main():
                 else HARMONICA_CHANNEL_VARYING_MODEL_KWARGS
             ),
             spectro_min_depth_ess=float(flags.get('spectro_min_depth_ess', 400)),
+            spectro_max_divergences=int(flags.get('spectro_max_divergences', 0)),
             compile_box=bool(flags.get('compile_box', False)),
             dump_metadata={
                 'config_path': os.path.abspath(args.config),
@@ -8817,6 +8984,7 @@ def main():
             else HARMONICA_CHANNEL_VARYING_MODEL_KWARGS
         ),
         spectro_min_depth_ess=float(flags.get('spectro_min_depth_ess', 400)),
+        spectro_max_divergences=int(flags.get('spectro_max_divergences', 0)),
         compile_box=bool(flags.get('compile_box', False)),
         dump_metadata={
             'config_path': os.path.abspath(args.config),
