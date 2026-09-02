@@ -5447,9 +5447,13 @@ def main():
         ('spectro_ld_parameterization', spectro_ld_parameterization),
         ('whitelight_ld_parameterization', whitelight_ld_parameterization),
     ):
-        if value not in {'coefficients', 'decorrelated'}:
+        if value not in {
+            'coefficients', 'decorrelated', 'decorrelated_linear',
+            'latent_gaussian',
+        }:
             raise ValueError(
-                f"flags.{name} must be 'coefficients' or 'decorrelated'."
+                f"flags.{name} must be coefficients, decorrelated, "
+                "decorrelated_linear, or latent_gaussian."
             )
     if spectro_sampler not in {
         'joint_nuts', 'independent_nuts', 'independent_hmc', 'laplace_is'

@@ -35,9 +35,12 @@ Exponential-linear spectroscopic trends now fix their timescale to the
 white-light posterior median by default; set
 `spectro_fixed_timescale_trends: false` for the historical free-timescale
 model. `spectro_ld_parameterization` and `whitelight_ld_parameterization`
-accept `coefficients` (current default) or `decorrelated`; the latter uses the
-exact induced physical-coefficient prior in the Maxted power-2 or Kipping
-quadratic coordinates.
+default to `coefficients`. The opt-in `latent_gaussian` setting samples an
+independent standard normal for each bounded free/wide LD coefficient and
+maps it through that coefficient prior's inverse CDF, exactly preserving the
+physical prior. The older `decorrelated` and `decorrelated_linear` experiments
+remain opt-in. None is selected automatically: the real wide-Gaussian SOSS
+benchmark failed the zero-divergence and per-lane LD-ESS gates.
 
 ## Recommended first configuration
 

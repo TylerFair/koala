@@ -300,7 +300,52 @@ def _prepare_unconstrained_initial_values(
                 "posterior if replicated across lanes."
             )
 
-        if name in init_params:
+        if (
+            name == "ld_decorrelated"
+            and name not in init_params
+            and "c1" in init_params
+            and "c2" in init_params
+        ):
+            # Stage dumps and the production pipeline deliberately retain the
+            # public physical LD sites.  A transformed model therefore needs
+            # its initial value derived from those sites instead of inheriting
+            # the random value used to trace the model scaffold.  The latter
+            # can lie outside the Maxted image (h2 <= 0), where the inverse and
+            # induced density are undefined.
+            from .ld_parameterization import (
+                Power2MaxtedTransform,
+                Power2LinearTransform,
+                QuadraticKippingTransform,
+            )
+
+            physical = jnp.stack(
+                (init_params["c1"], init_params["c2"]), axis=-1
+            )
+            distribution_transforms = getattr(site["fn"], "transforms", ())
+            parameterization = next(
+                (
+                    transform
+                    for transform in distribution_transforms
+                    if isinstance(
+                        transform,
+                        (
+                            Power2MaxtedTransform,
+                            Power2LinearTransform,
+                            QuadraticKippingTransform,
+                        ),
+                    )
+                ),
+                None,
+            )
+            if parameterization is None:
+                raise ValueError(
+                    "Could not identify the limb-darkening transform for "
+                    "the ld_decorrelated site."
+                )
+            constrained = _pad_first_axis(
+                parameterization(physical), lane_width
+            )[:, None, ...]
+        elif name in init_params:
             value = init_params[name]
             if not (
                 hasattr(value, "ndim")
