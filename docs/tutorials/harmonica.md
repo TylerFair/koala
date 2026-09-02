@@ -1,6 +1,6 @@
 # Harmonica limb asymmetry
 
-The WASP-94 b SOSS order-1 configuration supplies the required geometry and uses a first-order transmission string:
+This tutorial fits the WASP-94 b NIRISS/SOSS order-1 extraction with a first-order Harmonica transmission string. You will infer the odd boundary coefficient with fixed quadratic limb darkening and Laplace-metric independent NUTS. At the end, you will have the total transmission spectrum, correlated evening/morning limb spectra, and posterior transmission-string shapes.
 
 ```bash
 cp configs_harmonica/WASP-94_soss_order1_config.yaml wasp94_harmonica.yaml
@@ -21,15 +21,11 @@ flags:
   ld_prior: fixed
 ```
 
-`delta_r` samples the radius contrast represented by the odd transmission-string coefficient. Order 1 fits `a0` and `a1`; orders 3 and 5 can add `a3` and `a5`.
-
-After the fit, inspect `*_limb_spectra.csv`, `*_limb_spectra.png`, `*_transmission_strings.png`, and `*_transmission_string_posterior.png`. The CSV reports area-equivalent evening/leading and morning/trailing depths, endpoint depths, `a0`, active odd coefficients, and their percentile errors. The accompanying `*_limb_posterior_samples.npz` preserves their draw-by-draw covariance.
+`delta_r` samples the radius contrast represented by the odd transmission-string coefficient. Order 1 fits `a0` and `a1`; orders 3 and 5 can add `a3` and `a5`. After the fit, inspect `*_limb_spectra.csv`, `*_limb_spectra.png`, `*_transmission_strings.png`, and `*_transmission_string_posterior.png`. The CSV reports area-equivalent evening/leading and morning/trailing depths, endpoint depths, `a0`, active odd coefficients, and their percentile errors. The accompanying `*_limb_posterior_samples.npz` preserves their draw-by-draw covariance.
 
 ## Dataset and complete configuration
 
-This example fits WASP-94 b with NIRISS/SOSS order 1.
-
-The checked configuration uses $R=20$ for its bridge and $R=50$ for its final asymmetric spectrum.
+This example fits WASP-94 b with NIRISS/SOSS order 1. The checked configuration uses $R=20$ for its bridge and $R=50$ for its final asymmetric spectrum.
 
 ```yaml
 planet:
@@ -82,37 +78,21 @@ outlier_clip:
 host_device: gpu
 ```
 
-The explicit `ld_prior: fixed` line states the same choice as the older `fix_ld: true` switch.
-
-The geometry includes `a_rs`, `ecc`, and `omega` because this engine uses the scaled-semimajor-axis parameterization.
+The explicit `ld_prior: fixed` line states the same choice as the older `fix_ld: true` switch. The geometry includes `a_rs`, `ecc`, and `omega` because this engine uses the scaled-semimajor-axis parameterization.
 
 ## Transmission strings
 
-A circular planet has one radius ratio.
-
-Harmonica replaces that circle by a polar boundary $r(\theta)$ in stellar-radius units.
-
-For the supported odd-cosine expansion,
+A circular planet has one radius ratio. Harmonica replaces that circle by a polar boundary $r(\theta)$ in stellar-radius units. For the supported odd-cosine expansion,
 
 $$
 r(\theta)=a_0+a_1\cos\theta+a_3\cos3\theta+a_5\cos5\theta.
 $$
 
-`harmonica_max_order: 1` retains only $a_0$ and $a_1$.
+`harmonica_max_order: 1` retains only $a_0$ and $a_1$. $a_0$ is the mean transmission-string radius. $a_1$ shifts area between the two limbs and changes ingress relative to egress.
 
-$a_0$ is the mean transmission-string radius.
+The `delta_r` parameterization samples the endpoint radius difference. For order 1, the endpoints are $a_0+a_1$ and $a_0-a_1$, so `endpoint_delta_r` is $2a_1$. For higher supported orders it is $2(a_1+a_3+a_5)$.
 
-$a_1$ shifts area between the two limbs and changes ingress relative to egress.
-
-The `delta_r` parameterization samples the endpoint radius difference.
-
-For order 1, the endpoints are $a_0+a_1$ and $a_0-a_1$, so `endpoint_delta_r` is $2a_1$.
-
-For higher supported orders it is $2(a_1+a_3+a_5)$.
-
-Odd modes are used because they encode leading/trailing asymmetry.
-
-The configured `harmonica_spectro_odd_frac_sigma` controls the odd-mode prior scale relative to the radius.
+Odd modes are used because they encode leading/trailing asymmetry. The configured `harmonica_spectro_odd_frac_sigma` controls the odd-mode prior scale relative to the radius.
 
 ## Run
 
@@ -141,9 +121,7 @@ Saved transmission string plot to ..._transmission_strings.png
 Analysis complete!
 ```
 
-The engine name, LD law, maximum order, and geometry parameterization should match the YAML.
-
-The limb CSV and NPZ messages confirm that asymmetric products were written.
+The engine name, LD law, maximum order, and geometry parameterization should match the YAML. The limb CSV and NPZ messages confirm that asymmetric products were written.
 
 ## White-light fit
 
@@ -153,9 +131,7 @@ The limb CSV and NPZ messages confirm that asymmetric products were written.
 :align: center
 ```
 
-Ingress and egress carry the asymmetry information.
-
-Inspect them separately rather than judging only the flat transit bottom.
+Ingress and egress carry the asymmetry information. Inspect them separately rather than judging only the flat transit bottom.
 
 ## Total transmission spectrum
 
@@ -165,9 +141,7 @@ Inspect them separately rather than judging only the flat transit bottom.
 :align: center
 ```
 
-The ordinary spectrum retains the fitted model-radius summary.
-
-Use the limb products for the representative morning/evening depths.
+The ordinary spectrum retains the fitted model-radius summary. Use the limb products for the representative morning/evening depths.
 
 ## Limb spectra
 
@@ -177,15 +151,9 @@ Use the limb products for the representative morning/evening depths.
 :align: center
 ```
 
-Harmonica measures $\theta=0$ along the orbital-velocity direction.
+Harmonica measures $\theta=0$ along the orbital-velocity direction. The output convention maps $\theta=0$ to the evening/leading hemisphere and $\theta=\pi$ to morning/trailing. The representative depths are half-area equivalents, not the limb-darkened decrement at one exposure.
 
-The output convention maps $\theta=0$ to the evening/leading hemisphere and $\theta=\pi$ to morning/trailing.
-
-The representative depths are half-area equivalents, not the limb-darkened decrement at one exposure.
-
-Define $Q=a_1^2+a_3^2+a_5^2$ and $C=a_1-a_3/3+a_5/5$.
-
-Then
+Define $Q=a_1^2+a_3^2+a_5^2$ and $C=a_1-a_3/3+a_5/5$. Then
 
 $$
 D_\mathrm{evening}=a_0^2+Q/2+4a_0C/\pi,
@@ -195,9 +163,7 @@ $$
 D_\mathrm{morning}=a_0^2+Q/2-4a_0C/\pi,
 $$
 
-and $D_\mathrm{total}=(D_\mathrm{evening}+D_\mathrm{morning})/2$.
-
-Endpoint depths are reported separately and must not be substituted for these area quantities.
+and $D_\mathrm{total}=(D_\mathrm{evening}+D_\mathrm{morning})/2$. Endpoint depths are reported separately and must not be substituted for these area quantities.
 
 ## Read all three spectra
 
@@ -248,16 +214,12 @@ Use the NPZ arrays for differences or joint retrievals because the two limb dept
 
 ## Common problems
 
-**No limb products:** confirm `transit_engine: harmonica` and that odd samples are present.
+**No limb products:** confirm `transit_engine: harmonica` and that odd samples are present. **Nonphysical shapes:** use the configured odd prior and inspect transmission-string plots; higher odd orders add flexibility and require stronger data. **Ingress/egress residuals:** check ephemeris, cadence masks, and limb darkening before attributing them to planetary asymmetry.
 
-**Nonphysical shapes:** use the configured odd prior and inspect transmission-string plots; higher odd orders add flexibility and require stronger data.
-
-**Ingress/egress residuals:** check ephemeris, cadence masks, and limb darkening before attributing them to planetary asymmetry.
-
-**NaN channels:** remove invalid wavelength bins before sampling.
-
-**Interrupted run:** repeat the unchanged command; compatible chunk checkpoints load automatically.
-
-**Gate failure:** inspect the affected channel, reduce `vmap_chunk`, and allow the exact alternate sampler retry. Do not interpret a failed chain.
+**NaN channels:** remove invalid wavelength bins before sampling. **Interrupted run:** repeat the unchanged command; compatible chunk checkpoints load automatically. **Gate failure:** inspect the affected channel, reduce `vmap_chunk`, and allow the exact alternate sampler retry. Do not interpret a failed chain.
 
 **Apparent mirror spectra:** this is expected when a tightly constrained total area combines with a weakly constrained asymmetry; propagate the joint posterior.
+
+## Next steps
+
+Read [How the fit works](../concepts.md) for the shared geometry and quality gate, then use [Limb darkening](../guides/limb_darkening.md) before changing the fixed quadratic coefficients. The [Samplers](../guides/samplers.md) guide covers alternate exact sampling, and [Outputs](../guides/outputs.md) defines every limb-spectrum CSV and NPZ field.

@@ -1,6 +1,6 @@
 # NIRISS/SOSS order 1
 
-Start from the checked-in WASP-39 configuration:
+This tutorial fits the WASP-39 b NIRISS/SOSS order-1 box-spectrum extraction. You will run the white-light, R=20, and reference-grid stages with stellar-informed power-2 limb darkening. At the end, you will have diagnostic light-curve plots, resumable channel posteriors, and a transmission-spectrum CSV.
 
 ```bash
 cp configs_fiducial_stellarinformed/WASP-39_soss_order1_config.yaml wasp39.yaml
@@ -25,11 +25,7 @@ Use `order: 2` with the corresponding order-2 configuration and extraction. Orde
 
 ## Dataset and complete configuration
 
-This example is the WASP-39 b NIRISS/SOSS order-1 visit.
-
-The extracted file is `WASP-39_box_spectra_fullres.fits`.
-
-The bridge spectrum is binned to $R=20$ and the final spectrum follows `prism_template.csv`.
+This example is the WASP-39 b NIRISS/SOSS order-1 visit. The extracted file is `WASP-39_box_spectra_fullres.fits`. The bridge spectrum is binned to $R=20$ and the final spectrum follows `prism_template.csv`.
 
 ```yaml
 planet:
@@ -80,9 +76,7 @@ outlier_clip:
 host_device: gpu
 ```
 
-Change `path`, `input_dir`, and `output_dir` for your filesystem.
-
-The ephemeris and FITS times must use the same time convention.
+Change `path`, `input_dir`, and `output_dir` for your filesystem. The ephemeris and FITS times must use the same time convention.
 
 ## Run
 
@@ -92,9 +86,7 @@ export JAX_PLATFORMS=gpu
 python fit_jwst.py -c wasp39.yaml
 ```
 
-The fit masks the initial settling interval, builds the white-light curve, constructs the stellar LD prior, and samples white light.
-
-It then runs the R=20 bridge and the reference-grid channels.
+The fit masks the initial settling interval, builds the white-light curve, constructs the stellar LD prior, and samples white light. It then runs the R=20 bridge and the reference-grid channels.
 
 ## Log walkthrough
 
@@ -113,15 +105,9 @@ Transmission spectroscopy data saved to ..._Rreference.csv
 Analysis complete!
 ```
 
-The 125 combinations propagate the configured stellar uncertainties.
+The 125 combinations propagate the configured stellar uncertainties. `COMPUTING` marks a new chunk. `LOADING from checkpoint` marks a fingerprint-compatible resume.
 
-`COMPUTING` marks a new chunk.
-
-`LOADING from checkpoint` marks a fingerprint-compatible resume.
-
-`reusing compiled ... runner` means an equal-width executable was reused.
-
-Read the ESS and divergence lines before accepting a channel.
+`reusing compiled ... runner` means an equal-width executable was reused. Read the ESS and divergence lines before accepting a channel.
 
 ## White-light fit
 
@@ -131,11 +117,7 @@ Read the ESS and divergence lines before accepting a channel.
 :align: center
 ```
 
-Inspect ingress, egress, and the out-of-transit baseline.
-
-The separate residual and detrended plots make low-frequency structure easier to see.
-
-Resolve a poor white-light baseline before interpreting spectral features.
+Inspect ingress, egress, and the out-of-transit baseline. The separate residual and detrended plots make low-frequency structure easier to see. Resolve a poor white-light baseline before interpreting spectral features.
 
 ## Transmission spectrum
 
@@ -198,14 +180,12 @@ plt.show()
 
 ## Common problems
 
-**NaN channels:** inspect the extraction and wavelength masks; never replace missing flux with zero.
+**NaN channels:** inspect the extraction and wavelength masks; never replace missing flux with zero. **Order contamination:** fit order 2 separately with `order: 2` and its matching extraction. **Missing bridge products:** retain `need_lowres: true` when the R=20 stage is required.
 
-**Order contamination:** fit order 2 separately with `order: 2` and its matching extraction.
-
-**Missing bridge products:** retain `need_lowres: true` when the R=20 stage is required.
-
-**Interrupted job:** rerun the identical command; matching chunks load automatically.
-
-**Repeated gate failure:** inspect the named wavelength light curve, uncertainties, trend, and masks. Reduce `vmap_chunk` to isolate it.
+**Interrupted job:** rerun the identical command; matching chunks load automatically. **Repeated gate failure:** inspect the named wavelength light curve, uncertainties, trend, and masks. Reduce `vmap_chunk` to isolate it.
 
 **Out of memory:** lower `vmap_chunk`; the spectral grid and posterior model do not change.
+
+## Next steps
+
+Read [Limb darkening](../guides/limb_darkening.md) before changing the stellar-informed prior, [Systematics trends](../guides/trends.md) before adding baseline complexity, and [Samplers](../guides/samplers.md) when a channel triggers the quality gate. The [Outputs](../guides/outputs.md) guide describes every spectrum and detailed-fit column.

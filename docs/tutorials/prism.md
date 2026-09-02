@@ -1,6 +1,6 @@
 # NIRSpec/PRISM
 
-The repository PRISM example uses native high-resolution channels and an R=20 low-resolution stage:
+This tutorial fits the HAT-P-65 b visit-1 NIRSpec/PRISM NRS1 extraction. You will model the broadband ramp, run an R=20 bridge, and retain the native high-resolution channels. At the end, you will have white-light ramp diagnostics, resumable native-channel posteriors, and both low- and high-resolution spectra.
 
 ```bash
 cp configs_fiducial_stellarinformed/HAT-P-65_nrs1_prism_v1_config.yaml prism.yaml
@@ -21,9 +21,7 @@ PRISM spans a large dynamic range. Remove saturated wavelengths in the extractio
 
 ## Dataset and complete configuration
 
-This example fits HAT-P-65 b, visit 1, with NIRSpec/PRISM NRS1.
-
-The final grid is native and the bridge grid is $R=20$.
+This example fits HAT-P-65 b, visit 1, with NIRSpec/PRISM NRS1. The final grid is native and the bridge grid is $R=20$.
 
 ```yaml
 planet:
@@ -73,9 +71,7 @@ outlier_clip:
 host_device: gpu
 ```
 
-The white-light stage fits the exponential amplitude and decay time.
-
-The channel stage fixes the decay time to the white-light posterior median and fits the amplitude.
+The white-light stage fits the exponential amplitude and decay time. The channel stage fixes the decay time to the white-light posterior median and fits the amplitude.
 
 ## Run
 
@@ -105,11 +101,7 @@ Checkpoint directory: .../chunks
   chunk 0:100 - COMPUTING (100 channels)
 ```
 
-`Loading cached power2 grid` means the fingerprinted stellar grid already exists.
-
-The 369-channel message makes native PRISM memory requirements explicit.
-
-Use a smaller `vmap_chunk` than the historical width shown in this excerpt when device memory is limited.
+`Loading cached power2 grid` means the fingerprinted stellar grid already exists. The 369-channel message makes native PRISM memory requirements explicit. Use a smaller `vmap_chunk` than the historical width shown in this excerpt when device memory is limited.
 
 ## White-light fit
 
@@ -119,9 +111,7 @@ Use a smaller `vmap_chunk` than the historical width shown in this excerpt when 
 :align: center
 ```
 
-The early-time curvature is the feature modeled by the exponential ramp.
-
-Inspect the out-of-transit baseline and the residuals before accepting the decay time for channel fits.
+The early-time curvature is the feature modeled by the exponential ramp. Inspect the out-of-transit baseline and the residuals before accepting the decay time for channel fits.
 
 ## Transmission spectrum
 
@@ -131,21 +121,13 @@ Inspect the out-of-transit baseline and the residuals before accepting the decay
 :align: center
 ```
 
-Native PRISM channels vary strongly in photon count and saturation risk across wavelength.
-
-The spectrum should be inspected together with its uncertainty and depth-error outlier columns.
+Native PRISM channels vary strongly in photon count and saturation risk across wavelength. The spectrum should be inspected together with its uncertainty and depth-error outlier columns.
 
 ## Resolution choices
 
-`high: native` preserves the extraction grid.
+`high: native` preserves the extraction grid. `high: 20`, `100`, or `300` constructs constant-$R$ bins. `high: reference` uses `reference_grid`.
 
-`high: 20`, `100`, or `300` constructs constant-$R$ bins.
-
-`high: reference` uses `reference_grid`.
-
-The R=20 bridge is independent of the high-resolution choice.
-
-Use coarser bins when native channels are dominated by low ESS or weakly constrained systematics.
+The R=20 bridge is independent of the high-resolution choice. Use coarser bins when native channels are dominated by low ESS or weakly constrained systematics.
 
 ## Output checklist
 
@@ -191,14 +173,12 @@ plt.show()
 
 ## Common problems
 
-**Saturation:** exclude saturated integrations or wavelength bins during extraction/preparation. A finite placeholder is not a substitute for a valid measurement.
+**Saturation:** exclude saturated integrations or wavelength bins during extraction/preparation. A finite placeholder is not a substitute for a valid measurement. **Too many native channels:** choose R=100 or R=300, or reduce `vmap_chunk` to lower GPU memory.
 
-**Too many native channels:** choose R=100 or R=300, or reduce `vmap_chunk` to lower GPU memory.
-
-**Ramp-depth degeneracy:** verify that pre-transit baseline constrains `tau`; inspect white-light residuals and compare a simpler trend when appropriate.
-
-**No R=20 files:** set `need_lowres: true` and use `analysis_stage: all` or `prep`.
-
-**Resume rejected:** a changed data array or model option changes the fingerprint. Keep the old checkpoints and let the new configuration create its own family.
+**Ramp-depth degeneracy:** verify that pre-transit baseline constrains `tau`; inspect white-light residuals and compare a simpler trend when appropriate. **No R=20 files:** set `need_lowres: true` and use `analysis_stage: all` or `prep`. **Resume rejected:** a changed data array or model option changes the fingerprint. Keep the old checkpoints and let the new configuration create its own family.
 
 **Gate repeatedly fails:** inspect saturation and uncertainties first, then the ramp model. Isolate the channel with a smaller width.
+
+## Next steps
+
+Read [Systematics trends](../guides/trends.md) for the explinear equation and its fixed channel timescale, then consult [GPUs and clusters](../guides/gpu_and_clusters.md) before scheduling a large native-grid run. Use [Samplers](../guides/samplers.md) for repeated gate failures and [Outputs](../guides/outputs.md) for the native-spectrum and noise-binning columns.

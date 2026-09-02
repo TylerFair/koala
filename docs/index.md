@@ -63,11 +63,7 @@ citing
 
 ## Choose a starting point
 
-New users should run the [quickstart](quickstart.md), then read [How the fit works](concepts.md).
-
-SOSS users can begin with the [order-1 tutorial](tutorials/soss_order1.md).
-
-NIRSpec users can begin with [G395H](tutorials/nirspec_g395h.md) or [PRISM](tutorials/prism.md).
+New users should run the [quickstart](quickstart.md), then read [How the fit works](concepts.md). SOSS users can begin with the [order-1 tutorial](tutorials/soss_order1.md). NIRSpec users can begin with [G395H](tutorials/nirspec_g395h.md) or [PRISM](tutorials/prism.md).
 
 Asymmetric ingress/egress analyses should begin with the [Harmonica tutorial](tutorials/harmonica.md).
 
@@ -95,64 +91,30 @@ Asymmetric ingress/egress analyses should begin with the [Harmonica tutorial](tu
 
 ## Supported observing modes
 
-NIRISS/SOSS is selected with `instrument: NIRISS/SOSS` and an `order`.
+NIRISS/SOSS is selected with `instrument: NIRISS/SOSS` and an `order`. NIRSpec modes are selected with their full instrument string and `nrs` detector number. G395H and G395M cover the long-wavelength NIRSpec detectors.
 
-NIRSpec modes are selected with their full instrument string and `nrs` detector number.
-
-G395H and G395M cover the long-wavelength NIRSpec detectors.
-
-G140H and G235H use the same detector-aware configuration structure.
-
-PRISM supports native or constant-resolving-power channel grids.
-
-NRS1 and NRS2 are fitted separately.
+G140H and G235H use the same detector-aware configuration structure. PRISM supports native or constant-resolving-power channel grids. NRS1 and NRS2 are fitted separately.
 
 SOSS orders 1 and 2 are fitted separately.
 
 ## Principal products
 
-Every run writes white-light diagnostic plots and a time-series table.
+Every run writes white-light diagnostic plots and a time-series table. Spectroscopic stages write one transmission-spectrum CSV per resolution. Detailed tables include radius ratio, depth, limb darkening, jitter, and active trend parameters.
 
-Spectroscopic stages write one transmission-spectrum CSV per resolution.
-
-Detailed tables include radius ratio, depth, limb darkening, jitter, and active trend parameters.
-
-Chunk checkpoints make long GPU runs resumable.
-
-JSON diagnostics record numerical quality.
-
-Harmonica adds limb spectra, transmission-string figures, and joint limb posterior arrays.
+Chunk checkpoints make long GPU runs resumable. JSON diagnostics record numerical quality. Harmonica adds limb spectra, transmission-string figures, and joint limb posterior arrays.
 
 ## Configuration philosophy
 
-The YAML is the analysis record.
+The YAML is the analysis record. Keep target values, stellar values, extraction paths, model choices, and sampler controls together. Use a new output directory for a scientifically distinct configuration.
 
-Keep target values, stellar values, extraction paths, model choices, and sampler controls together.
-
-Use a new output directory for a scientifically distinct configuration.
-
-Set a random seed explicitly for a published analysis.
-
-Archive the geometry handoff and diagnostics beside the final spectrum.
+Set a random seed explicitly for a published analysis. Archive the geometry handoff and diagnostics beside the final spectrum.
 
 ## Glossary
 
-**White light:** the wavelength-summed transit time series.
+**White light:** the wavelength-summed transit time series. **Channel:** one wavelength-bin light curve. **Chunk:** a group of channels evaluated by one compiled sampler call.
 
-**Channel:** one wavelength-bin light curve.
+**Lane:** one independent channel position inside a vectorized chunk. **Bridge stage:** the optional low-resolution spectroscopic fit. **Geometry handoff:** fixed orbital quantities selected from white light.
 
-**Chunk:** a group of channels evaluated by one compiled sampler call.
-
-**Lane:** one independent channel position inside a vectorized chunk.
-
-**Bridge stage:** the optional low-resolution spectroscopic fit.
-
-**Geometry handoff:** fixed orbital quantities selected from white light.
-
-**Laplace metric:** local inverse-Hessian scaling used by NUTS or HMC.
-
-**Gate:** the ESS and divergence criteria required before accepting a posterior.
-
-**Reference grid:** an externally supplied wavelength grid used for binning.
+**Laplace metric:** local inverse-Hessian scaling used by NUTS or HMC. **Gate:** the ESS and divergence criteria required before accepting a posterior. **Reference grid:** an externally supplied wavelength grid used for binning.
 
 **Transmission string:** Harmonica's angle-dependent planet radius boundary.

@@ -13,9 +13,7 @@ White-light fits use NumPyro NUTS. Set `whitelight_mass_matrix: laplace` for Hes
 
 Independent NUTS adapts a low-dimensional chain per wavelength channel. With `spectro_mass_matrix: laplace`, each chain uses a local Laplace metric. The production policy switches a channel failing the depth-ESS/divergence gate to Laplace-metric fixed-step HMC-8, and switches back when the alternative fails. Select HMC directly with `spectro_sampler: independent_hmc` and `spectro_hmc_num_steps: 8`. `joint_nuts` is the legacy adaptive joint-channel fallback.
 
-`laplace_is` is opt-in approximate inference centered on a MAP/Laplace proposal. It reports importance diagnostics and can fall back for poor channels; use it only when its approximation and quality thresholds are acceptable for the analysis.
-
-The gate requires zero divergences and a minimum bulk ESS for transit depth. Logs such as `depth ESS below ...`, `divergences=...`, and `PASSED/FAILED ... GATE` report the channel or stage decision. JSON diagnostics beside chunk checkpoints contain the machine-readable values.
+`laplace_is` is opt-in approximate inference centered on a MAP/Laplace proposal. It reports importance diagnostics and can fall back for poor channels; use it only when its approximation and quality thresholds are acceptable for the analysis. The gate requires zero divergences and a minimum bulk ESS for transit depth. Logs such as `depth ESS below ...`, `divergences=...`, and `PASSED/FAILED ... GATE` report the channel or stage decision. JSON diagnostics beside chunk checkpoints contain the machine-readable values.
 
 On a V100 or A100, the first chunk of a new static width typically spends about 1–1.5 minutes compiling. Equal-width chunks reuse the compiled runner and then take seconds to a few minutes each, depending on cadence count and sampler work.
 
@@ -40,15 +38,11 @@ Completed chunks are saved under `output_dir/chunks/`. Re-running an identical c
 | Explicit legacy fallback | Joint NUTS | Adaptive | Inspect joint diagnostics |
 | Explicit approximate option | Laplace importance sampling | Laplace proposal | Internal fallback when enabled and diagnostics fail |
 
-The automatic swap remains within exact HMC/NUTS inference.
-
-Laplace importance sampling is separate and must be requested explicitly.
+The automatic swap remains within exact HMC/NUTS inference. Laplace importance sampling is separate and must be requested explicitly.
 
 ## White-light NUTS
 
-White light samples shared geometry, broadband limb darkening, jitter, and trend parameters.
-
-The default Laplace preparation finds a mode and constructs a curvature-based inverse mass matrix.
+White light samples shared geometry, broadband limb darkening, jitter, and trend parameters. The default Laplace preparation finds a mode and constructs a curvature-based inverse mass matrix.
 
 ```yaml
 flags:
@@ -63,15 +57,11 @@ flags:
   whitelight_max_extra_blocks: 3
 ```
 
-PRISM raises the production white-light target acceptance to 0.99.
-
-Additional blocks can extend a chain that has not yet reached the gate.
+PRISM raises the production white-light target acceptance to 0.99. Additional blocks can extend a chain that has not yet reached the gate.
 
 ## Independent NUTS
 
-Each lane contains one channel posterior and its own adaptation state.
-
-The production finite-difference Laplace metric starts sampling at the local mode.
+Each lane contains one channel posterior and its own adaptation state. The production finite-difference Laplace metric starts sampling at the local mode.
 
 ```yaml
 flags:
@@ -87,15 +77,11 @@ flags:
   spectro_max_divergences: 0
 ```
 
-PRISM or explinear configurations default to target acceptance 0.99.
-
-PRISM defaults to maximum tree depth 6.
+PRISM or explinear configurations default to target acceptance 0.99. PRISM defaults to maximum tree depth 6.
 
 ## Independent HMC
 
-HMC uses a fixed number of leapfrog steps rather than building a NUTS tree.
-
-The production alternate uses eight steps and trajectory jitter 0.25.
+HMC uses a fixed number of leapfrog steps rather than building a NUTS tree. The production alternate uses eight steps and trajectory jitter 0.25.
 
 ```yaml
 flags:
@@ -105,9 +91,7 @@ flags:
   spectro_hmc_trajectory_jitter: 0.25
 ```
 
-Fixed work can be faster and more predictable for a difficult lane.
-
-It can also fail when eight steps do not explore a posterior adequately, which is why NUTS remains the alternate.
+Fixed work can be faster and more predictable for a difficult lane. It can also fail when eight steps do not explore a posterior adequately, which is why NUTS remains the alternate.
 
 ## Joint adaptive NUTS
 
@@ -117,11 +101,7 @@ flags:
   spectro_mass_matrix: adaptive
 ```
 
-This samples all channels in a chunk within one joint kernel.
-
-It is retained for compatibility and as a fallback path.
-
-One hard channel can increase tree work for every lane.
+This samples all channels in a chunk within one joint kernel. It is retained for compatibility and as a fallback path. One hard channel can increase tree work for every lane.
 
 ## Laplace importance sampling
 
@@ -136,80 +116,36 @@ flags:
   spectro_laplace_is_fallback: true
 ```
 
-The method draws from a heavy-tailed proposal centered on the local Laplace approximation and reweights against the exact posterior.
-
-It is approximate because finite importance samples and Pareto smoothing replace a Markov chain.
-
-Inspect Pareto-$k$, importance ESS, and fallback counts before using its summaries.
+The method draws from a heavy-tailed proposal centered on the local Laplace approximation and reweights against the exact posterior. It is approximate because finite importance samples and Pareto smoothing replace a Markov chain. Inspect Pareto-$k$, importance ESS, and fallback counts before using its summaries.
 
 ## Reading timing messages
 
-`preparing Laplace metric` marks mode/Hessian work.
+`preparing Laplace metric` marks mode/Hessian work. `COMPUTING` means no usable checkpoint exists. The first equal-width chunk includes JIT compilation and commonly takes about 1--1.5 minutes on V100/A100.
 
-`COMPUTING` means no usable checkpoint exists.
-
-The first equal-width chunk includes JIT compilation and commonly takes about 1--1.5 minutes on V100/A100.
-
-`reusing compiled independent-NUTS runner` means subsequent equal-width chunks avoid that compile.
-
-Sampling then usually takes seconds to a few minutes per chunk.
-
-The last partial-width chunk can compile once more because its static shape differs.
+`reusing compiled independent-NUTS runner` means subsequent equal-width chunks avoid that compile. Sampling then usually takes seconds to a few minutes per chunk. The last partial-width chunk can compile once more because its static shape differs.
 
 ## Gate and swap messages
 
-`depth ESS below` identifies insufficient effective samples.
+`depth ESS below` identifies insufficient effective samples. `num_divergences` counts Hamiltonian integration failures. `PASSED ... GATE` means the configured ESS and divergence criteria were satisfied.
 
-`num_divergences` counts Hamiltonian integration failures.
-
-`PASSED ... GATE` means the configured ESS and divergence criteria were satisfied.
-
-A failure is followed by a message naming the alternate backend.
-
-The replacement chain receives a distinct diagnostic record.
-
-Do not infer success solely from `SAVED checkpoint`; read the gate status.
+A failure is followed by a message naming the alternate backend. The replacement chain receives a distinct diagnostic record. Do not infer success solely from `SAVED checkpoint`; read the gate status.
 
 ## Checkpoints
 
-Checkpoint filenames contain the target/stage prefix, backend, fingerprint fragment, and channel range.
+Checkpoint filenames contain the target/stage prefix, backend, fingerprint fragment, and channel range. The manifest binds the family to model arguments, arrays, priors, sampler controls, and relevant source files. Resume loads only current, readable, matching files.
 
-The manifest binds the family to model arguments, arrays, priors, sampler controls, and relevant source files.
-
-Resume loads only current, readable, matching files.
-
-Corrupt or stale files are not silently concatenated.
-
-Parallel jobs assign deterministic chunk ranges.
-
-`combine` checks that all expected chunks exist and restores wavelength order.
+Corrupt or stale files are not silently concatenated. Parallel jobs assign deterministic chunk ranges. `combine` checks that all expected chunks exist and restores wavelength order.
 
 ## Reproducibility
 
-The default master seed is 555.
+The default master seed is 555. Set it explicitly with `flags.random_seed`. `FIT_JWST_SEED` overrides the YAML value.
 
-Set it explicitly with `flags.random_seed`.
-
-`FIT_JWST_SEED` overrides the YAML value.
-
-Every chunk derives a deterministic distinct key from the master seed and channel range.
-
-Resuming does not change later chunk keys because they do not depend on which earlier files were loaded.
-
-Record the seed, software versions, backend, metric, warmup, samples, target acceptance, and GPU type.
+Every chunk derives a deterministic distinct key from the master seed and channel range. Resuming does not change later chunk keys because they do not depend on which earlier files were loaded. Record the seed, software versions, backend, metric, warmup, samples, target acceptance, and GPU type.
 
 ## Troubleshooting
 
-**Repeated compilation:** compare chunk widths and static model settings. A different final width legitimately compiles separately.
+**Repeated compilation:** compare chunk widths and static model settings. A different final width legitimately compiles separately. **Low ESS without divergences:** increase retained samples, inspect autocorrelation and tree depth, and allow the alternate sampler.
 
-**Low ESS without divergences:** increase retained samples, inspect autocorrelation and tree depth, and allow the alternate sampler.
+**Divergences:** inspect LD boundaries, trend degeneracy, reported uncertainties, and the local MAP/Hessian diagnostics. **One bad lane slows a chunk:** reduce `vmap_chunk` or use a verified batch plan to isolate it. **Resume does not load:** compare the manifest fingerprint inputs; a scientifically relevant change must create new checkpoints.
 
-**Divergences:** inspect LD boundaries, trend degeneracy, reported uncertainties, and the local MAP/Hessian diagnostics.
-
-**One bad lane slows a chunk:** reduce `vmap_chunk` or use a verified batch plan to isolate it.
-
-**Resume does not load:** compare the manifest fingerprint inputs; a scientifically relevant change must create new checkpoints.
-
-**Out of memory:** lower resident width. Do not reduce wavelength resolution unless that is also the intended analysis.
-
-**Both exact samplers fail:** inspect the data channel and model rather than lowering the quality gate.
+**Out of memory:** lower resident width. Do not reduce wavelength resolution unless that is also the intended analysis. **Both exact samplers fail:** inspect the data channel and model rather than lowering the quality gate.

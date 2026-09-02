@@ -16,26 +16,20 @@ export JAX_COMPILATION_CACHE_DIR=/scratch/$USER/jax_cache
 python fit_jwst.py -c config.yaml
 ```
 
-For a CPU smoke test, set `JAX_PLATFORMS=cpu` before Python starts. Do not import JAX and then change the platform.
-
-Enable the fitter's persistent cache with `flags.compile_box: true`; set `flags.jax_compilation_cache_dir` to node-visible storage. Cache reuse requires compatible JAX/XLA versions and static model shapes.
+For a CPU smoke test, set `JAX_PLATFORMS=cpu` before Python starts. Do not import JAX and then change the platform. Enable the fitter's persistent cache with `flags.compile_box: true`; set `flags.jax_compilation_cache_dir` to node-visible storage. Cache reuse requires compatible JAX/XLA versions and static model shapes.
 
 GPU memory grows with cadence count, model complexity, and `vmap_chunk`. Start with 40 independent channels on V100/A100 and reduce the width after an out-of-memory error. `chunk_mode: parallel` distributes channel ranges across array tasks; run `combine` only after all checkpoint files exist.
 
 ## Platform selection
 
-JAX selects its platform when it first initializes.
-
-Set the platform in the job environment before Python starts.
+JAX selects its platform when it first initializes. Set the platform in the job environment before Python starts.
 
 ```bash
 export JAX_PLATFORMS=gpu
 export JAX_ENABLE_X64=1
 ```
 
-Use `cpu` for read-only import checks on a login node.
-
-Do not run the production spectroscopic sampler on a shared login node.
+Use `cpu` for read-only import checks on a login node. Do not run the production spectroscopic sampler on a shared login node.
 
 ## Device check
 
@@ -43,27 +37,15 @@ Do not run the production spectroscopic sampler on a shared login node.
 python -c "import jax; print(jax.devices())"
 ```
 
-Run this inside the Slurm allocation.
-
-It should report the allocated V100, A100, or other supported CUDA device.
+Run this inside the Slurm allocation. It should report the allocated V100, A100, or other supported CUDA device.
 
 ## Memory controls
 
-`vmap_chunk` controls resident independent chains.
+`vmap_chunk` controls resident independent chains. Lowering it reduces memory approximately with channel concurrency. It does not rebin wavelength data.
 
-Lowering it reduces memory approximately with channel concurrency.
+Native PRISM usually needs more care because it combines many channels with long time arrays. Harmonica can also use more memory than a symmetric transit model. Start at 40 only when that width is known to fit the device and workload.
 
-It does not rebin wavelength data.
-
-Native PRISM usually needs more care because it combines many channels with long time arrays.
-
-Harmonica can also use more memory than a symmetric transit model.
-
-Start at 40 only when that width is known to fit the device and workload.
-
-Use 20, 10, or 4 after an allocation failure.
-
-The final partial-width chunk can compile a separate executable.
+Use 20, 10, or 4 after an allocation failure. The final partial-width chunk can compile a separate executable.
 
 ## Cache placement
 
@@ -73,11 +55,7 @@ flags:
   jax_compilation_cache_dir: /scratch/account/user/jax_cache
 ```
 
-Use persistent scratch visible to every node that may resume the run.
-
-Avoid a network home directory with a tight metadata quota.
-
-Cache reuse requires compatible code, JAX/XLA version, and static shapes.
+Use persistent scratch visible to every node that may resume the run. Avoid a network home directory with a tight metadata quota. Cache reuse requires compatible code, JAX/XLA version, and static shapes.
 
 ## Serial chunking
 
@@ -87,11 +65,7 @@ flags:
   vmap_chunk: 40
 ```
 
-One process walks through all channel ranges.
-
-Every completed chunk is checkpointed before the next starts.
-
-This is the simplest mode for one long allocation.
+One process walks through all channel ranges. Every completed chunk is checkpointed before the next starts. This is the simplest mode for one long allocation.
 
 ## Array-parallel chunking
 
@@ -102,11 +76,7 @@ flags:
   chunk_parallel_job_index: 0
 ```
 
-Set a distinct zero-based index in each array task.
-
-All tasks must see the same output and checkpoint directory.
-
-They write disjoint assigned chunks.
+Set a distinct zero-based index in each array task. All tasks must see the same output and checkpoint directory. They write disjoint assigned chunks.
 
 After every task finishes, use:
 
@@ -115,9 +85,7 @@ flags:
   chunk_mode: combine
 ```
 
-Combine checks completeness and restores global wavelength order.
-
-It fails rather than silently omitting a missing range.
+Combine checks completeness and restores global wavelength order. It fails rather than silently omitting a missing range.
 
 ## Split stages
 
@@ -126,38 +94,18 @@ flags:
   analysis_stage: prep
 ```
 
-This completes data preparation and required low-resolution work.
-
-Use `analysis_stage: highres` in a later allocation for the final channels.
-
-Prepared products are fingerprinted.
+This completes data preparation and required low-resolution work. Use `analysis_stage: highres` in a later allocation for the final channels. Prepared products are fingerprinted.
 
 ## Wall-time planning
 
-Budget for white light, low resolution, high resolution, and plotting.
+Budget for white light, low resolution, high resolution, and plotting. The first static channel width normally includes 1--1.5 minutes of compilation. Equal-width chunks then take seconds to a few minutes each on V100/A100.
 
-The first static channel width normally includes 1--1.5 minutes of compilation.
-
-Equal-width chunks then take seconds to a few minutes each on V100/A100.
-
-Difficult channels can take longer or trigger an alternate sampler.
-
-Use the number of channels and chunk width to estimate the call count.
-
-Keep time for the final partial-width compilation and output writing.
+Difficult channels can take longer or trigger an alternate sampler. Use the number of channels and chunk width to estimate the call count. Keep time for the final partial-width compilation and output writing.
 
 ## Cluster troubleshooting
 
-**CUDA device unavailable:** check Slurm GPU allocation and the JAX CUDA wheel.
+**CUDA device unavailable:** check Slurm GPU allocation and the JAX CUDA wheel. **Out of memory:** reduce `vmap_chunk` and resume with the new checkpoint family. **Cache misses:** check JAX versions, node-visible path, and static widths.
 
-**Out of memory:** reduce `vmap_chunk` and resume with the new checkpoint family.
-
-**Cache misses:** check JAX versions, node-visible path, and static widths.
-
-**Array collision:** verify unique `chunk_parallel_job_index` values and shared configuration.
-
-**Combine reports missing files:** do not force it; find and rerun the missing array assignment.
-
-**Job reaches wall time:** resubmit unchanged so completed chunks load.
+**Array collision:** verify unique `chunk_parallel_job_index` values and shared configuration. **Combine reports missing files:** do not force it; find and rerun the missing array assignment. **Job reaches wall time:** resubmit unchanged so completed chunks load.
 
 **Slow filesystem:** place cache and outputs on project or scratch storage suited to many checkpoint files.

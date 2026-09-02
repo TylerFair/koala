@@ -6,18 +6,14 @@ Select the law and prior under `flags`:
 flags: {ld_profile: power2, ld_prior: informed}
 ```
 
-`power2` uses coefficients `c1,c2`; `quadratic` uses `u1,u2`. Supported prior modes are:
-
-**Stellar-informed.** This is the ExoTiC-LD Stagger-grid prescription and currently requires power-2 plus stellar uncertainties.
+`power2` uses coefficients `c1,c2`; `quadratic` uses `u1,u2`. Supported prior modes are: **Stellar-informed.** This is the ExoTiC-LD Stagger-grid prescription and currently requires power-2 plus stellar uncertainties.
 
 ```yaml
 stellar: {teff: 5509, logg: 4.22, feh: 0.04, teff_sigma: 28, logg_sigma: 0.07, feh_sigma: 0.02, ld_model: stagger, ld_data_path: ../exotic_ld_data, ld_prior_min_sigma: 1.0e-4}
 flags: {ld_profile: power2, ld_prior: informed}
 ```
 
-`stellarprior` and `stellar` are aliases for `informed`.
-
-**Fixed.** Use calculated coefficients without sampling them. `fix_ld: true` is the legacy spelling.
+`stellarprior` and `stellar` are aliases for `informed`. **Fixed.** Use calculated coefficients without sampling them. `fix_ld: true` is the legacy spelling.
 
 ```yaml
 flags: {ld_profile: quadratic, ld_prior: fixed}
@@ -60,11 +56,7 @@ The power-2 law is
 
 $$I(\mu)/I(1)=1-c_1(1-\mu^{c_2}).$$
 
-The disk center is $\mu=1$ and the geometric limb is $\mu=0$.
-
-Quadratic LD is required by the Sing prescription.
-
-Power-2 is the current stellar-informed path.
+The disk center is $\mu=1$ and the geometric limb is $\mu=0$. Quadratic LD is required by the Sing prescription. Power-2 is the current stellar-informed path.
 
 ## Comparison
 
@@ -78,17 +70,9 @@ Power-2 is the current stellar-informed path.
 
 ## Informed prior construction
 
-The fitter evaluates ExoTiC-LD Stagger intensities over the configured stellar-parameter grid.
+The fitter evaluates ExoTiC-LD Stagger intensities over the configured stellar-parameter grid. It fits power-2 coefficients in every wavelength bin and stellar grid point. The weighted means become `c1_mean` and `c2_mean`.
 
-It fits power-2 coefficients in every wavelength bin and stellar grid point.
-
-The weighted means become `c1_mean` and `c2_mean`.
-
-The coefficient scatter propagated from `teff_sigma`, `logg_sigma`, and `feh_sigma` becomes the prior width.
-
-`ld_prior_min_sigma` floors that width.
-
-The cache records total, fit, and stellar-scatter columns for both coefficients.
+The coefficient scatter propagated from `teff_sigma`, `logg_sigma`, and `feh_sigma` becomes the prior width. `ld_prior_min_sigma` floors that width. The cache records total, fit, and stellar-scatter columns for both coefficients.
 
 ```yaml
 stellar:
@@ -103,29 +87,19 @@ The power-2 Gaussian support is `c1` from 0 to 1 and `c2` from 0.001 to 1.
 
 ## Wide Gaussian and uniform priors
 
-Without propagated widths, `widegaussian` uses a coefficient standard deviation of 0.2.
+Without propagated widths, `widegaussian` uses a coefficient standard deviation of 0.2. Quadratic coefficients are truncated to $[0,1]$. Power-2 uses the bounds above.
 
-Quadratic coefficients are truncated to $[0,1]$.
-
-Power-2 uses the bounds above.
-
-The `free` alias resolves to `widegaussian`.
-
-Use `uniform` for the explicit flat coefficient prior:
+The `free` alias resolves to `widegaussian`. Use `uniform` for the explicit flat coefficient prior:
 
 ```yaml
 flags: {ld_profile: power2, ld_prior: uniform}
 ```
 
-Uniform mode samples both coefficient dimensions on $[0,1]$.
-
-The builder may use a decorrelated transformed coordinate, while writing physical coefficients as deterministic sites.
+Uniform mode samples both coefficient dimensions on $[0,1]$. The builder may use a decorrelated transformed coordinate, while writing physical coefficients as deterministic sites.
 
 ## Sing coordinates and calibration
 
-Define $u_+=u_1+u_2$ and $u_-=u_1-u_2$.
-
-The implemented coordinates are
+Define $u_+=u_1+u_2$ and $u_-=u_1-u_2$. The implemented coordinates are
 
 $$l=1-u_+,\qquad \delta=(u_+-u_-)/8=u_2/4.$$
 
@@ -133,44 +107,20 @@ The inverse is
 
 $$u_1=(1-l)-4\delta,\qquad u_2=4\delta.$$
 
-The sampler bounds $l$ to $[0,1]$ and $\delta$ to $[-(1-l)/4,(1-l)/4]$.
+The sampler bounds $l$ to $[0,1]$ and $\delta$ to $[-(1-l)/4,(1-l)/4]$. The low-resolution calibration fits quadratic LD freely. It transforms fitted and Stagger coefficients to $(l,\delta)$.
 
-The low-resolution calibration fits quadratic LD freely.
+It computes an inverse-variance-weighted fitted-minus-model gray offset across wavelength. The JSON artifact contains both offsets, uncertainties, channel counts, and a fingerprint. `ld_sing_offset: fit` requests this calibration.
 
-It transforms fitted and Stagger coefficients to $(l,\delta)$.
-
-It computes an inverse-variance-weighted fitted-minus-model gray offset across wavelength.
-
-The JSON artifact contains both offsets, uncertainties, channel counts, and a fingerprint.
-
-`ld_sing_offset: fit` requests this calibration.
-
-`ld_sing_offset_path` supplies an existing compatible artifact.
-
-The code's tabulated fallback offsets are $\Delta l=0.020$ and $\Delta\delta=-0.003$, with scatters 0.031 and 0.016.
-
-The log states when it uses that fallback.
+`ld_sing_offset_path` supplies an existing compatible artifact. The code's tabulated fallback offsets are $\Delta l=0.020$ and $\Delta\delta=-0.003$, with scatters 0.031 and 0.016. The log states when it uses that fallback.
 
 ## The `mu_min` choice
 
-`stellar.ld_mu_min` excludes Stagger intensity points nearer the extreme limb than the selected $\mu$.
-
-For `ld_mu_min: 0.2`, points with $\mu<0.2$ do not enter the coefficient fit.
-
-This reduces leverage from the atmosphere grid's most extreme limb.
+`stellar.ld_mu_min` excludes Stagger intensity points nearer the extreme limb than the selected $\mu$. For `ld_mu_min: 0.2`, points with $\mu<0.2$ do not enter the coefficient fit. This reduces leverage from the atmosphere grid's most extreme limb.
 
 Changing it changes the calculated prior and must be recorded.
 
 ## Checks after fitting
 
-Read `c1,c2` or `u1,u2` from `*_bestfit_params.csv`.
+Read `c1,c2` or `u1,u2` from `*_bestfit_params.csv`. Plot them against wavelength with their asymmetric errors. Look for posteriors pressed against truncation bounds.
 
-Plot them against wavelength with their asymmetric errors.
-
-Look for posteriors pressed against truncation bounds.
-
-Inspect ingress and egress residuals before accepting a depth shift as atmospheric.
-
-If many informed widths equal the floor, revisit the stellar uncertainties and grid settings.
-
-If a uniform fit is unstable, compare it with informed or wide-Gaussian LD on the same geometry.
+Inspect ingress and egress residuals before accepting a depth shift as atmospheric. If many informed widths equal the floor, revisit the stellar uncertainties and grid settings. If a uniform fit is unstable, compare it with informed or wide-Gaussian LD on the same geometry.

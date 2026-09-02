@@ -1,6 +1,6 @@
 # NIRSpec/G395H
 
-NRS1 and NRS2 are separate inputs and fits:
+This tutorial fits the WASP-121 b NIRSpec/G395H NRS1 extraction; NRS1 and NRS2 remain separate inputs and fits. You will use a quadratic baseline, an R=20 bridge, and a reference wavelength grid. At the end, you will have NRS1 white-light diagnostics, checkpointed channel posteriors, and a detector-labeled transmission spectrum.
 
 ```bash
 cp configs_fiducial_stellarinformed/WASP-121_nrs1_g395h_config.yaml wasp121_nrs1.yaml
@@ -23,9 +23,7 @@ Set `nrs: 2` and use the NRS2 FITS file for the long-wavelength detector. Do not
 
 ## Dataset and complete configuration
 
-This example fits WASP-121 b on the NIRSpec/G395H NRS1 detector.
-
-The checked configuration uses a quadratic baseline, an R=20 bridge, and a final reference grid.
+This example fits WASP-121 b on the NIRSpec/G395H NRS1 detector. The checked configuration uses a quadratic baseline, an R=20 bridge, and a final reference grid.
 
 ```yaml
 planet:
@@ -77,9 +75,7 @@ outlier_clip:
 host_device: gpu
 ```
 
-The symbolic `cut_phase_to_transit` mask is used by the fitter's established configuration path for this visit.
-
-Use the checked NRS2 configuration rather than changing only the detector number: its filename and output name also differ.
+The symbolic `cut_phase_to_transit` mask is used by the fitter's established configuration path for this visit. Use the checked NRS2 configuration rather than changing only the detector number: its filename and output name also differ.
 
 ## Run
 
@@ -105,11 +101,7 @@ Transmission spectroscopy data saved to ..._Rreference.csv
 Analysis complete!
 ```
 
-The detector label in every stem should read `nrs1`.
-
-If it reads `nrs2`, confirm both the configuration and the extraction.
-
-The quadratic coefficient `v2` appears in the detailed parameter CSV.
+The detector label in every stem should read `nrs1`. If it reads `nrs2`, confirm both the configuration and the extraction. The quadratic coefficient `v2` appears in the detailed parameter CSV.
 
 The per-chunk diagnostic JSON records divergences and radius-ratio ESS.
 
@@ -121,9 +113,7 @@ The per-chunk diagnostic JSON records divergences and radius-ratio ESS.
 :align: center
 ```
 
-The broadband G395H curve constrains the common chord used by all NRS1 wavelength bins.
-
-Inspect the baseline on both sides of transit and verify that a quadratic is warranted.
+The broadband G395H curve constrains the common chord used by all NRS1 wavelength bins. Inspect the baseline on both sides of transit and verify that a quadratic is warranted.
 
 ## Transmission spectrum
 
@@ -133,9 +123,7 @@ Inspect the baseline on both sides of transit and verify that a quadratic is war
 :align: center
 ```
 
-This displayed product is an existing WASP-121 NRS1 R=100 spectrum.
-
-The tutorial configuration writes the grid named by `resolution.high`; use the matching CSV stem when plotting.
+This displayed product is an existing WASP-121 NRS1 R=100 spectrum. The tutorial configuration writes the grid named by `resolution.high`; use the matching CSV stem when plotting.
 
 ## Files to inspect
 
@@ -184,26 +172,18 @@ plt.show()
 
 ## Join NRS1 and NRS2 after fitting
 
-Read the two final CSVs separately.
-
-Add a detector column before concatenation.
-
-Do not discard an offset between detector segments without checking their white-light depths, limb assumptions, and trends.
+Read the two final CSVs separately. Add a detector column before concatenation. Do not discard an offset between detector segments without checking their white-light depths, limb assumptions, and trends.
 
 Do not assume NRS1 and NRS2 share bad-pixel masks.
 
 ## Common problems
 
-**Tilt event or jump:** use `linear_discontinuity` when the time series has a detector step. Initialize `t_jump_guess` near the event.
+**Tilt event or jump:** use `linear_discontinuity` when the time series has a detector step. Initialize `t_jump_guess` near the event. **NaNs at detector edges:** mask or remove those wavelength bins in preparation. Zero-filled channels produce misleading likelihoods.
 
-**NaNs at detector edges:** mask or remove those wavelength bins in preparation. Zero-filled channels produce misleading likelihoods.
+**Wrong detector:** `nrs`, `fits_file`, and the physical extraction must agree. **Low resolution omitted:** keep `need_lowres: true` for the bridge products or interpolation. **Interrupted run:** repeat the command unchanged to load matching checkpoints.
 
-**Wrong detector:** `nrs`, `fits_file`, and the physical extraction must agree.
+**Gate repeatedly fails:** inspect the named channel, reduce `vmap_chunk`, and test whether the trend or discontinuity model is missing structure. **Memory pressure:** NRS1 and NRS2 channel counts differ; tune the width for each detector rather than assuming one maximum.
 
-**Low resolution omitted:** keep `need_lowres: true` for the bridge products or interpolation.
+## Next steps
 
-**Interrupted run:** repeat the command unchanged to load matching checkpoints.
-
-**Gate repeatedly fails:** inspect the named channel, reduce `vmap_chunk`, and test whether the trend or discontinuity model is missing structure.
-
-**Memory pressure:** NRS1 and NRS2 channel counts differ; tune the width for each detector rather than assuming one maximum.
+Read [Systematics trends](../guides/trends.md) before introducing a detector-discontinuity model, and use [Samplers](../guides/samplers.md) to interpret a NUTS-to-HMC swap. The [Configuration reference](../guides/configuration.md) lists the NRS detector and resolution controls, while [Outputs](../guides/outputs.md) explains how to combine detector-labeled tables safely.

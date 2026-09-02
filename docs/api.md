@@ -37,23 +37,13 @@ python fit_jwst.py -c config.yaml
 
 ## Using the builders
 
-The builders return NumPyro model callables used by the CLI.
+The builders return NumPyro model callables used by the CLI. The command-line pipeline supplies normalized data, geometry, limb priors, and trend templates. Direct callers must supply arrays with compatible JAX float64 dtypes.
 
-The command-line pipeline supplies normalized data, geometry, limb priors, and trend templates.
-
-Direct callers must supply arrays with compatible JAX float64 dtypes.
-
-The builder APIs expose implementation-level controls and can change more readily than the YAML interface.
-
-Use `fit_jwst.py -c` for normal analyses.
+The builder APIs expose implementation-level controls and can change more readily than the YAML interface. Use `fit_jwst.py -c` for normal analyses.
 
 ## Jaxoplanet builder
 
-`models.jaxoplanet.builder` constructs white-light and vectorized channel models.
-
-It supports quadratic and power-2 limb profiles.
-
-It also selects the stock or optimized light-curve kernel.
+`models.jaxoplanet.builder` constructs white-light and vectorized channel models. It supports quadratic and power-2 limb profiles. It also selects the stock or optimized light-curve kernel.
 
 The vectorized model retains time-dependent reported errors in the likelihood.
 
@@ -71,11 +61,7 @@ The returned callable still needs the full prior/data arguments documented by it
 
 ## Independent NUTS
 
-`models.independent_nuts` creates and caches equal-width lane runners.
-
-It returns posterior samples and diagnostics to the chunk router.
-
-The cache separates static compilation options from dynamic arrays.
+`models.independent_nuts` creates and caches equal-width lane runners. It returns posterior samples and diagnostics to the chunk router. The cache separates static compilation options from dynamic arrays.
 
 ```python
 from models.independent_nuts import build_independent_nuts_runner
@@ -87,9 +73,7 @@ Use the CLI to obtain fingerprinted checkpoints and automatic quality gates.
 
 ## Independent HMC
 
-`models.independent_hmc` implements fixed-step independent HMC.
-
-Its public runner accepts the same channel-factorized model family and Laplace mass option.
+`models.independent_hmc` implements fixed-step independent HMC. Its public runner accepts the same channel-factorized model family and Laplace mass option.
 
 ```python
 from models.independent_hmc import get_samples_independent_hmc
@@ -123,9 +107,7 @@ u1, u2 = sing_to_quadratic(l, delta)
 print(l, delta, u1, u2)
 ```
 
-`estimate_gray_offset` expects matching `[channel, 2]` arrays.
-
-`write_offset_artifact` creates a new fingerprinted JSON file and refuses to replace an existing one.
+`estimate_gray_offset` expects matching `[channel, 2]` arrays. `write_offset_artifact` creates a new fingerprinted JSON file and refuses to replace an existing one.
 
 ## Trend functions
 
@@ -143,11 +125,7 @@ The functions expect the transit and trend keys named by the selected model.
 
 ## Harmonica builder
 
-`models.harmonica.builder` constructs white-light and channel transmission-string models.
-
-It supports odd orders 1, 3, and 5 through the configured maximum.
-
-It also supports `delta_r`, fractional, and half-area spectroscopic parameterizations where allowed.
+`models.harmonica.builder` constructs white-light and channel transmission-string models. It supports odd orders 1, 3, and 5 through the configured maximum. It also supports `delta_r`, fractional, and half-area spectroscopic parameterizations where allowed.
 
 Direct callers must provide consistent `a_rs`, eccentricity, and argument of periastron geometry.
 
@@ -160,6 +138,4 @@ JAX_ENABLE_X64=1 JAX_PLATFORMS=cpu python -c \
   "import models.jaxoplanet.builder, models.independent_nuts, models.independent_hmc"
 ```
 
-The documentation build mocks heavy dependencies so API signatures can render on Read the Docs.
-
-The production environment must install the real scientific packages.
+The documentation build mocks heavy dependencies so API signatures can render on Read the Docs. The production environment must install the real scientific packages.

@@ -81,9 +81,7 @@ python fit_jwst.py -c config.yaml
 | `bin_time`, `bin_dt_seconds`, `bin_method` | bool,float,string / false, config value, `mean` | Flag-level time-binning controls |
 | `bin_whitelight`, `bin_spectroscopic` | bool / inherited | Apply time binning to either stage |
 
-Laplace metric controls accept generic `spectro_laplace_*` and stage-specific `lowres_laplace_*`/`highres_laplace_*`: `warmup` (150), `target_accept` (0.95 for NUTS; 0.99 for PRISM or explinear), `max_tree_depth` (5; 6 for PRISM), `start_at_map` (true), `hessian_method` (`finite_difference`), `fd_relative_step` (2e-4), `fuse_program` (false), `trust_radius` (5), and `map_decrement_tolerance` (1e-4). White-light equivalents are `whitelight_mass_matrix`, `whitelight_laplace_warmup` (200), `target_accept` (0.9; 0.99 for PRISM), `max_tree_depth` (10), `trust_radius` (5), and `hessian_method` (`finite_difference`).
-
-Laplace importance sampling accepts generic, `spectro_`, `lowres_`, or `highres_` prefixed `laplace_is_*` keys: `output` (`imh`), `num_draws` (4096), `rounds` (2), `draw_chunk_size` (256), `student_df` (3), `scale_inflation` (1.5), `wide_fraction` (0), `wide_scale` (3), `map_maxiter` (200), `map_tol` (1e-4), `trust_radius` (5), `khat_threshold` (0.7), `min_ess` (400), `min_ess_fraction` (0.2), `min_imh_acceptance` (0.2), `imh_thin` (8), `fallback` (true), and `force` (false).
+Laplace metric controls accept generic `spectro_laplace_*` and stage-specific `lowres_laplace_*`/`highres_laplace_*`: `warmup` (150), `target_accept` (0.95 for NUTS; 0.99 for PRISM or explinear), `max_tree_depth` (5; 6 for PRISM), `start_at_map` (true), `hessian_method` (`finite_difference`), `fd_relative_step` (2e-4), `fuse_program` (false), `trust_radius` (5), and `map_decrement_tolerance` (1e-4). White-light equivalents are `whitelight_mass_matrix`, `whitelight_laplace_warmup` (200), `target_accept` (0.9; 0.99 for PRISM), `max_tree_depth` (10), `trust_radius` (5), and `hessian_method` (`finite_difference`). Laplace importance sampling accepts generic, `spectro_`, `lowres_`, or `highres_` prefixed `laplace_is_*` keys: `output` (`imh`), `num_draws` (4096), `rounds` (2), `draw_chunk_size` (256), `student_df` (3), `scale_inflation` (1.5), `wide_fraction` (0), `wide_scale` (3), `map_maxiter` (200), `map_tol` (1e-4), `trust_radius` (5), `khat_threshold` (0.7), `min_ess` (400), `min_ess_fraction` (0.2), `min_imh_acceptance` (0.2), `imh_thin` (8), `fallback` (true), and `force` (false).
 
 Harmonica adds `harmonica_max_order` (1), `harmonica_spectro_parameterization` (`delta_r`), `harmonica_spectro_fit_jitter` (true), `harmonica_spectro_odd_frac_sigma` (0.1), and legacy `harmonica_wl_parameterization`. Stage prefixes `harmonica_wl`, `harmonica_lr`, and `harmonica_hr` accept `dense_mass`, `regularize_mass_matrix`, `max_tree_depth`, and `target_accept`. Sing adds `ld_sing_offset`, `ld_sing_offset_path`, `ld_sing_calibration_warmup` (1000), `ld_sing_calibration_samples` (1000), and `ld_sing_calibration_min_ess`.
 
@@ -208,26 +206,14 @@ host_device: gpu
 
 ## Precedence rules
 
-Stage-specific keys override generic spectroscopic keys.
-
-For example, `highres_laplace_target_accept` overrides `spectro_laplace_target_accept` only at high resolution.
-
-Environment variables override `analysis_stage`, `chunk_mode`, and the random seed where documented.
+Stage-specific keys override generic spectroscopic keys. For example, `highres_laplace_target_accept` overrides `spectro_laplace_target_accept` only at high resolution. Environment variables override `analysis_stage`, `chunk_mode`, and the random seed where documented.
 
 An explicit YAML value overrides a production `setdefault` value.
 
 ## Configuration checks
 
-Use YAML booleans `true` and `false`, not quoted strings.
+Use YAML booleans `true` and `false`, not quoted strings. Ensure `nrs` is present for every NIRSpec mode. Ensure `order` is present for SOSS.
 
-Ensure `nrs` is present for every NIRSpec mode.
-
-Ensure `order` is present for SOSS.
-
-Specify either `resolution` or `pixels`.
-
-Check that `fits_file` resolves below `path/input_dir`.
-
-Keep a new `output_dir` for a scientifically different fit.
+Specify either `resolution` or `pixels`. Check that `fits_file` resolves below `path/input_dir`. Keep a new `output_dir` for a scientifically different fit.
 
 Review the startup log: it prints the selected transit engine, trend, LD mode, and sampler settings.
