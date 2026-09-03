@@ -1,0 +1,7 @@
+dataset: wasp39_nrs1_ref
+analysis_stage: all
+variants:
+  - name: uniform_linear_step_retry3_ref
+    overrides:
+      input_dir: /scratch/midway3/tfairnington/FITS
+      flags: {ld_prior: uniform, ld_profile: power2, detrending_type: linear_discontinuity, whitelight_mass_matrix: laplace}

@@ -627,6 +627,15 @@ def parse_args(argv=None):
     parser.add_argument("--warmup", type=int)
     parser.add_argument("--samples", type=int)
     parser.add_argument("--chunk-size", type=int)
+    parser.add_argument(
+        "--resident-lane-width",
+        type=int,
+        help=(
+            "Pad independent backends to this compiled lane width. This is "
+            "primarily for memory/throughput studies; it must be at least the "
+            "largest real chunk width."
+        ),
+    )
     parser.add_argument("--platform", choices=("cpu", "gpu"), default="cpu")
     parser.add_argument("--seed", type=int)
     parser.add_argument(
@@ -783,10 +792,19 @@ def main(argv=None):
     raw_diagnostics = {}
     runners = {}
     resident_lane_width = (
-        chunk_size
-        if selected.num_channels > chunk_size
-        else selected.num_channels
+        int(args.resident_lane_width)
+        if args.resident_lane_width is not None
+        else (
+            chunk_size
+            if selected.num_channels > chunk_size
+            else selected.num_channels
+        )
     )
+    if resident_lane_width < min(chunk_size, selected.num_channels):
+        raise ValueError(
+            "--resident-lane-width must be at least the largest real chunk."
+        )
+    memory_before = dict(jax.devices()[0].memory_stats() or {})
     total_started = time.perf_counter()
     for chunk_index, local_start in enumerate(
         range(0, selected.num_channels, chunk_size)
@@ -854,6 +872,7 @@ def main(argv=None):
             flush=True,
         )
     total_wall = time.perf_counter() - total_started
+    memory_after = dict(jax.devices()[0].memory_stats() or {})
 
     samples = _concatenate_samples(sample_chunks, widths)
     pickle_path = Path(f"{output_prefix}.pkl")
@@ -897,6 +916,8 @@ def main(argv=None):
         "builder_overrides": builder_overrides,
         "backend_overrides": backend_overrides,
         "resident_lane_width": resident_lane_width,
+        "memory_before": memory_before,
+        "memory_after": memory_after,
         "total_wall_seconds": total_wall,
         "compile_inclusive_wall_seconds": compile_inclusive_wall,
         "recorded_compile_seconds": sum(

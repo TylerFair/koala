@@ -1,0 +1,51 @@
+planet:
+  name: WASP-39
+  period: 4.05528043
+  duration: 0.11693087083333333
+  t0: 59791.105
+  b: 0.4498
+  rprs: 0.1457
+stellar:
+  feh: 0.04
+  teff: 5509
+  logg: 4.22
+  teff_sigma: 28
+  logg_sigma: 0.07
+  feh_sigma: 0.02
+  ld_model: stagger
+  ld_data_path: ../exotic_ld_data
+  ld_prior_min_sigma: 0.0001
+instrument: NIRSPEC/G395H
+order: null
+nrs: 1
+path: /scratch/midway3/tfairnington/accel_stacking/wasp39_nrs1_ref
+input_dir: /scratch/midway3/tfairnington/FITS
+output_dir: wide_linear
+fits_file: WASP-39_nrs1_box_spectra_fullres_G395H.fits
+resolution:
+  high: reference
+  low: 20
+  reference_grid: prism_template.csv
+flags:
+  vmap_chunk: 40
+  detrending_type: linear
+  interpolate_trend: false
+  interpolate_ld: false
+  ld_prior: widegaussian
+  need_lowres: true
+  ld_profile: power2
+  t_jump_guess: 59791.125
+  jump_guess: -0.0005
+  mask_start: jnp.min(t)
+  mask_end: jnp.min(t) + 0.007
+  mask_integrations_start: None
+  whitelight_mass_matrix: laplace
+  analysis_stage: all
+  spectro_sampler: independent_nuts
+  spectro_mass_matrix: laplace
+  spectro_jitter_prior: lognormal
+  spectro_min_depth_ess: 400
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+host_device: gpu

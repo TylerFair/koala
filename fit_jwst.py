@@ -39,6 +39,7 @@ from jaxoplanet.experimental import calc_poly_coeffs
 import tinygp
 import matplotlib.cm as cm
 from models.common import _to_f64, _tree_to_f64, get_I_power2, compute_transit_model_auto
+from models.ld_parameterization import Power2LinearTransform, Power2MaxtedTransform
 from models.sing_ld import (
     SING_TABULATED_OFFSET,
     SING_TABULATED_SCATTER,
@@ -193,6 +194,55 @@ def _resolve_ld_prior_mode(flags, stellar_cfg, ld_profile):
     if resolved == 'sing' and ld_profile != 'quadratic':
         raise ValueError("flags.ld_prior: 'sing' requires flags.ld_profile: 'quadratic'.")
     return resolved
+
+
+def _resolve_ld_parameterization(flags, flag_name, ld_prior_mode, ld_profile='power2'):
+    """Resolve an explicit LD coordinate choice or the prior-dependent default."""
+    raw_value = flags.get(flag_name)
+    value = (
+        'decorrelated'
+        if (
+            raw_value is None
+            and ld_profile == 'power2'
+            and ld_prior_mode in {'free', 'widegaussian', 'uniform'}
+        )
+        else ('coefficients' if raw_value is None else str(raw_value).lower())
+    )
+    allowed = {
+        'coefficients', 'decorrelated', 'decorrelated_linear',
+        'latent_gaussian',
+    }
+    if value not in allowed:
+        raise ValueError(
+            f"flags.{flag_name} must be coefficients, decorrelated, "
+            "decorrelated_linear, or latent_gaussian."
+        )
+    return value
+
+
+def _power2_ld_initial_sites(coefficients, parameterization):
+    """Return initial values in the actual latent coordinates of the LD model."""
+    coefficients = jnp.asarray(coefficients, dtype=jnp.float64)
+    if parameterization == 'coefficients':
+        return {'c1': coefficients[0], 'c2': coefficients[1]}
+    if parameterization == 'decorrelated':
+        return {'ld_decorrelated': Power2MaxtedTransform()(coefficients)}
+    if parameterization == 'decorrelated_linear':
+        return {'ld_decorrelated': Power2LinearTransform()(coefficients)}
+    if parameterization == 'latent_gaussian':
+        return {'ld_latent': jnp.zeros(2, dtype=jnp.float64)}
+    raise ValueError(f"Unknown power-2 LD parameterization: {parameterization}")
+
+
+def _power2_ld_optimization_sites(parameterization):
+    """Return only latent sample sites, never deterministic LD coefficients."""
+    if parameterization == 'coefficients':
+        return ['c1', 'c2']
+    if parameterization in {'decorrelated', 'decorrelated_linear'}:
+        return ['ld_decorrelated']
+    if parameterization == 'latent_gaussian':
+        return ['ld_latent']
+    raise ValueError(f"Unknown power-2 LD parameterization: {parameterization}")
 
 def _param_at(params, name, idx=None):
     if name not in params:
@@ -2641,7 +2691,12 @@ def get_samples_chunked(
                         if key in {"dense_mass", "regularize_mass_matrix",
                                    "target_accept_prob", "max_tree_depth"}
                     }
-                    adaptive_nuts.update(target_accept_prob=0.95)
+                    # This is the legacy adaptive joint-NUTS safety net, not
+                    # the shallow-tree production Laplace kernel. Restore its
+                    # historical tree-depth allowance for difficult lanes.
+                    adaptive_nuts.update(
+                        target_accept_prob=0.95, max_tree_depth=10
+                    )
                     fallback = get_samples(
                         model, jax.random.fold_in(key_chunk, 99173 + attempt_index),
                         t, yerr_chunk[selected], y_chunk[selected], fallback_init,
@@ -2772,10 +2827,50 @@ def _resolve_stage_vmap_width(
     n_planets,
     transit_window,
 ):
-    """Load a measured width only for its exact runtime/science workload."""
-    from models.channel_batching import WidthSelection
+    """Resolve an automatic/modelled or measured resident width."""
+    from models.channel_batching import (
+        SpectroMemoryModel,
+        WidthSelection,
+        resolve_spectro_auto_width,
+    )
 
     stage_name = str(stage_name).lower()
+    if str(default_width).lower() == 'auto':
+        stats = jax.devices()[0].memory_stats() or {}
+        bytes_limit = int(stats.get('bytes_limit', 0))
+        if bytes_limit <= 0:
+            raise ValueError(
+                "spectro_chunk_size='auto' requires a backend that reports "
+                "memory_stats()['bytes_limit']."
+            )
+        # Conservative envelope of the exact-stage V100 fits in
+        # acceleration_reports/memory_chunk_study.md.  The cadence slope is
+        # deliberately the largest fitted mode slope.  PRISM is capped at the
+        # only validated native-cadence speed point; shorter modes are capped
+        # at the largest measured width.
+        model = SpectroMemoryModel(
+            intercept_bytes=160_000_000,
+            bytes_per_lane=0.0,
+            bytes_per_lane_cadence=6_000.0,
+            bytes_per_draw_lane=128.0,
+        )
+        speed_cap = 4 if int(num_cadences) > 10_000 else 160
+        width = resolve_spectro_auto_width(
+            model,
+            bytes_limit=bytes_limit,
+            cadences=int(num_cadences),
+            draws=int(mcmc_kwargs['num_samples']),
+            speed_cap=speed_cap,
+            max_channels=speed_cap,
+            headroom_fraction=0.25,
+        )
+        print(
+            f"[spectro auto-width] stage={stage_name}, cadences={num_cadences}, "
+            f"bytes_limit={bytes_limit}, headroom=25%, speed_cap={speed_cap}, "
+            f"selected={width} lanes.",
+            flush=True,
+        )
+        return width
     path = flags.get(
         f"{stage_name}_width_selection",
         flags.get("spectro_width_selection"),
@@ -3296,6 +3391,12 @@ def _resolve_jaxoplanet_spectro_nuts_kwargs(
                     flags.get(
                         f'{stage_prefix}_laplace_fd_relative_step',
                         flags.get('spectro_laplace_fd_relative_step', 2.0e-4),
+                    )
+                ),
+                laplace_fd_batch_size=int(
+                    flags.get(
+                        f'{stage_prefix}_laplace_fd_batch_size',
+                        flags.get('spectro_laplace_fd_batch_size', 1),
                     )
                 ),
                 laplace_fuse_program=bool(
@@ -5437,24 +5538,6 @@ def main():
         raise ValueError(
             "flags.spectro_jitter_prior_scale and flags.spectro_jitter_prior_center must be > 0."
         )
-    spectro_ld_parameterization = str(
-        flags.get('spectro_ld_parameterization', 'coefficients')
-    ).lower()
-    whitelight_ld_parameterization = str(
-        flags.get('whitelight_ld_parameterization', 'coefficients')
-    ).lower()
-    for name, value in (
-        ('spectro_ld_parameterization', spectro_ld_parameterization),
-        ('whitelight_ld_parameterization', whitelight_ld_parameterization),
-    ):
-        if value not in {
-            'coefficients', 'decorrelated', 'decorrelated_linear',
-            'latent_gaussian',
-        }:
-            raise ValueError(
-                f"flags.{name} must be coefficients, decorrelated, "
-                "decorrelated_linear, or latent_gaussian."
-            )
     if spectro_sampler not in {
         'joint_nuts', 'independent_nuts', 'independent_hmc', 'laplace_is'
     }:
@@ -5523,9 +5606,11 @@ def main():
         spectro_sampling_mode = 'independent' if transit_engine == 'harmonica' else 'joint'
     else:
         spectro_sampling_mode = spectro_sampling_mode_raw
-    vmap_chunk = flags.get('vmap_chunk', False)
+    vmap_chunk = flags.get('spectro_chunk_size', flags.get('vmap_chunk', False))
     vmap_chunk_size = None
-    if isinstance(vmap_chunk, (int, float)) and not isinstance(vmap_chunk, bool):
+    if isinstance(vmap_chunk, str) and vmap_chunk.lower() == 'auto':
+        vmap_chunk_size = 'auto'
+    elif isinstance(vmap_chunk, (int, float)) and not isinstance(vmap_chunk, bool):
         vmap_chunk_size = int(vmap_chunk)
     elif vmap_chunk is True:
         vmap_chunk_size = 50
@@ -5543,7 +5628,7 @@ def main():
             "flags.spectro_sampling_mode='independent' without flags.vmap_chunk; "
             "defaulting spectroscopic chunk size to 1 channel per job."
         )
-    if vmap_chunk_size is not None and vmap_chunk_size < 1:
+    if vmap_chunk_size is not None and vmap_chunk_size != 'auto' and vmap_chunk_size < 1:
         raise ValueError("flags.vmap_chunk must resolve to an integer >= 1.")
     # Measured widths are resolved only when their stage is actually about to
     # run, after the requested JAX backend and exact cadence/model workload are
@@ -5615,6 +5700,12 @@ def main():
     )
     ld_profile = flags.get('ld_profile', 'quadratic')
     ld_prior_mode = _resolve_ld_prior_mode(flags, stellar_cfg, ld_profile)
+    spectro_ld_parameterization = _resolve_ld_parameterization(
+        flags, 'spectro_ld_parameterization', ld_prior_mode, ld_profile
+    )
+    whitelight_ld_parameterization = _resolve_ld_parameterization(
+        flags, 'whitelight_ld_parameterization', ld_prior_mode, ld_profile
+    )
     if hr_custom_ld_path and ld_profile != 'power2':
         raise ValueError("flags.hr_custom_ld_path currently supports only flags.ld_profile: 'power2'.")
     if transit_engine == 'harmonica' and ld_profile not in {'power2', 'quadratic'}:
@@ -6133,8 +6224,9 @@ def main():
             # falls back to NumPyro's default initialization and defeats the
             # stellar-informed starting point for both transit engines.
             if ld_profile == 'power2' and ld_prior_mode != 'fixed':
-                init_params_wl['c1'] = U_mu_wl[0]
-                init_params_wl['c2'] = U_mu_wl[1]
+                init_params_wl.update(_power2_ld_initial_sites(
+                    U_mu_wl, whitelight_ld_parameterization
+                ))
             if transit_engine == 'harmonica':
                 for harmonic_name in HARMONICA_ODD_HARMONICS:
                     init_params_wl[_harmonica_frac_site(harmonic_name)] = _harmonica_coeff_to_frac(
@@ -6598,7 +6690,9 @@ def main():
                     elif ld_profile == "quadratic":
                         stage2_sites.append("u")
                     elif ld_profile == "power2":
-                        stage2_sites.extend(["c1", "c2"])
+                        stage2_sites.extend(_power2_ld_optimization_sites(
+                            whitelight_ld_parameterization
+                        ))
                 if n_planets_sanity != 1:
                     stage2_sites = None
 
@@ -8112,7 +8206,11 @@ def main():
                         nuts_kwargs=gray_nuts_kwargs,
                         mcmc_kwargs=gray_mcmc,
                         use_chunked=True,
-                        chunk_size=(vmap_chunk_size_lr or num_lcs_lr),
+                        chunk_size=(
+                            min(40, int(num_lcs_lr))
+                            if vmap_chunk_size_lr == 'auto'
+                            else (vmap_chunk_size_lr or num_lcs_lr)
+                        ),
                         chunk_mode='serial',
                         output_dir=output_dir,
                         checkpoint_prefix=gray_prefix,

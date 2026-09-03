@@ -1,0 +1,7 @@
+dataset: wasp39_nrs1_g395h_r20
+analysis_stage: prep
+variants:
+  - name: fixed_linear_retry3
+    overrides:
+      input_dir: /scratch/midway3/tfairnington/FITS
+      flags: {ld_prior: fixed, ld_profile: power2, detrending_type: linear, whitelight_mass_matrix: laplace}

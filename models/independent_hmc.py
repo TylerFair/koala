@@ -85,6 +85,7 @@ def _resolve_hmc_options(
         "laplace_eigenvalue_floor",
         "laplace_hessian_method",
         "laplace_fd_relative_step",
+        "laplace_fd_batch_size",
         "laplace_compare_exact_hessian",
         "trajectory_jitter",
         "laplace_map_method",
@@ -183,6 +184,7 @@ def _resolve_hmc_options(
         "laplace_fd_relative_step": float(
             kernel.get("laplace_fd_relative_step", 2.0e-4)
         ),
+        "laplace_fd_batch_size": int(kernel.get("laplace_fd_batch_size", 1)),
         "laplace_compare_exact_hessian": bool(
             kernel.get("laplace_compare_exact_hessian", False)
         ),
@@ -228,6 +230,8 @@ def _resolve_hmc_options(
         )
     if result["laplace_fd_relative_step"] <= 0.0:
         raise ValueError("laplace_fd_relative_step must be > 0.")
+    if result["laplace_fd_batch_size"] < 0:
+        raise ValueError("laplace_fd_batch_size must be >= 0.")
     if not 0.0 <= result["trajectory_jitter"] < 1.0:
         raise ValueError("trajectory_jitter must be in [0, 1).")
     if result["laplace_map_method"] not in {"newton", "diagonal"}:

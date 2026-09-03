@@ -28,6 +28,93 @@ BATCH_PLAN_SCHEMA_VERSION = 2
 WIDTH_SELECTION_SCHEMA_VERSION = 2
 
 
+@dataclass(frozen=True)
+class SpectroMemoryModel:
+    """Affine peak-memory model for a fixed sampler/model family.
+
+    The draw term represents compact retained posterior/diagnostic arrays;
+    cadence-sized temporaries are represented separately so the rule remains
+    useful across instrument modes.
+    """
+
+    intercept_bytes: float
+    bytes_per_lane: float
+    bytes_per_lane_cadence: float
+    bytes_per_draw_lane: float = 0.0
+
+    def predict(self, width: int, cadences: int, draws: int = 0) -> int:
+        width, cadences, draws = int(width), int(cadences), int(draws)
+        if width < 1 or cadences < 1 or draws < 0:
+            raise ValueError("width/cadences must be positive and draws non-negative.")
+        value = (
+            self.intercept_bytes
+            + self.bytes_per_lane * width
+            + self.bytes_per_lane_cadence * width * cadences
+            + self.bytes_per_draw_lane * width * draws
+        )
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("Memory model predicted an invalid byte count.")
+        return int(math.ceil(value))
+
+
+def fit_spectro_memory_model(measurements):
+    """Least-squares fit of the documented affine peak-memory model."""
+    rows, peaks = [], []
+    for item in measurements:
+        width = int(item["width"])
+        cadences = int(item["cadences"])
+        draws = int(item.get("draws", 0))
+        peak = float(item["peak_memory_bytes"])
+        if min(width, cadences) < 1 or draws < 0 or peak < 0:
+            raise ValueError("Invalid memory-model measurement.")
+        rows.append((1.0, width, width * cadences, width * draws))
+        peaks.append(peak)
+    if len(rows) < 4:
+        raise ValueError("At least four measurements are required to fit the model.")
+    coefficients, _, rank, _ = np.linalg.lstsq(
+        np.asarray(rows, dtype=np.float64),
+        np.asarray(peaks, dtype=np.float64),
+        rcond=None,
+    )
+    if rank < 3:
+        raise ValueError("Memory-model measurements do not constrain cadence scaling.")
+    coefficients = np.maximum(coefficients, 0.0)
+    return SpectroMemoryModel(*coefficients)
+
+
+def resolve_spectro_auto_width(
+    model,
+    *,
+    bytes_limit,
+    cadences,
+    draws,
+    speed_cap,
+    max_channels,
+    headroom_fraction=0.25,
+):
+    """Largest predicted-safe width, capped at the measured speed sweet spot."""
+    if not isinstance(model, SpectroMemoryModel):
+        model = SpectroMemoryModel(**dict(model))
+    bytes_limit = int(bytes_limit)
+    headroom_fraction = float(headroom_fraction)
+    if bytes_limit <= 0 or not 0.0 <= headroom_fraction < 1.0:
+        raise ValueError("Invalid device limit or headroom fraction.")
+    cap = min(int(speed_cap), int(max_channels))
+    if cap < 1:
+        raise ValueError("speed_cap and max_channels must be positive.")
+    budget = int(math.floor(bytes_limit * (1.0 - headroom_fraction)))
+    if model.predict(1, cadences, draws) > budget:
+        raise ValueError("Even one spectroscopic lane exceeds the memory budget.")
+    low, high = 1, cap
+    while low < high:
+        middle = (low + high + 1) // 2
+        if model.predict(middle, cadences, draws) <= budget:
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
 def _canonical_sha256(payload: Mapping[str, Any]) -> str:
     encoded = json.dumps(
         payload,
@@ -911,8 +998,11 @@ __all__ = [
     "PilotDiagnostics",
     "WidthMeasurement",
     "WidthSelection",
+    "SpectroMemoryModel",
     "build_difficulty_batch_plan",
     "restore_channel_order",
     "restore_sample_mapping",
     "select_autotuned_width",
+    "fit_spectro_memory_model",
+    "resolve_spectro_auto_width",
 ]

@@ -342,3 +342,255 @@ and uniform LD. Keep `latent_gaussian`, `decorrelated`, and
 `decorrelated_linear` opt-in only. The inverse-CDF prior is exact, but on this
 ridge it did not improve the finite-difference Laplace metric: it produced 38
 divergences, LD ESS minima near four, and parity outliers up to 0.674 sigma.
+
+## Default flip to Jacobian-corrected LD coordinates (2026-09-02 CDT)
+
+### Implementation and prior meaning
+
+The prior-dependent default is now `decorrelated` for `widegaussian`,
+`uniform`, and the `free` alias in both white-light and spectroscopic model
+builders. Power-2 LD uses Maxted h1,h2 and quadratic LD uses Kipping q1,q2.
+All other prior modes default to `coefficients`; in particular,
+stellar-informed and Sing are unchanged. Either parameterization flag still
+overrides this resolution explicitly.
+
+This is a change of sampling coordinates only. NumPyro's transformed
+distribution evaluates the original density on the physical coefficients and
+includes the analytic change-of-variables Jacobian. Physical c1,c2 or u1,u2
+remain deterministic output sites. The model-builder keyword is part of
+`_chunk_checkpoint_fingerprint`, and the regression test directly verifies
+that coefficient and decorrelated builders produce different fingerprints.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `fit_jwst.py` | Added prior-dependent LD parameterization resolution for both stages. |
+| `tests/test_spectro_safety_guards.py` | Asserted wide/free/uniform defaults, unchanged modes, and explicit override. |
+| `tests/test_mcmc_runner_reuse.py` | Asserted the LD coordinate choice changes the checkpoint fingerprint. |
+| `SPECTRO_ACCELERATION.md` | Documented the new defaults and exact prior preservation. |
+| `docs/guides/limb_darkening.md`, `docs/guides/samplers.md` | Added the requested plain-language sampling-coordinate notes. |
+| `tools/campaign/compare_ld_coordinate_runs.py` | Added matched-sample spectrum metrics and the two-panel comparison plot. |
+| `configs_defaults/WASP-39_nrs1_g395h_uniform_quadratic_dump342.yaml`, `...dump347.yaml`, `...dump348.yaml` | Added immutable initial and retry configs for a real uniform-quadratic dump. |
+| queue scripts 340--348 | Added immutable GPU invocations; 345/346 became recorded no-ops after the user dropped stellar reruns. |
+| `ld_jacobian_vs_legacy_HAT-P-12_SOSS.{png,json}`, `ld_jacobian_vs_legacy_WASP-39_G395H.{png,json}` | Saved the requested visual checks and full machine-readable metrics. |
+
+No existing data or output was deleted, renamed, or overwritten.
+
+### Full-spectrum visual and numerical shape checks
+
+Both comparisons use identical stage inputs and the same seed within each
+pair. Depths and error bars are posterior median and posterior standard
+deviation. The lower figure panels plot candidate minus legacy depth with the
+quadrature sum of the two posterior standard deviations.
+
+| Dataset | Channels | Legacy wall / compile | New-coordinate wall / compile | Legacy / new div. | offset (ppm) | slope (ppm/um) | slope uncertainty (ppm/um) | RMS after offset (ppm) | median-depth MC RMS (ppm) | error ratio p05 / med / p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| HAT-P-12 SOSS order 1, wide Gaussian | 118 | 604.24 / 55.05 s | 121.89 / 76.92 s | 0 / 75 | -0.470 | -2.236 | 20.023 | 6.616 | 6.858 | 0.918 / 1.002 / 1.083 |
+| WASP-39 G395H NRS1, uniform quadratic | 68 | 217.14 / 35.93 s | 83.78 / 56.37 s | 0 / 18,761 | +144.642 | -99.916 | 59.484 | 239.272 | 5.599 | 0.00045 / 0.00662 / 1.157 |
+
+The SOSS spectra are roughly the same: the fitted slope is consistent with
+zero, and its 6.62 ppm offset-removed RMS matches the 6.86 ppm Monte Carlo
+expectation. The figure is `acceleration_reports/ld_jacobian_vs_legacy_HAT-P-12_SOSS.png`.
+
+The uniform-quadratic G395H raw Laplace run **does change the recovered
+spectral shape** relative to the converged legacy run. Its slope is not a
+clean zero-shape result and its 239 ppm RMS is about 43 times the 5.60 ppm
+Monte Carlo expectation. The visual discrepancy is clear in
+`acceleration_reports/ld_jacobian_vs_legacy_WASP-39_G395H.png`. This is not
+evidence that the Jacobian changed the posterior target: the candidate has
+18,761 divergences, median depth ESS 8.42 (minimum 1.32), and median depth
+error ratio 0.0066, so it did not sample that target. MAP preparation also
+ended at 200 iterations in many lanes, with gradient norms as large as
+4.84e3 and reported condition-number caps of 1e8. The production automatic
+sampler gate must therefore reject and swap these lanes; an un-gated raw
+Laplace result is unsafe.
+
+For completeness, the SOSS candidate depth ESS was 1266 median / 865 minimum,
+c1 was 1024 / 428, and c2 was 1075 / 423. Its 75 divergences likewise mean
+the automatic gate will swap affected lanes even though the aggregate shape
+check is clean.
+
+### Exact commands
+
+The exact GPU commands and environment are preserved in executable queue
+scripts:
+
+```text
+acceleration_reports/gpu_queue/done/340_ld_soss_full_joint_coeff.sh
+acceleration_reports/gpu_queue/done/341_ld_soss_full_decorrelated.sh
+acceleration_reports/gpu_queue/done/342_uniform_quadratic_dump.sh
+acceleration_reports/gpu_queue/done/343_ld_uniform_quadratic_full_joint.sh
+acceleration_reports/gpu_queue/done/344_ld_uniform_quadratic_full_decorrelated.sh
+acceleration_reports/gpu_queue/done/347_uniform_quadratic_dump_retry.sh
+acceleration_reports/gpu_queue/done/348_uniform_quadratic_dump_retry2.sh
+```
+
+The successful dump was produced by queue 348. The two analysis commands
+were:
+
+```bash
+JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false \
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/campaign/compare_ld_coordinate_runs.py \
+/scratch/midway3/tfairnington/accel_gpu_results/340_ld_soss_full_joint_coeff/joint_coeff.npz \
+/scratch/midway3/tfairnington/accel_gpu_results/341_ld_soss_full_decorrelated/laplace_decorrelated.npz \
+/scratch/midway3/tfairnington/accel_stage_inputs/HAT-P-12_NIRISS_SOSS_order1_Rreference_high_resolution_inputs.pkl \
+--gate-json /scratch/midway3/tfairnington/accel_stage_inputs/references/HAT-P-12_NIRISS_SOSS_order1_Rreference_high_resolution_inputs_ch0_40_pooled_joint_nuts_noise_floor.json \
+--figure acceleration_reports/ld_jacobian_vs_legacy_HAT-P-12_SOSS.png \
+--title 'HAT-P-12 SOSS order 1: LD sampling coordinates' \
+--output acceleration_reports/ld_jacobian_vs_legacy_HAT-P-12_SOSS.json
+
+JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false \
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/campaign/compare_ld_coordinate_runs.py \
+/scratch/midway3/tfairnington/accel_gpu_results/343_ld_uniform_quadratic_full_joint/joint_coeff.npz \
+/scratch/midway3/tfairnington/accel_gpu_results/344_ld_uniform_quadratic_full_decorrelated/laplace_decorrelated.npz \
+/scratch/midway3/tfairnington/accel_gpu_results/348_uniform_quadratic_dump_retry2/stage_inputs/WASP-39_NIRSPEC_G395H_nrs1_Rreference_high_resolution_inputs.pkl \
+--figure acceleration_reports/ld_jacobian_vs_legacy_WASP-39_G395H.png \
+--title 'WASP-39 G395H NRS1: uniform quadratic LD coordinates' \
+--output acceleration_reports/ld_jacobian_vs_legacy_WASP-39_G395H.json
+```
+
+The final verification commands were:
+
+```bash
+JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false \
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m pytest -q \
+tests/test_ld_parameterization.py tests/test_spectro_safety_guards.py \
+tests/test_mcmc_runner_reuse.py tests/test_independent_nuts.py
+
+JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false \
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m sphinx -W -b html docs docs/_build/html
+```
+
+Final results were **40 passed** with three dependency warnings in 130.37 s,
+and the warning-as-error HTML documentation build succeeded.
+
+### Failures and open risks
+
+Queue 342 spent 41.1 s in failed white-light Laplace preparation, fell back
+to adaptive NUTS, retained 4,000 draws after three extension blocks, and then
+failed in the low-resolution automatic HMC swap because
+`laplace_fd_batch_size` was passed to independent HMC. Its dispatcher exit was
+1. Queue 347 failed immediately because explicit `joint_nuts` was combined
+with the then-default `spectro_mass_matrix: laplace`; queue 348 corrected this
+to `adaptive`, shortened only the dump-producing fit, and exited 0. The
+queue-348 dump is the sole input to both reported G395H 1,000-draw samplers.
+
+The principal open risk is the failed uniform-quadratic raw Laplace shape
+check. The requested default flip is implemented as directed, but production
+correctness for this case depends on the already-implemented divergence/ESS
+gate and exact-MCMC sampler swap. This task did not run a full automatic-swap
+uniform-quadratic production spectrum after the scope was narrowed to the
+two direct sampler overlays. Stellar-informed reruns were explicitly dropped;
+queued scripts 345 and 346 exited 0 after printing `SKIPPED` and ran no fit.
+
+### Quadratic-default correction and production swap (2026-09-02 CDT)
+
+The automatic Jacobian-coordinate default is now restricted to power-2
+wide-Gaussian and uniform/free LD. Quadratic LD resolves to `coefficients` for
+both white light and spectroscopy; an explicit `decorrelated` flag still
+selects Kipping q1,q2. Stellar-informed, Sing, and fixed modes are unchanged.
+Because the resolved builder parameterization is part of the checkpoint
+signature, quadratic wide/free jobs no longer reuse checkpoints made with the
+old automatic Kipping choice.
+
+| File | Change |
+|---|---|
+| `fit_jwst.py` | Made LD resolution depend on both prior and profile; restored depth 10 for the legacy adaptive fallback. |
+| `models/independent_hmc.py` | Carried `laplace_fd_batch_size` through HMC option resolution so selective fallback accepts production NUTS inputs. |
+| `models/jaxoplanet/builder.py` | Enforced the bounded physical support after inverse decorrelation, closing a transformed-distribution support leak. |
+| `tools/diagnose_quadratic_map_path.py` | Added a one-lane CPU trace of potential, gradient, Hessian spectrum, q, and recovered u along the production MAP iterations. |
+| `tools/run_production_swap_on_stage_inputs.py` | Added a stage-dump replay of the production gate and exact-MCMC swap chain with sampler provenance. |
+| `tools/campaign/compare_ld_coordinate_runs.py` | Added an explicit candidate legend label for mixed production samplers. |
+| `tests/test_ld_parameterization.py`, `tests/test_spectro_safety_guards.py`, `tests/test_independent_hmc.py` | Added support, profile-resolution, explicit-override, and HMC FD-batching coverage. |
+| `SPECTRO_ACCELERATION.md`, `docs/guides/limb_darkening.md`, `docs/guides/samplers.md` | Documented the power-2-only automatic transform and coefficient default for quadratic LD. |
+| `acceleration_reports/quadratic_kipping_map_path_channel40.json` | Saved the channel-40 MAP trace. |
+| `acceleration_reports/ld_coefficients_production_swap_vs_legacy_WASP-39_G395H_corrected.png` | Legacy-versus-production spectrum and per-channel difference figure. |
+
+#### Why Kipping failed here
+
+Channel 40 did not start on an edge: q=(0.04801, 0.18581), corresponding to
+u=(0.08142, 0.13768), with gradient norm 457 and Hessian condition number
+7.19e5. By iteration 20 the optimizer had reached q=(0.000375, 4.973), whose
+inverse is u=(0.1927, -0.1733). It ended at iteration 200 with q=(0.001048,
+6.512), u=(0.4216, -0.3893), gradient norm 693, a nearly zero/negative raw
+minimum Hessian eigenvalue, and the repaired condition number pinned at 1e8.
+Thus the initial point was not the problem, and the 1e8 cap was a downstream
+symptom rather than the initiating cause.
+
+The direct cause was a support leak, not evidence that the physical posterior
+sat on the Kipping triangle edge. The custom transform advertised a real-vector
+codomain; NumPyro therefore did not apply a bounded support transform, while
+the base Uniform log density assumed support had already been enforced. The
+MAP could consequently obtain a finite potential after its inverse left
+[0,1]^2, then follow an almost flat, nonphysical direction until Hessian repair
+hit 1e8. An explicit zero/-infinity support factor now preserves the intended
+bounded prior for opt-in decorrelated coordinates. Quadratic remains in
+coefficient coordinates by default because even a corrected hard boundary is
+poor geometry for this Laplace preparation.
+
+#### Full 68-channel production result
+
+| Sampler result | wall (s) | retained lanes: Laplace NUTS / HMC-8 / adaptive | attempted divergences: NUTS / HMC / adaptive | depth ESS min / median | u1 ESS min / median | u2 ESS min / median | offset (ppm) | slope (ppm/um) | RMS after offset / MC RMS (ppm) | error ratio p05 / med / p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Legacy joint NUTS, coefficients | 217.14 | 0 / 0 / 68 | 0 | not recomputed | not recomputed | not recomputed | reference | reference | reference | reference |
+| Raw Laplace NUTS, Kipping (rejected) | 83.78 | 68 / 0 / 0 | 18,761 / 0 / 0 | 1.32 / 8.42 | unusable | unusable | +144.642 | -99.916 +/- 59.484 | 239.272 / 5.599 | 0.00045 / 0.00662 / 1.157 |
+| Production coefficient gate + swap | 326.44 | 53 / 9 / 6 | 35 / 1 / 0 | 389.94 / 782.23 | 8.32 / 100.48 | 8.67 / 103.82 | -1.538 | +1.686 +/- 59.484 | 6.266 / 6.349 | 0.928 / 0.999 / 1.075 |
+
+The final retained mixed posterior has zero divergences by construction: each
+retained lane passed the production zero-divergence/depth-ESS gate. The 389.94
+depth ESS quoted above is ArviZ bulk ESS; the production NumPyro gate uses its
+own estimator and accepted every retained lane at >=400. Fifteen lanes were
+sent to HMC-8; nine passed there, and six continued to adaptive joint NUTS.
+The LD coefficients themselves remain slow (minimum bulk ESS about 8), which
+is an open mixing limitation of quadratic uniform LD even though the depth
+spectrum is fidelity-safe.
+
+The spectrum check passes the requested shape criterion. Its slope is
+consistent with zero (1.69 +/- 59.48 ppm/um), and the 6.27 ppm offset-removed
+RMS agrees with the 6.35 ppm Monte Carlo expectation. The weighted offset is
+-1.54 ppm and median error ratio is 0.999. The visual overlay and difference
+panel are in
+`acceleration_reports/ld_coefficients_production_swap_vs_legacy_WASP-39_G395H_corrected.png`.
+
+#### Exact commands, failures, and risks
+
+CPU diagnosis and comparison:
+
+```bash
+JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false \
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/diagnose_quadratic_map_path.py \
+/scratch/midway3/tfairnington/accel_gpu_results/348_uniform_quadratic_dump_retry2/stage_inputs/WASP-39_NIRSPEC_G395H_nrs1_Rreference_high_resolution_inputs.pkl \
+--channel 40 --iterations 200 --output acceleration_reports/quadratic_kipping_map_path_channel40.json
+
+JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false \
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/campaign/compare_ld_coordinate_runs.py \
+/scratch/midway3/tfairnington/accel_gpu_results/343_ld_uniform_quadratic_full_joint/joint_coeff.npz \
+/scratch/midway3/tfairnington/accel_gpu_results/392_uniform_quadratic_production_swap_retry2/production_coefficients_swap.npz \
+/scratch/midway3/tfairnington/accel_gpu_results/348_uniform_quadratic_dump_retry2/stage_inputs/WASP-39_NIRSPEC_G395H_nrs1_Rreference_high_resolution_inputs.pkl \
+--figure acceleration_reports/ld_coefficients_production_swap_vs_legacy_WASP-39_G395H_corrected.png \
+--candidate-label 'Production Laplace NUTS + selective swaps (coefficients)' \
+--title 'WASP-39 G395H NRS1: production coefficient sampler swap' \
+--output acceleration_reports/ld_coefficients_production_swap_vs_legacy_WASP-39_G395H_corrected.json
+```
+
+The exact GPU commands are preserved in queue scripts 390--392. Queue 390
+failed after primary NUTS when HMC option resolution omitted
+`laplace_fd_batch_size`. Queue 391 fixed that and reached adaptive NUTS, but
+failed the gate in two lanes because fallback inherited max tree depth 5.
+Queue 392 used the restored legacy depth 10, exited 0, and wrote to the fresh
+root `/scratch/midway3/tfairnington/accel_gpu_results/392_uniform_quadratic_production_swap_retry2/`.
+
+The main open risk is that the earlier HAT-P-12 Maxted shape benchmark was run
+before the transformed-support leak was identified; prior sampling itself was
+correct, and its depth spectrum agreed with legacy, but some retained physical
+LD coefficients were outside their declared bounds. The support is now
+enforced, so the default is mathematically prior-preserving as documented, but
+the corrected-support power-2 full-spectrum performance has not been rerun in
+this narrowly scoped follow-up. No GPU jobs remain pending.
+
+Final verification used the mandated CPU environment. The LD/default/HMC
+group passed 28 tests in 38.49 s, `tests/test_independent_nuts.py` passed 11
+tests in 93.45 s (three dependency warnings in each invocation), and
+`python -m sphinx -W -b html docs docs/_build/html` succeeded. Queue exit
+codes were 390=1, 391=1, and 392=0; all are terminal and none is pending.

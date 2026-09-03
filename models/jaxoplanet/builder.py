@@ -26,6 +26,18 @@ from ..gp import (
 )
 from ..trends import spot_crossing
 
+
+def _enforce_decorrelated_coefficient_support(coefficients, low, high):
+    """Retain the bounded base-prior support in real-valued LD coordinates."""
+    coefficients = jnp.asarray(coefficients)
+    inside = jnp.all(
+        (coefficients >= jnp.asarray(low))
+        & (coefficients <= jnp.asarray(high)), axis=-1
+    )
+    numpyro.factor(
+        "ld_decorrelated_support", jnp.where(inside, 0.0, -jnp.inf)
+    )
+
 from ..harmonica.core import (
     harmonica_a_rs_from_duration,
     harmonica_cos_i_from_geometry,
@@ -263,6 +275,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     q = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, QuadraticKippingTransform()))
                     u = numpyro.deterministic('u', QuadraticKippingTransform().inv(q))
+                    _enforce_decorrelated_coefficient_support(u, 0.0, 1.0)
                 else:
                     u = numpyro.sample("u", coefficient_prior)
             elif ld_mode == 'uniform':
@@ -274,6 +287,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     q = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, QuadraticKippingTransform()))
                     u = numpyro.deterministic('u', QuadraticKippingTransform().inv(q))
+                    _enforce_decorrelated_coefficient_support(u, 0.0, 1.0)
                 else:
                     u = numpyro.sample("u", coefficient_prior)
             elif ld_mode == 'fixed':
@@ -305,6 +319,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, power2_transform))
                     coefficients = power2_transform.inv(h)
+                    _enforce_decorrelated_coefficient_support(
+                        coefficients, jnp.asarray([0.0, 0.001]), 1.0
+                    )
                     c1 = numpyro.deterministic('c1', coefficients[0])
                     c2 = numpyro.deterministic('c2', coefficients[1])
                 else:
@@ -323,6 +340,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, power2_transform))
                     coefficients = power2_transform.inv(h)
+                    _enforce_decorrelated_coefficient_support(coefficients, 0.0, 1.0)
                     c1 = numpyro.deterministic('c1', coefficients[0])
                     c2 = numpyro.deterministic('c2', coefficients[1])
                 else:
@@ -632,6 +650,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                         u = numpyro.deterministic(
                             'u', QuadraticKippingTransform().inv(q)
                         )
+                        _enforce_decorrelated_coefficient_support(u, 0.0, 1.0)
                     else:
                         u = numpyro.sample('u', u_prior_dist)
             elif ld_profile == 'power2':
@@ -668,6 +687,9 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                         ),
                     )
                     coefficients = power2_transform.inv(h)
+                    _enforce_decorrelated_coefficient_support(
+                        coefficients, jnp.asarray([0.0, 0.001]), 1.0
+                    )
                     c1 = numpyro.deterministic('c1', coefficients[:, 0])
                     c2 = numpyro.deterministic('c2', coefficients[:, 1])
                 else:
@@ -695,6 +717,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     q = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, QuadraticKippingTransform()))
                     u = numpyro.deterministic('u', QuadraticKippingTransform().inv(q))
+                    _enforce_decorrelated_coefficient_support(u, 0.0, 1.0)
                 else:
                     u = numpyro.sample('u', coefficient_prior)
             elif ld_profile == 'power2':
@@ -711,6 +734,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, power2_transform))
                     coefficients = power2_transform.inv(h)
+                    _enforce_decorrelated_coefficient_support(coefficients, 0.0, 1.0)
                     c1 = numpyro.deterministic('c1', coefficients[:, 0])
                     c2 = numpyro.deterministic('c2', coefficients[:, 1])
                 else:

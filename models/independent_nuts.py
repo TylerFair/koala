@@ -422,6 +422,7 @@ def _resolve_sampler_options(
         "laplace_eigenvalue_floor",
         "laplace_hessian_method",
         "laplace_fd_relative_step",
+        "laplace_fd_batch_size",
         "laplace_compare_exact_hessian",
         "laplace_map_method",
         "laplace_line_search_steps",
@@ -529,6 +530,10 @@ def _resolve_sampler_options(
         "laplace_fd_relative_step": float(
             nuts.get("laplace_fd_relative_step", 2.0e-4)
         ),
+        # Zero requests the historical all-coordinate vmap.  A positive
+        # value lowers the finite-difference coordinate axis in bounded
+        # batches, reducing the simultaneous cadence-sized gradient buffers.
+        "laplace_fd_batch_size": int(nuts.get("laplace_fd_batch_size", 1)),
         "laplace_compare_exact_hessian": bool(
             nuts.get("laplace_compare_exact_hessian", False)
         ),
@@ -567,6 +572,8 @@ def _resolve_sampler_options(
         )
     if result["laplace_fd_relative_step"] <= 0.0:
         raise ValueError("laplace_fd_relative_step must be > 0.")
+    if result["laplace_fd_batch_size"] < 0:
+        raise ValueError("laplace_fd_batch_size must be >= 0.")
     if result["laplace_map_method"] not in {"newton", "diagonal"}:
         raise ValueError(
             "laplace_map_method must be 'newton' or 'diagonal'."
@@ -786,12 +793,25 @@ class _IndependentSamplerRunner:
             def central_gradient_hessian(flat, coordinate_steps):
                 offsets = jnp.eye(flat.shape[0], dtype=flat.dtype)
                 offsets = offsets * coordinate_steps[:, None]
-                plus = jax.vmap(lambda offset: gradient_fn(flat + offset))(
-                    offsets
-                )
-                minus = jax.vmap(lambda offset: gradient_fn(flat - offset))(
-                    offsets
-                )
+                batch_size = options["laplace_fd_batch_size"]
+                if batch_size:
+                    plus = jax.lax.map(
+                        lambda offset: gradient_fn(flat + offset),
+                        offsets,
+                        batch_size=batch_size,
+                    )
+                    minus = jax.lax.map(
+                        lambda offset: gradient_fn(flat - offset),
+                        offsets,
+                        batch_size=batch_size,
+                    )
+                else:
+                    plus = jax.vmap(
+                        lambda offset: gradient_fn(flat + offset)
+                    )(offsets)
+                    minus = jax.vmap(
+                        lambda offset: gradient_fn(flat - offset)
+                    )(offsets)
                 estimate = (plus - minus) / (2.0 * coordinate_steps[:, None])
                 return 0.5 * (estimate + estimate.T)
 

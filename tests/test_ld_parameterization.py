@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive
+from numpyro.infer.util import log_density
 
 from models.ld_parameterization import (
     Power2LinearTransform,
@@ -16,6 +17,17 @@ from models.ld_parameterization import (
     gaussian_to_truncated_normal,
     gaussian_to_uniform,
 )
+from models.jaxoplanet.builder import _enforce_decorrelated_coefficient_support
+
+
+def test_decorrelated_support_factor_rejects_invalid_inverse_images():
+    def model(coefficients):
+        _enforce_decorrelated_coefficient_support(coefficients, 0.0, 1.0)
+
+    valid, _ = log_density(model, (jnp.asarray([0.2, 0.8]),), {}, {})
+    invalid, _ = log_density(model, (jnp.asarray([0.2, -0.1]),), {}, {})
+    assert valid == 0.0
+    assert jnp.isneginf(invalid)
 
 
 def test_transformed_prior_is_exact_in_physical_coefficients():

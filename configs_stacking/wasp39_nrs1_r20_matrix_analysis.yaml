@@ -1,0 +1,6 @@
+dataset: wasp39_nrs1_g395h_r20
+variants:
+  - {name: informed_linear_retry2, queue_number: 309}
+  - {name: uniform_linear_retry2, queue_number: 311}
+  - {name: wide_linear_retry2, queue_number: 312}
+  - {name: fixed_linear_retry3, queue_number: 314}

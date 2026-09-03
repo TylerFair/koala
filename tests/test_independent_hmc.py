@@ -100,6 +100,7 @@ def test_laplace_hmc_uses_fd_metric_and_jittered_fixed_work():
         nuts_kwargs={
             "mass_matrix": "laplace",
             "laplace_hessian_method": "finite_difference",
+            "laplace_fd_batch_size": 1,
             "laplace_compare_exact_hessian": True,
             "laplace_map_iterations": 3,
             "laplace_warmup": 6,

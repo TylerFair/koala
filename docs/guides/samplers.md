@@ -11,6 +11,8 @@ flags:
 
 White-light fits use NumPyro NUTS. Set `whitelight_mass_matrix: laplace` for Hessian preconditioning; a failed Laplace preparation falls back to adaptive mass-matrix NUTS.
 
+Wide-Gaussian and uniform/free power-2 limb-darkening priors use Maxted decorrelated coordinates by default in both white-light and spectroscopic fits. The analytic Jacobian leaves the physical prior and reported coefficients unchanged; quadratic priors default to coefficient coordinates, while Kipping coordinates remain selectable, and stellar-informed and Sing modes are unaffected.
+
 Independent NUTS adapts a low-dimensional chain per wavelength channel. With `spectro_mass_matrix: laplace`, each chain uses a local Laplace metric. The production policy switches a channel failing the depth-ESS/divergence gate to Laplace-metric fixed-step HMC-8, and switches back when the alternative fails. Select HMC directly with `spectro_sampler: independent_hmc` and `spectro_hmc_num_steps: 8`. `joint_nuts` is the legacy adaptive joint-channel fallback.
 
 `laplace_is` is opt-in approximate inference centered on a MAP/Laplace proposal. It reports importance diagnostics and can fall back for poor channels; use it only when its approximation and quality thresholds are acceptable for the analysis. The gate requires zero divergences and a minimum bulk ESS for transit depth. Logs such as `depth ESS below ...`, `divergences=...`, and `PASSED/FAILED ... GATE` report the channel or stage decision. JSON diagnostics beside chunk checkpoints contain the machine-readable values.

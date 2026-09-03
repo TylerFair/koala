@@ -95,7 +95,7 @@ The `free` alias resolves to `widegaussian`. Use `uniform` for the explicit flat
 flags: {ld_profile: power2, ld_prior: uniform}
 ```
 
-Uniform mode samples both coefficient dimensions on $[0,1]$. The builder may use a decorrelated transformed coordinate, while writing physical coefficients as deterministic sites.
+Uniform mode preserves a flat prior on both physical coefficient dimensions on $[0,1]$. Wide-Gaussian and uniform/free power-2 priors are sampled in Maxted $h_1,h_2$ coordinates by default, with the analytic Jacobian preserving the original physical-coefficient prior exactly. Quadratic priors remain in coefficient coordinates by default; Kipping $q_1,q_2$ remains explicitly selectable, and builders still write the physical coefficients as deterministic sites.
 
 ## Sing coordinates and calibration
 

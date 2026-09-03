@@ -17,6 +17,45 @@ from models.channel_batching import (
 )
 
 
+@pytest.mark.parametrize("prior", ["free", "widegaussian", "uniform"])
+def test_wide_power2_ld_defaults_to_jacobian_corrected_coordinates(prior):
+    assert fit_jwst._resolve_ld_parameterization(
+        {}, "spectro_ld_parameterization", prior, "power2"
+    ) == "decorrelated"
+    assert fit_jwst._resolve_ld_parameterization(
+        {}, "whitelight_ld_parameterization", prior, "power2"
+    ) == "decorrelated"
+
+
+@pytest.mark.parametrize("prior", ["free", "widegaussian", "uniform"])
+def test_wide_quadratic_ld_keeps_coefficient_default(prior):
+    assert fit_jwst._resolve_ld_parameterization(
+        {}, "spectro_ld_parameterization", prior, "quadratic"
+    ) == "coefficients"
+    assert fit_jwst._resolve_ld_parameterization(
+        {}, "whitelight_ld_parameterization", prior, "quadratic"
+    ) == "coefficients"
+
+
+@pytest.mark.parametrize("prior", ["fixed", "informed", "sing"])
+def test_other_ld_priors_keep_coefficient_default(prior):
+    assert fit_jwst._resolve_ld_parameterization(
+        {}, "spectro_ld_parameterization", prior
+    ) == "coefficients"
+
+
+def test_explicit_ld_parameterization_overrides_prior_default():
+    assert fit_jwst._resolve_ld_parameterization(
+        {"spectro_ld_parameterization": "coefficients"},
+        "spectro_ld_parameterization",
+        "widegaussian",
+    ) == "coefficients"
+    assert fit_jwst._resolve_ld_parameterization(
+        {"spectro_ld_parameterization": "decorrelated"},
+        "spectro_ld_parameterization", "uniform", "quadratic",
+    ) == "decorrelated"
+
+
 def _unprovenanced_plan():
     pilot = PilotDiagnostics(
         channel_indices=(0, 1),

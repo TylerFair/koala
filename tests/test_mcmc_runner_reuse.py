@@ -192,6 +192,35 @@ def test_checkpoint_fingerprint_changes_with_data_and_science_signature():
     assert reference != changed_seed
 
 
+def test_checkpoint_fingerprint_changes_with_ld_parameterization():
+    def model():
+        return None
+
+    common = {
+        "rng_key": jax.random.key_data(jax.random.PRNGKey(0)),
+        "t": jnp.arange(3.0),
+        "yerr": jnp.ones((1, 3)),
+        "indiv_y": jnp.zeros((1, 3)),
+        "init_params": {"x": jnp.zeros(1)},
+        "chunk_size": 1,
+        "sampler_backend": "independent_nuts",
+        "nuts_kwargs": {"mass_matrix": "laplace"},
+        "mcmc_kwargs": {"num_samples": 10},
+        "channel_varying_kwargs": (),
+        "checkpoint_signature": {},
+        "model_kwargs": {},
+    }
+    model.__sampler_input_builder__ = {
+        "identity": "tests.fake_builder",
+        "kwargs": {"ld_parameterization": "coefficients"},
+        "callable_is_model": False,
+    }
+    coefficients = fit_jwst._chunk_checkpoint_fingerprint(model=model, **common)
+    model.__sampler_input_builder__["kwargs"]["ld_parameterization"] = "decorrelated"
+    decorrelated = fit_jwst._chunk_checkpoint_fingerprint(model=model, **common)
+    assert coefficients != decorrelated
+
+
 def test_chunk_keys_are_global_indexed_and_resume_independent(monkeypatch, tmp_path):
     observed_keys = {}
 
