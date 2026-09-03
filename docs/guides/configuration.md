@@ -25,6 +25,12 @@ python fit_jwst.py -c config.yaml
 | `wavelength_filter`, `wavelength_masks` | mapping/list / none | Include ranges and mask wavelength intervals during cube preparation |
 | `host_device` | string / read from config | Requested host device label |
 
+Stellar power-2 prior grids are stored in a fingerprinted cache at
+`/scratch/midway3/tfairnington/ld_prior_cache`. Set
+`stellar.ld_prior_cache_dir` to change the location or
+`stellar.ld_prior_cache: false` to disable it. If the directory is unavailable,
+the fit computes the prior without caching it.
+
 ## Model flags
 
 | `flags` key | Type / default | Meaning |
@@ -63,8 +69,9 @@ python fit_jwst.py -c config.yaml
 | `analysis_stage` | string / `all` | `all`, `whitelight`, `prep`, or `highres` |
 | `chunk_mode` | string / `serial` | `serial`, `parallel`, or `combine` |
 | `chunk_parallel_job_count`, `chunk_parallel_job_index` | int / none | Parallel chunk partition |
-| `compile_box` | bool / false | Enable persistent JAX compilation cache |
-| `jax_compilation_cache_dir` | path / `/scratch/midway3/tfairnington/jax_cache` | Cache used by `compile_box` |
+| `compile_box` | bool / true | Pad cadence arrays into reusable compile buckets |
+| `jax_persistent_cache` | bool / true | Enable the persistent JAX compilation cache |
+| `jax_compilation_cache_dir` | path / `/scratch/midway3/tfairnington/jax_cache` | Persistent compilation cache directory |
 | `save_whitelight_trace` | bool / false | Save white-light trace plot |
 | `whitelight_geometry_estimator` | string / `posterior_median` | Geometry handoff estimator |
 | `whitelight_log_likelihood_batch_size` | int / 64 | Draw batch for likelihood evaluation |
@@ -76,6 +83,11 @@ python fit_jwst.py -c config.yaml
 | `spectro_min_depth_ess`, `spectro_max_divergences` | int / 400, 0 | Spectroscopic quality gate |
 | `whitelight_min_ess`, `whitelight_max_divergences` | int / 400, 0 | White-light quality gate |
 | `whitelight_max_extra_blocks` | int / 3 | Additional white-light sampling blocks allowed by the gate |
+| `whitelight_mass_matrix` | string / family default | `laplace` except `2spot`, which defaults to `adaptive`; an explicit value overrides routing |
+| `whitelight_trend_parameterization` | string / family default | `cadence` for spot and step/discontinuity, `physical` otherwise; accepts `physical` or `cadence` |
+| `whitelight_2spot_ordering` | string / `legacy` | `legacy` labeled centers or the exact canonical `ordered` representation |
+| `whitelight_complex_trend_adaptive` | bool / unset | Legacy compatibility override for complex-trend routing; explicit `whitelight_mass_matrix` takes precedence |
+| `ld_uniform_coefficient_bounds` | two floats / `[0, 1]` | Bounds for quadratic uniform LD when `ld_uniform_basis: coefficients` |
 | `spectro_width_selection`, `lowres_width_selection`, `highres_width_selection` | path / none | Measured width manifest |
 | `spectro_batch_plan`, `lowres_batch_plan`, `highres_batch_plan` | path / none | Difficulty-aware batch plan |
 | `bin_time`, `bin_dt_seconds`, `bin_method` | bool,float,string / false, config value, `mean` | Flag-level time-binning controls |

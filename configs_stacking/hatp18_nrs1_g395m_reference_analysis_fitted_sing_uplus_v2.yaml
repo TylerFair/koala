@@ -1,8 +1,0 @@
-dataset: hatp18_nrs1_g395m_ref
-variants:
-  - name: fixed_power2_linear
-    queue_number: 410
-  - name: uniform_quadratic_linear_uplus_v2
-    queue_number: 421
-  - name: sing_quadratic_linear_fitted_v2
-    queue_number: 420

@@ -1,0 +1,46 @@
+# Model-averaging matrix: fit the same dataset under several limb-darkening
+# treatments and combine them. Each variant is a complete, independent fit
+# (its own white light, its own geometry), because the limb-darkening choice
+# changes the fitted geometry.
+#
+#   python -m tools.stacking.run_matrix examples/nirspec_g395m.yaml \
+#       examples/limb_darkening_stack.yaml
+#   python -m tools.stacking.stack_spectra <analysis-spec> --output results/
+#
+# The stacker weights the variants per wavelength channel by their
+# leave-one-out predictive score on the light-curve points, aligns their
+# achromatic offsets, and writes the marginalised spectrum.
+
+dataset: hatp18_nrs1_g395m
+analysis_stage: all
+
+variants:
+  - name: fixed_power2
+    overrides:
+      flags:
+        ld_profile: power2
+        ld_prior: fixed
+        detrending_type: linear
+
+  - name: stellar_informed_power2
+    overrides:
+      flags:
+        ld_profile: power2
+        ld_prior: stellarprior
+        detrending_type: linear
+
+  - name: uniform_quadratic
+    overrides:
+      flags:
+        ld_profile: quadratic
+        ld_prior: uniform
+        detrending_type: linear
+
+  - name: sing_quadratic
+    overrides:
+      stellar:
+        ld_mu_min: 0.2
+      flags:
+        ld_profile: quadratic
+        ld_prior: sing
+        detrending_type: linear

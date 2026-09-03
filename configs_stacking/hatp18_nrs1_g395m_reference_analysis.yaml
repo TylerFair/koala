@@ -1,5 +1,0 @@
-dataset: hatp18_nrs1_g395m_ref
-variants:
-  - {name: fixed_power2_linear, queue_number: 410}
-  - {name: uniform_quadratic_linear, queue_number: 411}
-  - {name: sing_quadratic_linear, queue_number: 412}

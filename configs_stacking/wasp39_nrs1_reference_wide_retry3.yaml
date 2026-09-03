@@ -1,7 +1,0 @@
-dataset: wasp39_nrs1_ref
-analysis_stage: all
-variants:
-  - name: wide_linear_retry3
-    overrides:
-      input_dir: /scratch/midway3/tfairnington/FITS
-      flags: {ld_prior: widegaussian, ld_profile: power2, detrending_type: linear, whitelight_mass_matrix: laplace}

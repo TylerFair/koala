@@ -45,6 +45,41 @@ def test_science_artifact_fingerprint_tracks_data_and_config(tmp_path):
     assert not list(tmp_path.glob("*.tmp.*"))
 
 
+def test_whitelight_fingerprint_tracks_trend_coordinates_and_ordering():
+    payload = {
+        "config": {
+            "flags": {
+                "detrending_type": "2spot",
+                "whitelight_trend_parameterization": "physical",
+                "whitelight_2spot_ordering": "legacy",
+            }
+        },
+        "time": np.array([1.0, 2.0]),
+        "flux": np.array([0.99, 1.0]),
+    }
+    reference = _science_artifact_fingerprint("whitelight", payload)
+    cadence = {
+        **payload,
+        "config": {
+            "flags": {
+                **payload["config"]["flags"],
+                "whitelight_trend_parameterization": "cadence",
+            }
+        },
+    }
+    ordered = {
+        **payload,
+        "config": {
+            "flags": {
+                **payload["config"]["flags"],
+                "whitelight_2spot_ordering": "ordered",
+            }
+        },
+    }
+    assert reference != _science_artifact_fingerprint("whitelight", cadence)
+    assert reference != _science_artifact_fingerprint("whitelight", ordered)
+
+
 def test_file_content_identity_detects_same_size_edit(tmp_path):
     source = tmp_path / "source.fits"
     source.write_bytes(b"abcdefgh")
@@ -96,6 +131,7 @@ def test_power2_ld_prior_fresh_and_cached_sigma_floor_match(monkeypatch, tmp_pat
         "ld_prior_n_grid": 1,
         "ld_prior_min_sigma": 1e-4,
         "ld_data_path": str(grid),
+        "ld_prior_cache_dir": str(tmp_path / "ld_prior_cache"),
     }
     kwargs = dict(
         stellar_cfg=stellar,

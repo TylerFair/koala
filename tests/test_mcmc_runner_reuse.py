@@ -123,6 +123,78 @@ def test_chunk_cache_is_partitioned_by_resident_width(monkeypatch):
     np.testing.assert_array_equal(np.asarray(samples["x"]), np.arange(5.0)[None, :])
 
 
+def test_selective_fallback_programs_reuse_fixed_resident_width(monkeypatch):
+    import models.independent_hmc as independent_hmc
+    import models.independent_nuts as independent_nuts
+
+    builds = {"nuts": 0, "hmc": 0, "joint": 0}
+    joint_widths = []
+    gate_call = 0
+
+    def fake_build_nuts(*args, **kwargs):
+        builds["nuts"] += 1
+        return object()
+
+    def fake_build_hmc(*args, **kwargs):
+        builds["hmc"] += 1
+        return object()
+
+    def fake_independent(model, key, t, yerr, y, init, **kwargs):
+        return {"depths": jnp.ones((8, yerr.shape[0], 1))}
+
+    def fake_gate(samples, path, min_ess, max_divergences):
+        nonlocal gate_call
+        phase = gate_call % 3
+        gate_call += 1
+        failed = (
+            np.arange(samples["depths"].shape[1], dtype=int)
+            if phase < 2 else np.asarray([], dtype=int)
+        )
+        return failed, {
+            "depth_ess_per_channel": [999.0] * samples["depths"].shape[1],
+            "num_divergences_per_channel": [0] * samples["depths"].shape[1],
+        }
+
+    def fake_build_joint(*args, **kwargs):
+        builds["joint"] += 1
+        return object(), {}, {}
+
+    def fake_joint(model, key, t, yerr, y, init, **kwargs):
+        joint_widths.append(int(yerr.shape[0]))
+        return {"depths": jnp.ones((8, yerr.shape[0], 1))}
+
+    monkeypatch.setattr(independent_nuts, "build_independent_nuts_runner", fake_build_nuts)
+    monkeypatch.setattr(independent_nuts, "get_samples_independent", fake_independent)
+    monkeypatch.setattr(independent_hmc, "build_independent_hmc_runner", fake_build_hmc)
+    monkeypatch.setattr(independent_hmc, "get_samples_independent_hmc", fake_independent)
+    monkeypatch.setattr(fit_jwst, "_spectro_failed_lanes", fake_gate)
+    monkeypatch.setattr(fit_jwst, "_build_numpyro_mcmc", fake_build_joint)
+    monkeypatch.setattr(fit_jwst, "get_samples", fake_joint)
+
+    independent_cache = {}
+    joint_cache = {}
+    common = dict(
+        model=lambda *args, **kwargs: None,
+        key=jax.random.PRNGKey(7),
+        t=jnp.arange(3.0),
+        yerr=jnp.ones((8, 3)),
+        indiv_y=jnp.zeros((8, 3)),
+        init_params={"depths": jnp.full((8, 1), 0.01)},
+        chunk_size=8,
+        sampler_backend="independent_nuts",
+        mcmc_kwargs={"num_samples": 8},
+        spectro_min_depth_ess=400,
+        adaptive_fallback_resident_width=4,
+        _independent_mcmc_runner_cache=independent_cache,
+        _joint_mcmc_runner_cache=joint_cache,
+    )
+    fit_jwst.get_samples_chunked(**common)
+    fit_jwst.get_samples_chunked(**{**common, "key": jax.random.PRNGKey(8)})
+
+    assert builds == {"nuts": 1, "hmc": 1, "joint": 1}
+    assert joint_widths == [4, 4, 4, 4]
+
+
 def test_reused_runner_respects_explicit_init_strategy(monkeypatch):
     class FakeSampler:
         _init_strategy = None
@@ -190,6 +262,10 @@ def test_checkpoint_fingerprint_changes_with_data_and_science_signature():
     assert reference != changed_data
     assert reference != changed_signature
     assert reference != changed_seed
+    changed_fallback_width = fit_jwst._chunk_checkpoint_fingerprint(
+        **{**common, "adaptive_fallback_resident_width": 4}
+    )
+    assert reference != changed_fallback_width
 
 
 def test_checkpoint_fingerprint_changes_with_ld_parameterization():

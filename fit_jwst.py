@@ -9,6 +9,7 @@ import uuid
 import re
 import time
 import atexit
+import tempfile
 from contextlib import contextmanager
 from functools import partial
 
@@ -392,6 +393,7 @@ def _validate_whitelight_optimized_start(
     ld_profile,
     ld_parameterization,
     ld_prior_mode,
+    quadratic_uniform_bounds=(0.0, 1.0),
     n_planets=1,
 ):
     """Validate physical LD and transit geometry before using an optimizer result."""
@@ -433,11 +435,17 @@ def _validate_whitelight_optimized_start(
                 )
     elif ld_profile == 'quadratic' and 'u' in solution:
         values = np.asarray(jax.device_get(solution['u']), dtype=float)
+        quadratic_low, quadratic_high = (
+            quadratic_uniform_bounds
+            if ld_prior_mode == 'uniform'
+            else (0.0, 1.0)
+        )
         if not np.all(np.isfinite(values)):
             reasons.append('quadratic coefficients are non-finite')
-        elif np.any(values < 0.0) or np.any(values > 1.0):
+        elif np.any(values < quadratic_low) or np.any(values > quadratic_high):
             reasons.append(
-                f'quadratic coefficients {values.tolist()} are outside [0, 1]'
+                f'quadratic coefficients {values.tolist()} are outside '
+                f'[{quadratic_low}, {quadratic_high}]'
             )
 
     rors_min = float(np.sqrt(1.0e-6))
@@ -1273,13 +1281,13 @@ HARMONICA_CHANNEL_VARYING_MODEL_KWARGS = (
 )
 
 CHUNK_CHECKPOINT_SCHEMA_VERSION = 4
-CHUNK_CHECKPOINT_TARGET_REVISION = "production-defaults-sampler-swap-v4"
+CHUNK_CHECKPOINT_TARGET_REVISION = "whitelight-trend-routing-v6"
 SAMPLING_WORKLOAD_SCHEMA_VERSION = 1
 SPECTRO_GRADIENT_DIAGNOSTIC_SCHEMA_VERSION = 1
 SCIENCE_ARTIFACT_SCHEMA_VERSION = 1
-SCIENCE_ARTIFACT_TARGET_REVISION = "wl-lr-target-2026-08-12"
+SCIENCE_ARTIFACT_TARGET_REVISION = "whitelight-trend-routing-2026-09-03-v2"
 WHITELIGHT_GEOMETRY_HANDOFF_SCHEMA_VERSION = 1
-WHITELIGHT_GEOMETRY_HANDOFF_TARGET_REVISION = "retained-draw-data-loglik-v1"
+WHITELIGHT_GEOMETRY_HANDOFF_TARGET_REVISION = "retained-draw-data-loglik-v2"
 SPECTRO_DATA_TARGET_REVISION = "createdatacube-positive-yerr-2026-08-13-v2"
 POWER2_LD_CACHE_TARGET_REVISION = "stellar-grid-direct-power2-v2"
 SAMPLER_STAGE_INPUT_SCHEMA_VERSION = 1
@@ -1576,6 +1584,7 @@ def _chunk_checkpoint_fingerprint(
     model_kwargs,
     spectro_min_depth_ess=0.0,
     spectro_max_divergences=0,
+    adaptive_fallback_resident_width=None,
 ):
     """Fingerprint the posterior target, inputs, and sampling configuration."""
     hasher = hashlib.sha256()
@@ -1606,6 +1615,10 @@ def _chunk_checkpoint_fingerprint(
             "model_kwargs": model_kwargs,
             "spectro_min_depth_ess": float(spectro_min_depth_ess),
             "spectro_max_divergences": int(spectro_max_divergences),
+            "adaptive_fallback_resident_width": (
+                None if adaptive_fallback_resident_width is None else
+                int(adaptive_fallback_resident_width)
+            ),
         },
     )
     return hasher.hexdigest()
@@ -2478,6 +2491,7 @@ def get_samples_chunked(
     spectro_max_divergences=0,
     adaptive_fallback_model=None,
     adaptive_fallback_init_params=None,
+    adaptive_fallback_resident_width=None,
     _joint_mcmc_runner_cache=None,
     _independent_mcmc_runner_cache=None,
     **model_kwargs,
@@ -2542,6 +2556,9 @@ def get_samples_chunked(
             model_kwargs=model_kwargs,
             spectro_min_depth_ess=spectro_min_depth_ess,
             spectro_max_divergences=spectro_max_divergences,
+            adaptive_fallback_resident_width=(
+                adaptive_fallback_resident_width
+            ),
         )
         checkpoint_prefix = (
             f"{logical_checkpoint_prefix}_cfg{checkpoint_fingerprint[:12]}"
@@ -2893,7 +2910,10 @@ def get_samples_chunked(
                 )
                 fallback_nuts = dict(nuts_kwargs or {})
                 if fallback_backend == "independent_hmc":
-                    from models.independent_hmc import get_samples_independent_hmc
+                    from models.independent_hmc import (
+                        build_independent_hmc_runner,
+                        get_samples_independent_hmc,
+                    )
                     fallback_nuts.pop("max_tree_depth", None)
                     fallback_nuts.pop("laplace_max_tree_depth", None)
                     fallback_nuts.update(
@@ -2902,15 +2922,39 @@ def get_samples_chunked(
                         laplace_start_at_map=True, num_steps=8,
                         trajectory_jitter=0.25,
                     )
+                    fallback_runner_key = (
+                        fallback_backend, int(chunk_size), varying_for_chunk,
+                    )
+                    fallback_runner = independent_mcmc_runners.get(
+                        fallback_runner_key
+                    )
+                    if fallback_runner is None:
+                        fallback_runner = build_independent_hmc_runner(
+                            model, nuts_kwargs=fallback_nuts,
+                            mcmc_kwargs=mcmc_kwargs, lane_width=chunk_size,
+                            channel_varying_kwargs=varying_for_chunk,
+                        )
+                        independent_mcmc_runners[fallback_runner_key] = (
+                            fallback_runner
+                        )
+                    else:
+                        print(
+                            f"  chunk {start}:{end} - reusing compiled "
+                            f"fallback HMC-8 runner (padded width {chunk_size})"
+                        )
                     fallback = get_samples_independent_hmc(
                         model, jax.random.fold_in(key_chunk, 99173 + attempt_index),
                         t, yerr_chunk[selected], y_chunk[selected], fallback_init,
                         nuts_kwargs=fallback_nuts, mcmc_kwargs=mcmc_kwargs,
                         diagnostics_path=fallback_path, lane_width=chunk_size,
-                        channel_varying_kwargs=varying_for_chunk, **fallback_kwargs,
+                        channel_varying_kwargs=varying_for_chunk,
+                        _runner=fallback_runner, **fallback_kwargs,
                     )
                 elif fallback_backend == "independent_nuts":
-                    from models.independent_nuts import get_samples_independent
+                    from models.independent_nuts import (
+                        build_independent_nuts_runner,
+                        get_samples_independent,
+                    )
                     fallback_nuts.pop("num_steps", None)
                     fallback_nuts.pop("trajectory_jitter", None)
                     fallback_nuts.update(
@@ -2921,12 +2965,34 @@ def get_samples_chunked(
                         ),
                         laplace_start_at_map=True,
                     )
+                    fallback_runner_key = (
+                        fallback_backend, int(chunk_size), varying_for_chunk,
+                    )
+                    fallback_runner = independent_mcmc_runners.get(
+                        fallback_runner_key
+                    )
+                    if fallback_runner is None:
+                        fallback_runner = build_independent_nuts_runner(
+                            model, nuts_kwargs=fallback_nuts,
+                            mcmc_kwargs=mcmc_kwargs, lane_width=chunk_size,
+                            channel_varying_kwargs=varying_for_chunk,
+                        )
+                        independent_mcmc_runners[fallback_runner_key] = (
+                            fallback_runner
+                        )
+                    else:
+                        print(
+                            f"  chunk {start}:{end} - reusing compiled "
+                            f"fallback Laplace-NUTS runner "
+                            f"(padded width {chunk_size})"
+                        )
                     fallback = get_samples_independent(
                         model, jax.random.fold_in(key_chunk, 99173 + attempt_index),
                         t, yerr_chunk[selected], y_chunk[selected], fallback_init,
                         nuts_kwargs=fallback_nuts, mcmc_kwargs=mcmc_kwargs,
                         diagnostics_path=fallback_path, lane_width=chunk_size,
-                        channel_varying_kwargs=varying_for_chunk, **fallback_kwargs,
+                        channel_varying_kwargs=varying_for_chunk,
+                        _runner=fallback_runner, **fallback_kwargs,
                     )
                 else:
                     adaptive_model = (
@@ -2956,13 +3022,125 @@ def get_samples_chunked(
                     adaptive_nuts.update(
                         target_accept_prob=0.95, max_tree_depth=10
                     )
-                    fallback = get_samples(
-                        adaptive_model,
-                        jax.random.fold_in(key_chunk, 99173 + attempt_index),
-                        t, yerr_chunk[selected], y_chunk[selected], fallback_init,
-                        nuts_kwargs=adaptive_nuts, mcmc_kwargs=mcmc_kwargs,
-                        diagnostics_path=fallback_path, **fallback_kwargs,
+                    adaptive_width = (
+                        int(selected.size)
+                        if adaptive_fallback_resident_width is None else
+                        int(adaptive_fallback_resident_width)
                     )
+                    if adaptive_width < 1:
+                        raise ValueError(
+                            "adaptive_fallback_resident_width must be positive"
+                        )
+                    adaptive_runner_key = (
+                        "adaptive_fallback", adaptive_width,
+                    )
+                    adaptive_runner = joint_mcmc_runners.get(
+                        adaptive_runner_key
+                    )
+                    adaptive_batches = []
+                    adaptive_divergences = []
+                    for batch_index, batch_start in enumerate(
+                        range(0, int(selected.size), adaptive_width)
+                    ):
+                        batch_stop = min(
+                            batch_start + adaptive_width, int(selected.size)
+                        )
+                        batch_positions = jnp.arange(batch_start, batch_stop)
+                        batch_size = batch_stop - batch_start
+
+                        def _batch_adaptive(value):
+                            try:
+                                array = jnp.asarray(value)
+                            except (TypeError, ValueError):
+                                return value
+                            if (array.ndim and
+                                    array.shape[0] == int(selected.size)):
+                                array = array[batch_positions]
+                                if adaptive_width > batch_size:
+                                    array = jnp.concatenate((
+                                        array,
+                                        jnp.repeat(
+                                            array[-1:],
+                                            adaptive_width - batch_size,
+                                            axis=0,
+                                        ),
+                                    ), axis=0)
+                            return array
+
+                        adaptive_yerr = _batch_adaptive(yerr_chunk[selected])
+                        adaptive_y = _batch_adaptive(y_chunk[selected])
+                        adaptive_init = {
+                            name: _batch_adaptive(value)
+                            for name, value in fallback_init.items()
+                        }
+                        adaptive_kwargs = {
+                            name: (
+                                _batch_adaptive(value)
+                                if name in channel_varying_set else value
+                            )
+                            for name, value in fallback_kwargs.items()
+                        }
+                        if adaptive_runner is None:
+                            adaptive_runner, _, _ = _build_numpyro_mcmc(
+                                adaptive_model, _tree_to_f64(adaptive_init),
+                                adaptive_nuts, dict(mcmc_kwargs or {}),
+                            )
+                            joint_mcmc_runners[adaptive_runner_key] = (
+                                adaptive_runner
+                            )
+                        else:
+                            print(
+                                f"  chunk {start}:{end} - reusing compiled "
+                                f"adaptive joint-NUTS runner "
+                                f"(resident width {adaptive_width}, batch "
+                                f"{batch_index + 1})"
+                            )
+                        batch_path = fallback_path
+                        if fallback_path is not None and int(selected.size) > adaptive_width:
+                            batch_path = fallback_path.replace(
+                                ".json", f".batch{batch_index + 1}.json"
+                            )
+                        batch_samples = get_samples(
+                            adaptive_model,
+                            jax.random.fold_in(
+                                key_chunk,
+                                99173 + attempt_index + 1009 * batch_index,
+                            ),
+                            t, adaptive_yerr, adaptive_y, adaptive_init,
+                            nuts_kwargs=adaptive_nuts,
+                            mcmc_kwargs=mcmc_kwargs,
+                            diagnostics_path=batch_path,
+                            _mcmc_runner=adaptive_runner,
+                            **adaptive_kwargs,
+                        )
+                        adaptive_batches.append(jax.tree.map(
+                            lambda value: value[:, :batch_size], batch_samples
+                        ))
+                        batch_divergence = 0
+                        if batch_path is not None and os.path.isfile(batch_path):
+                            with open(batch_path, "r", encoding="utf-8") as stream:
+                                batch_divergence = int(
+                                    json.load(stream).get("num_divergences", 0)
+                                )
+                        adaptive_divergences.extend(
+                            [batch_divergence] * batch_size
+                        )
+                    fallback = jax.tree.map(
+                        lambda *values: jnp.concatenate(values, axis=1),
+                        *adaptive_batches,
+                    )
+                    if (fallback_path is not None and
+                            int(selected.size) > adaptive_width):
+                        with open(fallback_path, "x", encoding="utf-8") as stream:
+                            json.dump({
+                                "num_divergences": int(sum(adaptive_divergences)),
+                                "num_divergences_per_channel": (
+                                    adaptive_divergences
+                                ),
+                                "resident_width": adaptive_width,
+                                "num_batches": len(adaptive_batches),
+                            }, stream, indent=2)
+                            stream.write("\n")
                 fallback_failed, fallback_gate = _spectro_failed_lanes(
                     fallback, fallback_path, spectro_min_depth_ess,
                     spectro_max_divergences,
@@ -3512,6 +3690,101 @@ def _resolve_whitelight_laplace_options(flags):
             "'finite_difference'."
         )
     return options
+
+
+def _resolve_whitelight_mass_matrix(flags, detrending_type):
+    """Choose the production white-light metric for the requested trend."""
+    explicit = flags.get("whitelight_mass_matrix")
+    if explicit is not None:
+        value = str(explicit).strip().lower()
+        if value not in {"adaptive", "laplace"}:
+            raise ValueError(
+                "flags.whitelight_mass_matrix must be 'adaptive' or 'laplace'."
+            )
+        return value
+    components = {
+        item.strip().lower()
+        for item in str(detrending_type).replace("_", "+").split("+")
+        if item.strip()
+    }
+    is_complex = bool(
+        components.intersection({"spot", "2spot", "discontinuity", "step"})
+        or "discontinuity" in str(detrending_type).lower()
+        or "step" in str(detrending_type).lower()
+    )
+    if "whitelight_complex_trend_adaptive" in flags and is_complex:
+        return (
+            "adaptive"
+            if bool(flags["whitelight_complex_trend_adaptive"])
+            else "laplace"
+        )
+    is_combined_complex = "+" in str(detrending_type) and is_complex
+    if "2spot" in components or is_combined_complex:
+        return "adaptive"
+    return "laplace"
+
+
+def _resolve_whitelight_trend_parameterization(flags, detrending_type):
+    """Resolve the real config interface, with the diagnostic env override."""
+    env_value = os.getenv("JWSTJAXFIT_WL_TREND_PARAMETERIZATION")
+    explicit = flags.get("whitelight_trend_parameterization")
+    if env_value is not None and env_value.strip():
+        value = env_value
+    elif explicit is not None:
+        value = explicit
+    else:
+        components = {
+            item.strip().lower()
+            for item in str(detrending_type).replace("_", "+").split("+")
+            if item.strip()
+        }
+        is_step = (
+            "discontinuity" in components
+            or "step" in components
+            or "discontinuity" in str(detrending_type).lower()
+            or "step" in str(detrending_type).lower()
+        )
+        value = "cadence" if components == {"spot"} or is_step else "physical"
+    value = str(value).strip().lower()
+    if value not in {"physical", "cadence"}:
+        raise ValueError(
+            "flags.whitelight_trend_parameterization must be 'physical' or "
+            "'cadence'."
+        )
+    return value
+
+
+def _resolve_whitelight_two_spot_ordering(flags):
+    """Return the explicitly selectable two-spot labeling convention."""
+    value = str(flags.get("whitelight_2spot_ordering", "legacy")).strip().lower()
+    if value not in {"legacy", "ordered"}:
+        raise ValueError(
+            "flags.whitelight_2spot_ordering must be 'legacy' or 'ordered'."
+        )
+    return value
+
+
+def _resolve_compile_cache_options(flags):
+    """Return compile-box and persistent-cache production settings."""
+    return {
+        "compile_box": bool(flags.get("compile_box", True)),
+        "persistent_cache": bool(flags.get("jax_persistent_cache", True)),
+        "cache_dir": str(flags.get(
+            "jax_compilation_cache_dir",
+            "/scratch/midway3/tfairnington/jax_cache",
+        )),
+    }
+
+
+def _resolve_ld_prior_cache_options(stellar_cfg):
+    """Return the fingerprinted stellar-LD cache settings."""
+    return {
+        "enabled": bool(stellar_cfg.get("ld_prior_cache", True)),
+        "cache_dir": str(stellar_cfg.get(
+            "ld_prior_cache_dir",
+            "/scratch/midway3/tfairnington/ld_prior_cache",
+        )),
+    }
 
 
 def _resolve_harmonica_stage_nuts_kwargs(
@@ -4380,8 +4653,21 @@ def get_or_build_power2_ld_prior(stellar_cfg, wavelengths, wavelength_err, instr
     has_vector_err = hasattr(wavelength_err, '__len__') and np.asarray(wavelength_err).ndim > 0
     wavelength_err_np = np.asarray(wavelength_err, dtype=float) if has_vector_err else np.array([float(wavelength_err)], dtype=float)
 
-    cache_dir = stellar_cfg.get('ld_prior_cache_dir', os.path.join(output_dir, 'ld_prior_cache'))
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_options = _resolve_ld_prior_cache_options(stellar_cfg)
+    cache_enabled = cache_options["enabled"]
+    cache_dir = cache_options["cache_dir"]
+    if cache_enabled:
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            probe = tempfile.NamedTemporaryFile(dir=cache_dir, delete=True)
+            probe.close()
+        except OSError as error:
+            print(
+                f"[LD prior] Cache directory {cache_dir} is unavailable "
+                f"({error}); continuing without a persistent cache.",
+                flush=True,
+            )
+            cache_enabled = False
     mode, wl_min, wl_max = _get_ld_mode_bounds(instrument, order)
     implementation_path = sys.modules[StellarLimbDarkening.__module__].__file__
     digest = hashlib.sha256()
@@ -4409,7 +4695,7 @@ def get_or_build_power2_ld_prior(stellar_cfg, wavelengths, wavelength_err, instr
     cache_name = f"{instrument.replace('/', '_')}_{cache_label}_{digest.hexdigest()[:12]}.csv"
     cache_path = os.path.join(cache_dir, cache_name)
 
-    if os.path.exists(cache_path):
+    if cache_enabled and os.path.exists(cache_path):
         expected_rows = len(wavelengths_np) if has_vector_err else 1
         required_columns = {
             'c1_mean', 'c2_mean', 'c1_sigma_star', 'c2_sigma_star'
@@ -4540,7 +4826,16 @@ def get_or_build_power2_ld_prior(stellar_cfg, wavelengths, wavelength_err, instr
             'c2_sigma_fit': c2_fit,
             'c2_sigma_star': c2_star,
         })
-        _atomic_dataframe_csv(out_df, cache_path, index=False)
+        if cache_enabled:
+            try:
+                _atomic_dataframe_csv(out_df, cache_path, index=False)
+            except OSError as error:
+                cache_enabled = False
+                print(
+                    f"[LD prior] Could not write cache {cache_path} ({error}); "
+                    "continuing with the newly computed prior.",
+                    flush=True,
+                )
         if _PHASE_TIMERS.enabled:
             _PHASE_TIMERS.events.append({
                 "phase": "ld_prior_construction",
@@ -4549,7 +4844,8 @@ def get_or_build_power2_ld_prior(stellar_cfg, wavelengths, wavelength_err, instr
                 "cache_path": cache_path, "stellar_grid_points": len(combos),
             })
             _PHASE_TIMERS.write()
-        print(f"[LD prior] Saved power2 grid cache to {cache_path}", flush=True)
+        if cache_enabled:
+            print(f"[LD prior] Saved power2 grid cache to {cache_path}", flush=True)
         return jnp.array(np.column_stack([c1_mean, c2_mean])), jnp.array(np.column_stack([c1_tot, c2_tot]))
     else:
         out_df = pd.DataFrame({
@@ -4564,8 +4860,17 @@ def get_or_build_power2_ld_prior(stellar_cfg, wavelengths, wavelength_err, instr
             'c2_sigma_fit': [float(c2_fit[0])],
             'c2_sigma_star': [float(c2_star[0])],
         })
-        _atomic_dataframe_csv(out_df, cache_path, index=False)
-        print(f"[LD prior] Saved power2 grid cache to {cache_path}", flush=True)
+        if cache_enabled:
+            try:
+                _atomic_dataframe_csv(out_df, cache_path, index=False)
+            except OSError as error:
+                print(
+                    f"[LD prior] Could not write cache {cache_path} ({error}); "
+                    "continuing with the newly computed prior.",
+                    flush=True,
+                )
+            else:
+                print(f"[LD prior] Saved power2 grid cache to {cache_path}", flush=True)
         return jnp.array([c1_mean[0], c2_mean[0]]), jnp.array([c1_tot[0], c2_tot[0]])
 
 
@@ -5720,7 +6025,17 @@ def main():
     flags.setdefault('spectro_hmc_trajectory_jitter', 0.25)
     flags.setdefault('spectro_min_depth_ess', 400)
     flags.setdefault('spectro_max_divergences', 0)
-    flags.setdefault('whitelight_mass_matrix', 'laplace')
+    flags['whitelight_trend_parameterization'] = (
+        _resolve_whitelight_trend_parameterization(
+            flags, flags.get('detrending_type', 'linear')
+        )
+    )
+    flags['whitelight_2spot_ordering'] = (
+        _resolve_whitelight_two_spot_ordering(flags)
+    )
+    flags['whitelight_mass_matrix'] = _resolve_whitelight_mass_matrix(
+        flags, flags.get('detrending_type', 'linear')
+    )
     flags.setdefault('whitelight_laplace_target_accept', 0.99 if is_prism else 0.9)
     flags.setdefault('whitelight_min_ess', 400)
     flags.setdefault('whitelight_max_divergences', 0)
@@ -5730,20 +6045,30 @@ def main():
     flags.setdefault('spectro_fixed_timescale_trends', True)
     flags.setdefault('step_width_mode', 'free')
     flags.setdefault('step_width_days', _JUMP_WIDTH_DAYS)
-    if bool(flags.get('compile_box', False)):
-        compilation_cache_dir = str(
-            flags.get(
-                'jax_compilation_cache_dir',
-                '/scratch/midway3/tfairnington/jax_cache',
+    compile_cache_options = _resolve_compile_cache_options(flags)
+    flags.setdefault('compile_box', compile_cache_options['compile_box'])
+    flags.setdefault('jax_persistent_cache', compile_cache_options['persistent_cache'])
+    flags.setdefault('jax_compilation_cache_dir', compile_cache_options['cache_dir'])
+    if flags['jax_persistent_cache']:
+        compilation_cache_dir = flags['jax_compilation_cache_dir']
+        try:
+            os.makedirs(compilation_cache_dir, exist_ok=True)
+            probe = tempfile.NamedTemporaryFile(
+                dir=compilation_cache_dir, delete=True
             )
-        )
-        os.makedirs(compilation_cache_dir, exist_ok=True)
-        jax.config.update('jax_compilation_cache_dir', compilation_cache_dir)
-        jax.config.update('jax_persistent_cache_min_compile_time_secs', 1)
-        print(
-            "Compile box enabled: persistent JAX cache at "
-            f"{compilation_cache_dir}."
-        )
+            probe.close()
+        except OSError as error:
+            print(
+                "Persistent JAX cache unavailable at "
+                f"{compilation_cache_dir} ({error}); continuing without it."
+            )
+        else:
+            jax.config.update('jax_compilation_cache_dir', compilation_cache_dir)
+            jax.config.update('jax_persistent_cache_min_compile_time_secs', 1)
+            print(
+                "Persistent JAX compilation cache enabled at "
+                f"{compilation_cache_dir}."
+            )
     resolution = cfg.get('resolution', None)
     pixels = cfg.get('pixels', None)
     
@@ -6025,6 +6350,23 @@ def main():
         raise ValueError(
             "flags.ld_uniform_basis must be 'uplus_uminus' or 'coefficients'."
         )
+    ld_uniform_coefficient_bounds = np.asarray(
+        flags.get('ld_uniform_coefficient_bounds', [0.0, 1.0]), dtype=float
+    )
+    if (
+        ld_uniform_coefficient_bounds.shape != (2,)
+        or not np.all(np.isfinite(ld_uniform_coefficient_bounds))
+        or ld_uniform_coefficient_bounds[0] >= ld_uniform_coefficient_bounds[1]
+    ):
+        raise ValueError(
+            "flags.ld_uniform_coefficient_bounds must be [low, high] with "
+            "finite low < high."
+        )
+    quadratic_uniform_physical_bounds = (
+        (-1.5, 2.0)
+        if ld_uniform_basis == 'uplus_uminus'
+        else tuple(ld_uniform_coefficient_bounds)
+    )
     if hr_custom_ld_path and ld_profile != 'power2':
         raise ValueError("flags.hr_custom_ld_path currently supports only flags.ld_profile: 'power2'.")
     if transit_engine == 'harmonica' and ld_profile not in {'power2', 'quadratic'}:
@@ -6120,6 +6462,8 @@ def main():
             'max_harmonic_order': max_harmonic_order,
             'param_method': param_method,
             'ld_profile': ld_profile,
+            'trend_parameterization': flags['whitelight_trend_parameterization'],
+            'two_spot_ordering': flags['whitelight_2spot_ordering'],
         }
         _engine_spectro_kw = {
             'max_harmonic_order': max_harmonic_order,
@@ -6142,6 +6486,9 @@ def main():
             'jaxoplanet_kernel': jaxoplanet_kernel,
             'ld_parameterization': whitelight_ld_parameterization,
             'ld_uniform_basis': ld_uniform_basis,
+            'ld_uniform_coefficient_bounds': tuple(ld_uniform_coefficient_bounds),
+            'trend_parameterization': flags['whitelight_trend_parameterization'],
+            'two_spot_ordering': flags['whitelight_2spot_ordering'],
         }
         _engine_spectro_kw = {
             'jitter_prior': spectro_jitter_prior,
@@ -6153,6 +6500,7 @@ def main():
             'jaxoplanet_kernel': jaxoplanet_kernel,
             'ld_parameterization': spectro_ld_parameterization,
             'ld_uniform_basis': ld_uniform_basis,
+            'ld_uniform_coefficient_bounds': tuple(ld_uniform_coefficient_bounds),
         }
         if trend_inference == 'gaussian_marginalized' and 'gp' in detrending_type:
             raise ValueError(
@@ -6457,6 +6805,11 @@ def main():
             "ld_profile": ld_profile,
             "ld_prior_mode": ld_prior_mode,
             "detrending_type": detrending_type,
+            "trend_parameterization": flags[
+                'whitelight_trend_parameterization'
+            ],
+            "two_spot_ordering": flags['whitelight_2spot_ordering'],
+            "whitelight_mass_matrix": flags['whitelight_mass_matrix'],
             "param_method": param_method,
             "geometry_estimator": whitelight_geometry_estimator,
             "whitelight_sigma": whitelight_sigma,
@@ -6602,6 +6955,30 @@ def main():
                 init_params_wl['spot_amp2'] = spot_amp2
                 init_params_wl['spot_mu2'] = spot_mu2
                 init_params_wl['spot_sigma2'] = spot_sigma2
+                if flags['whitelight_2spot_ordering'] == 'ordered':
+                    cadence = float(
+                        np.median(np.diff(np.sort(np.asarray(data.wl_time))))
+                    )
+                    midpoint = 0.5 * (float(spot_mu) + float(spot_mu2))
+                    separation = max(
+                        abs(float(spot_mu2) - float(spot_mu)), cadence
+                    )
+                    if flags['whitelight_trend_parameterization'] == 'cadence':
+                        prior_midpoint = 0.5 * (
+                            float(hyper_params_wl['spot_guess'])
+                            + float(hyper_params_wl['spot_guess2'])
+                        )
+                        init_params_wl[
+                            'spot_center_midpoint_offset_cadences'
+                        ] = (midpoint - prior_midpoint) / cadence
+                        init_params_wl[
+                            'log_spot_center_separation_cadences'
+                        ] = np.log(separation / cadence)
+                    else:
+                        init_params_wl['spot_center_midpoint'] = midpoint
+                        init_params_wl[
+                            'log_spot_center_separation'
+                        ] = np.log(separation)
 
             # Step 1 of the Sing recipe measures LD freely.  The resulting
             # artifact is deliberately consumed only by the spectroscopic fit.
@@ -7088,6 +7465,7 @@ def main():
                         ld_profile=ld_profile,
                         ld_parameterization=whitelight_ld_parameterization,
                         ld_prior_mode=ld_prior_mode,
+                        quadratic_uniform_bounds=quadratic_uniform_physical_bounds,
                         n_planets=n_planets_sanity,
                     )
                 )
@@ -7105,6 +7483,7 @@ def main():
                             ld_profile=ld_profile,
                             ld_parameterization=whitelight_ld_parameterization,
                             ld_prior_mode=ld_prior_mode,
+                            quadratic_uniform_bounds=quadratic_uniform_physical_bounds,
                             n_planets=n_planets_sanity,
                         )
                     )
@@ -7351,7 +7730,7 @@ def main():
                 )
             _save_mcmc_diagnostics(
                 mcmc,
-                max_tree_depth=wl_nuts_kwargs.get("max_tree_depth"),
+                max_tree_depth=wl_nuts_kwargs.get("max_tree_depth", 10),
                 output_path=os.path.join(
                     output_dir, "whitelight_mcmc_diagnostics.json"
                 ),

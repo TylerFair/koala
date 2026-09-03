@@ -50,6 +50,25 @@ def test_quadratic_uniform_coefficients_preserves_legacy_prior():
     np.testing.assert_allclose(high, 1.0)
 
 
+def test_quadratic_uniform_coefficients_accept_wide_configured_bounds():
+    model = create_vectorized_model(
+        ld_mode="uniform", ld_profile="quadratic",
+        ld_uniform_basis="coefficients",
+        ld_uniform_coefficient_bounds=(-2.0, 2.0), transit_window="off",
+    )
+    trace = handlers.trace(handlers.seed(model, jax.random.PRNGKey(23))).get_trace(
+        jnp.linspace(-0.03, 0.03, 13), jnp.full((2, 13), 1e-3),
+        y=jnp.ones((2, 13)), mu_duration=jnp.array([0.06]),
+        mu_t0=jnp.array([0.0]), mu_b=jnp.array([0.3]),
+        mu_depths=jnp.full((2, 1), 0.01), PERIOD=jnp.array([3.0]),
+    )
+    base = trace["u"]["fn"]
+    while hasattr(base, "base_dist"):
+        base = base.base_dist
+    np.testing.assert_allclose(np.asarray(base.low), -2.0)
+    np.testing.assert_allclose(np.asarray(base.high), 2.0)
+
+
 def test_uniform_basis_is_part_of_builder_fingerprint_inputs():
     model = fit_jwst._build_spectroscopic_model(
         create_vectorized_model,

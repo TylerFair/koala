@@ -9,7 +9,14 @@ flags:
   spectro_jitter_prior: lognormal
 ```
 
-White-light fits use NumPyro NUTS. Set `whitelight_mass_matrix: laplace` for Hessian preconditioning; a failed Laplace preparation falls back to adaptive mass-matrix NUTS.
+White-light fits use NumPyro NUTS. Linear, quadratic, exponential-linear,
+spot, and sigmoid-step trends start with the Laplace mass matrix; two-spot
+starts directly with adaptive NUTS. Spot and step use exact cadence-normalized
+coordinates by default, which repaired their local metrics without changing
+the physical posterior. A failed Laplace quality gate still falls back to
+adaptive NUTS. Set `whitelight_mass_matrix` or
+`whitelight_trend_parameterization` explicitly to reproduce another route;
+`whitelight_complex_trend_adaptive` is retained only as a legacy override.
 
 Wide-Gaussian and uniform/free power-2 limb-darkening priors use Maxted decorrelated coordinates by default in both white-light and spectroscopic fits. The analytic Jacobian leaves the physical prior and reported coefficients unchanged; quadratic priors use physical coefficient coordinates, with `latent_gaussian` as the only alternative, and stellar-informed and Sing modes are unaffected.
 
@@ -34,7 +41,8 @@ Completed chunks are saved under `output_dir/chunks/`. Re-running an identical c
 
 | Stage or condition | Sampler | Metric | Action on failure |
 |---|---|---|---|
-| White light | NUTS | Laplace by default | Adaptive-metric fallback if Laplace preparation fails |
+| White light, except two-spot | NUTS | Family-default Laplace | Adaptive-metric fallback if preparation or the quality gate fails |
+| White light, two-spot | NUTS | Adaptive | Extend draws and report failure if the ESS gate remains unmet |
 | Spectroscopic default | Independent NUTS | Per-channel Laplace | Retry failed work with HMC-8 |
 | NUTS gate failure | Independent HMC | Per-channel Laplace, 8 steps | Retry with NUTS if HMC is the selected primary path |
 | Explicit legacy fallback | Joint NUTS | Adaptive | Inspect joint diagnostics |
@@ -44,7 +52,22 @@ The automatic swap remains within exact HMC/NUTS inference. Laplace importance s
 
 ## White-light NUTS
 
-White light samples shared geometry, broadband limb darkening, jitter, and trend parameters. The default Laplace preparation finds a mode and constructs a curvature-based inverse mass matrix.
+White light samples shared geometry, broadband limb darkening, jitter, and
+trend parameters. Laplace preparation finds a mode and constructs a
+curvature-based inverse mass matrix. The measured family defaults are:
+
+| detrending family | trend coordinates | initial metric |
+|---|---|---|
+| linear | physical | Laplace |
+| quadratic | physical | Laplace |
+| exponential-linear | physical (`log_tau`) | Laplace |
+| spot | cadence | Laplace |
+| two spots | physical, legacy labels | adaptive |
+| sigmoid step | cadence | Laplace |
+
+The two-spot exception is deliberate: both physical and cadence ordered
+Laplace trials failed the science ESS gate, and the reference posterior's
+dominant ambiguity was spot shape/depth rather than mirrored labels.
 
 ```yaml
 flags:

@@ -1,0 +1,43 @@
+# WASP-39 b, NIRISS/SOSS order 1, stellar-informed power-2 limb darkening,
+# linear baseline. This is the standard starting point for a SOSS transit.
+
+planet:
+  name: WASP-39
+  period: 4.05528043      # days
+  duration: 0.11693087    # days
+  t0: 59787.055           # BMJD_TDB
+  b: 0.4498
+  rprs: 0.1457
+
+stellar:
+  teff: 5509
+  logg: 4.22
+  feh: 0.04
+  teff_sigma: 28          # propagated into the limb-darkening prior
+  logg_sigma: 0.07
+  feh_sigma: 0.02
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRISS/SOSS'
+order: 1
+
+path: '/path/to/work'
+input_dir: 'FITS'
+fits_file: 'WASP-39_box_spectra_fullres.fits'
+output_dir: 'WASP-39_SOSS_ORDER1'
+
+resolution:
+  high: 'reference'                  # 'reference' | 'native' | an integer R
+  reference_grid: 'prism_template.csv'
+
+flags:
+  detrending_type: 'linear'
+  ld_profile: 'power2'
+  ld_prior: 'stellarprior'
+
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

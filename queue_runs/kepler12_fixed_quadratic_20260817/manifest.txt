@@ -1,2 +1,0 @@
-configs_harmonica/Kepler-12_nrs1_prism_v1_config.yaml
-configs_harmonica/Kepler-12_nrs1_prism_v2_config.yaml

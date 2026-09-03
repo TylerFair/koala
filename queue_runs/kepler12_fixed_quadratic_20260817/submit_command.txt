@@ -1,1 +1,0 @@
-sbatch --parsable --array=0-1 --job-name=kepler12_qld --export=ALL,QUEUE_STATE_DIR=/project/ekempton/tfairnington/JWST/queue_runs/kepler12_fixed_quadratic_20260817,MANIFEST_PATH=/project/ekempton/tfairnington/JWST/queue_runs/kepler12_fixed_quadratic_20260817/manifest.txt run_harmonica_population.sbatch

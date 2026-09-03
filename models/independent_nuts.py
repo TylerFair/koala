@@ -69,6 +69,42 @@ def _asarray_f64(value):
     return array
 
 
+def _synchronize_cadence_init_values(init_values, model_args):
+    """Keep normalized step-width starts consistent with physical repairs.
+
+    The white-light optimizer returns both deterministic physical sites and
+    latent sites.  Its support-edge guard repairs ``log_width``; copy that
+    repaired starting point into whichever cadence latent is present before
+    ``init_to_value`` sees it.  This is an initialization-only coordinate
+    conversion and is inactive for the default physical model.
+    """
+    if not (
+        isinstance(init_values, Mapping)
+        and "log_width" in init_values
+        and (
+            "log_width_cadences" in init_values
+            or "log_width_unit_logit" in init_values
+        )
+        and model_args
+    ):
+        return init_values
+    time = jnp.asarray(model_args[0])
+    cadence = jnp.median(jnp.diff(jnp.sort(time)))
+    synchronized = dict(init_values)
+    log_width_cadences = jnp.asarray(init_values["log_width"]) - jnp.log(cadence)
+    if "log_width_cadences" in init_values:
+        synchronized["log_width_cadences"] = log_width_cadences
+    if "log_width_unit_logit" in init_values:
+        low = jnp.log(0.5)
+        high = jnp.log((30.0 / (24.0 * 60.0)) / cadence)
+        fraction = (log_width_cadences - low) / (high - low)
+        fraction = jnp.clip(fraction, 1.0e-12, 1.0 - 1.0e-12)
+        synchronized["log_width_unit_logit"] = jnp.log(fraction) - jnp.log1p(
+            -fraction
+        )
+    return synchronized
+
+
 def prepare_laplace_metric(
     model,
     rng_key,
@@ -96,6 +132,7 @@ def prepare_laplace_metric(
     if trust_radius <= 0 or max_iterations < 1 or line_search_steps < 1:
         raise ValueError("Invalid Laplace MAP iteration controls.")
     model_kwargs = dict(model_kwargs or {})
+    init_values = _synchronize_cadence_init_values(init_values, model_args)
     info = initialize_model(
         rng_key,
         model,

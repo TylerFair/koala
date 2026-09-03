@@ -16,9 +16,13 @@ export JAX_COMPILATION_CACHE_DIR=/scratch/$USER/jax_cache
 python fit_jwst.py -c config.yaml
 ```
 
-For a CPU smoke test, set `JAX_PLATFORMS=cpu` before Python starts. Do not import JAX and then change the platform. Enable the fitter's persistent cache with `flags.compile_box: true`; set `flags.jax_compilation_cache_dir` to node-visible storage. Cache reuse requires compatible JAX/XLA versions and static model shapes.
+For a CPU smoke test, set `JAX_PLATFORMS=cpu` before Python starts. Do not import JAX and then change the platform. Compile-box padding and the persistent compilation cache are enabled by default. Set `flags.jax_compilation_cache_dir` to node-visible storage, or use `flags.compile_box: false` and `flags.jax_persistent_cache: false` as the respective opt-outs. Cache reuse requires compatible JAX/XLA versions and static model shapes.
 
 GPU memory grows with cadence count, model complexity, and `vmap_chunk`. Start with 40 independent channels on V100/A100 and reduce the width after an out-of-memory error. `chunk_mode: parallel` distributes channel ranges across array tasks; run `combine` only after all checkpoint files exist.
+
+PRISM multi-worker chunking remains opt-in. The default processes one planet on
+one GPU; choose `chunk_mode: parallel` only when separate workers and a later
+combine step are explicitly configured.
 
 ## Platform selection
 
@@ -56,6 +60,12 @@ flags:
 ```
 
 Use persistent scratch visible to every node that may resume the run. Avoid a network home directory with a tight metadata quota. Cache reuse requires compatible code, JAX/XLA version, and static shapes.
+
+Stellar power-2 prior grids use a separate fingerprinted cache at
+`/scratch/midway3/tfairnington/ld_prior_cache`. Change
+`stellar.ld_prior_cache_dir` when that location is not shared, or set
+`stellar.ld_prior_cache: false` to disable it. An unavailable cache directory
+does not stop a fit.
 
 ## Serial chunking
 

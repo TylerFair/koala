@@ -139,3 +139,39 @@ Gaussian marginalization defaults to means 1 for `c`, 0 for polynomial coefficie
 Active coefficients appear in `*_bestfit_params.csv` with central, standard-deviation, and asymmetric-error columns. Possible fields include `c`, `v`, `v2`, `v3`, `v4`, `A`, `tau`, `t_jump`, `jump`, spot parameters, and template scales. The white-light time-series table includes `trend_model` and `detrended_flux` when available.
 
 Inspect both before interpreting wavelength-dependent depths. Use the noise-binning products to check whether residual RMS approaches white-noise scaling.
+
+## White-light trend coordinates
+
+`flags.whitelight_trend_parameterization` is the production interface. It
+accepts `physical` or `cadence`. Spot and sigmoid-step white-light fits default
+to `cadence`; linear, quadratic, exponential-linear, and two-spot fits default
+to `physical`. The first three have no center or width coordinate to rescale,
+so selecting `cadence` would not change their model. Two-spot remains physical
+because neither tested coordinate form met its sampling and calibrated-fidelity
+gates. An explicit flag always overrides the family default:
+
+```yaml
+flags:
+  whitelight_trend_parameterization: physical  # reproduce the old spot/step form
+```
+
+Cadence form samples spot centers and widths, sigmoid-step centers, and
+sigmoid log-widths in units of the observed median cadence. Both the
+jaxoplanet and Harmonica production builders retain the usual physical
+outputs (`spot_mu`, `spot_sigma`, `spot_mu2`, `spot_sigma2`, `t_jump`, and
+`log_width`) as deterministic sites, so downstream tables and plots keep
+their original units. The normalized priors include the required scale or
+Jacobian. The bounded step width uses a smooth Logistic-CDF pullback of the
+original uniform log-width. Consequently the physical prior, likelihood, and
+posterior are unchanged. This exact form made the measured spot and step
+Laplace fits pass their gates. `JWSTJAXFIT_WL_TREND_PARAMETERIZATION` remains
+available as a diagnostic override and takes precedence over YAML.
+
+`flags.whitelight_2spot_ordering: ordered` selects an exact canonical
+left/right representation. It sums the two labeled center-prior densities and
+includes the midpoint/log-separation Jacobian, so it removes only label
+duplication even when the two center-prior means differ. The legacy labeled
+form remains the default: the benchmark reference already had zero ordering
+violations in 4,000 draws, and an ordered trial entered a low-quality
+overlap/depth branch rather than improving the science ESS. See
+`acceleration_reports/whitelight_trends.md` before enabling it.

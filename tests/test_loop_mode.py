@@ -50,6 +50,34 @@ def test_data_form_coefficient_and_maxted_potentials_are_exact():
     assert jnp.allclose(actual_h, expected_h, rtol=0.0, atol=1e-12)
 
 
+def test_bounded_maxted_pullback_equals_standalone_potential():
+    transform = Power2MaxtedTransform()
+    z = jnp.array([-0.7, 0.9])
+    low = jnp.zeros(2)
+    high = jnp.ones(2)
+    coefficients, correction = _ld_variant_data_form(
+        z, jnp.zeros(2), -jnp.ones(2), low, high,
+        LD_MAP_POWER2_MAXTED, "power2", low, high,
+    )
+    h = transform(coefficients)
+    standalone_h = (
+        dist.Uniform(low, high).log_prob(coefficients).sum()
+        - transform.log_abs_det_jacobian(coefficients, h)
+    )
+    log_dc_dz = jnp.sum(
+        jax.nn.log_sigmoid(z) + jax.nn.log_sigmoid(-z)
+    )
+    pulled_back_standalone = (
+        standalone_h
+        + transform.log_abs_det_jacobian(coefficients, h)
+        + log_dc_dz
+    )
+    data_form = dist.Normal(0.0, 1.0).log_prob(z).sum() + correction
+    assert jnp.allclose(
+        data_form, pulled_back_standalone, rtol=0.0, atol=1e-10
+    )
+
+
 def test_data_form_uniform_sumdiff_and_sing_potentials_are_exact():
     sumdiff = jnp.array([0.7, -0.2])
     low = jnp.array([-1.0, -2.0])
@@ -118,16 +146,23 @@ def test_loop_spectrum_schema_matches_pipeline_columns():
 def test_three_data_variants_build_one_independent_program():
     from models.independent_nuts import build_independent_nuts_runner
 
-    def model(t, yerr, y=None, ld_center=None, ld_map_code=0):
+    def model(t, yerr, y=None, ld_center=None, ld_latent_low=None,
+              ld_latent_high=None, ld_map_code=0):
         latent = numpyro.sample(
             "ld_variant_latent",
             dist.Normal(0.0, 1.0).expand([1, 2]).to_event(1),
         )
-        prediction = latent[:, :1] + 0.0 * ld_center[:, :1]
+        prediction = (
+            latent[:, :1] + 0.0 * ld_center[:, :1]
+            + 0.0 * ld_latent_low[:, :1] + 0.0 * ld_latent_high[:, :1]
+        )
         numpyro.sample("obs", dist.Normal(prediction, yerr), obs=y)
 
     runner = build_independent_nuts_runner(
-        model, lane_width=1, channel_varying_kwargs=("ld_center",),
+        model, lane_width=1,
+        channel_varying_kwargs=(
+            "ld_center", "ld_latent_low", "ld_latent_high",
+        ),
         num_warmup=1, num_samples=2,
     )
     common = dict(
@@ -137,7 +172,11 @@ def test_three_data_variants_build_one_independent_program():
     for code in range(3):
         runner.run_raw(
             jax.random.PRNGKey(900 + code), **common,
-            model_kwargs={"ld_center": jnp.full((1, 2), code / 10.0),
-                          "ld_map_code": jnp.asarray(code)},
+        model_kwargs={
+            "ld_center": jnp.full((1, 2), code / 10.0),
+            "ld_latent_low": jnp.full((1, 2), -1.0 - code),
+            "ld_latent_high": jnp.full((1, 2), 1.0 + code),
+            "ld_map_code": jnp.asarray(code),
+        },
         )
     assert runner.program_build_count == 1

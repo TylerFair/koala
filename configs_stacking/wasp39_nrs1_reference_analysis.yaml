@@ -1,8 +1,0 @@
-dataset: wasp39_nrs1_ref
-variants:
-  - {name: informed_linear, queue_number: 320}
-  - {name: uniform_linear, queue_number: 321}
-  - {name: wide_linear_initfix, queue_number: 380}
-  - {name: fixed_linear, queue_number: 323}
-  - {name: informed_linear_step, queue_number: 324}
-  - {name: uniform_linear_step_initfix, queue_number: 381}

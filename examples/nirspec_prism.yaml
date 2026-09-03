@@ -1,0 +1,45 @@
+# WASP-6 b, NIRSpec/PRISM at native resolution with an exponential ramp.
+# PRISM time series are long (tens of thousands of integrations), so the
+# resident chunk width is kept small: wider batches wait on the slowest
+# channel and are slower per channel, not faster.
+
+planet:
+  name: WASP-6
+  period: 3.36100208
+  duration: 0.10861111
+  t0: 59803.1
+  b: 0.256
+  rprs: 0.1404
+
+stellar:
+  teff: 5375
+  logg: 4.49
+  feh: -0.15
+  teff_sigma: 65
+  logg_sigma: 0.03
+  feh_sigma: 0.07
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRSPEC/PRISM'
+nrs: 1
+
+path: '/path/to/work'
+input_dir: 'FITS'
+fits_file: 'WASP-6_nrs1_box_spectra_fullres_PRISM.fits'
+output_dir: 'WASP-6_PRISM_NRS1'
+
+resolution:
+  high: 'native'
+
+flags:
+  detrending_type: 'explinear'   # exponential ramp plus a linear baseline
+  ld_profile: 'power2'
+  ld_prior: 'stellarprior'
+  vmap_chunk: 4                  # channels sampled per GPU batch
+
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

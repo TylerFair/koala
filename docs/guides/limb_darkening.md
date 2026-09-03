@@ -26,10 +26,11 @@ flags: {ld_profile: power2, ld_prior: widegaussian}
 ```
 
 **Free uniform.** For quadratic LD, `uniform` means wide flat priors on
-$u_+=u_1+u_2$ and $u_-=u_1-u_2$ following Sing et al. (2026); `sing` means the
-offset-corrected informed prior. The wide box is $u_+\in[-1,2]$ and
-$u_-\in[-2,2]$; set `ld_uniform_basis: coefficients` for the historical
-$u_1,u_2\in[0,1]$ prior.
+$u_+=u_1+u_2$ and $u_-=u_1-u_2$; `sing` means the offset-corrected informed
+prior. Sing et al. (2026) advocate sufficiently wide uninformative priors in
+these coordinates but do not prescribe bounds. The configured default is
+$u_+\in[-1,2]$ and $u_-\in[-2,2]$; use `ld_uniform_basis: coefficients` and
+`ld_uniform_coefficient_bounds` for a direct-coefficient box.
 
 ```yaml
 flags: {ld_profile: power2, ld_prior: uniform}
@@ -102,8 +103,10 @@ flags: {ld_profile: power2, ld_prior: uniform}
 For quadratic LD, uniform mode uses independent flat priors on
 $u_+=u_1+u_2\in[-1,2]$ and $u_-=u_1-u_2\in[-2,2]$. This deliberately enlarges
 the prior relative to the legacy coefficient box; it is not a reparameterized
-version of the same prior. Set `ld_uniform_basis: coefficients` to recover flat
-$u_1,u_2\in[0,1]$. Wide-Gaussian and uniform/free power-2 priors retain their
+version of the same prior. Set `ld_uniform_basis: coefficients` to sample
+direct coefficients and use `ld_uniform_coefficient_bounds` to set their
+shared bounds; the default is $u_1,u_2\in[0,1]$. Wide-Gaussian and uniform/free
+power-2 priors retain their
 existing behavior. Builders save `u1`, `u2`, `l`, `delta`, and `u` for the new
 quadratic path so downstream output remains in familiar quantities.
 

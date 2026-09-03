@@ -1,3 +1,5 @@
+import os
+
 import jax
 import jax.numpy as jnp
 import numpyro
@@ -88,6 +90,14 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
 
     def _whitelight_model_static(t, yerr, y=None, prior_params=None):
         durations, t0s, bs, rorss = [], [], [], []
+        trend_parameterization = os.getenv(
+            "JWSTJAXFIT_WL_TREND_PARAMETERIZATION", "physical"
+        ).lower()
+        if trend_parameterization not in {"physical", "cadence"}:
+            raise ValueError(
+                "JWSTJAXFIT_WL_TREND_PARAMETERIZATION must be 'physical' or 'cadence'."
+            )
+        cadence = jnp.median(jnp.diff(jnp.sort(jnp.asarray(t))))
 
         for i in range(n_planets):
             logD = numpyro.sample(f"logD_{i}", dist.Uniform(jnp.log(0.0007), jnp.log(1)))
@@ -152,7 +162,17 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
         if 'linear_discontinuity' in detrend_components:
             t_jump_guess = prior_params.get('t_jump_guess', 0.5 * (jnp.min(t) + jnp.max(t)))
             jump_guess = prior_params.get('jump_guess', 0.0)
-            params['t_jump'] = numpyro.sample('t_jump', dist.Normal(t_jump_guess, 1e-2))
+            if trend_parameterization == "cadence":
+                t_jump_offset_cadences = numpyro.sample(
+                    't_jump_offset_cadences', dist.Normal(0.0, 1e-2 / cadence)
+                )
+                params['t_jump'] = numpyro.deterministic(
+                    't_jump', t_jump_guess + cadence * t_jump_offset_cadences
+                )
+            else:
+                params['t_jump'] = numpyro.sample(
+                    't_jump', dist.Normal(t_jump_guess, 1e-2)
+                )
             params['jump'] = numpyro.sample('jump', dist.Normal(jump_guess, 0.01))
             params['width'] = sample_step_width(t, prior_params, step_width_mode)
 
@@ -163,13 +183,41 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
 
         if not detrend_components.isdisjoint({'spot', '2spot'}):
             params['spot_amp'] = numpyro.sample('spot_amp', dist.Uniform(0.0, 0.1))
-            params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(prior_params['spot_guess'], 0.01))
-            params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Uniform(1e-4, 0.1))
+            if trend_parameterization == "cadence":
+                mu_offset = numpyro.sample(
+                    'spot_mu_offset_cadences', dist.Normal(0.0, 0.01 / cadence)
+                )
+                sigma_cadences = numpyro.sample(
+                    'spot_sigma_cadences', dist.Uniform(1e-4 / cadence, 0.1 / cadence)
+                )
+                params['spot_mu'] = numpyro.deterministic(
+                    'spot_mu', prior_params['spot_guess'] + cadence * mu_offset
+                )
+                params['spot_sigma'] = numpyro.deterministic(
+                    'spot_sigma', cadence * sigma_cadences
+                )
+            else:
+                params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(prior_params['spot_guess'], 0.01))
+                params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Uniform(1e-4, 0.1))
         if '2spot' in detrend_components:
             spot_guess2 = prior_params.get('spot_guess2', prior_params['spot_guess'])
             params['spot_amp2'] = numpyro.sample('spot_amp2', dist.Uniform(0.0, 0.1))
-            params['spot_mu2'] = numpyro.sample('spot_mu2', dist.Normal(spot_guess2, 0.01))
-            params['spot_sigma2'] = numpyro.sample('spot_sigma2', dist.Uniform(1e-4, 0.1))
+            if trend_parameterization == "cadence":
+                mu_offset2 = numpyro.sample(
+                    'spot_mu2_offset_cadences', dist.Normal(0.0, 0.01 / cadence)
+                )
+                sigma_cadences2 = numpyro.sample(
+                    'spot_sigma2_cadences', dist.Uniform(1e-4 / cadence, 0.1 / cadence)
+                )
+                params['spot_mu2'] = numpyro.deterministic(
+                    'spot_mu2', spot_guess2 + cadence * mu_offset2
+                )
+                params['spot_sigma2'] = numpyro.deterministic(
+                    'spot_sigma2', cadence * sigma_cadences2
+                )
+            else:
+                params['spot_mu2'] = numpyro.sample('spot_mu2', dist.Normal(spot_guess2, 0.01))
+                params['spot_sigma2'] = numpyro.sample('spot_sigma2', dist.Uniform(1e-4, 0.1))
 
         if 'gp' in detrend_components:
             params['GP_log_sigma'] = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-5), jnp.log(1e3)))

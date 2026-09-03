@@ -24,7 +24,6 @@ def _variant_stage(stage, variant):
     """Convert one structural stage dump to the invariant data-form schema."""
     import jax.numpy as jnp
     from dataclasses import replace
-    from models.ld_parameterization import Power2MaxtedTransform
 
     kwargs = dict(stage.model_kwargs)
     init = dict(stage.init_params)
@@ -32,16 +31,30 @@ def _variant_stage(stage, variant):
     zeros = jnp.zeros((n, 2), dtype=jnp.float64)
     ones = jnp.ones((n, 2), dtype=jnp.float64)
     if variant.name.startswith("fixed_"):
-        center = jnp.asarray(kwargs.pop("ld_fixed"))
+        if "ld_fixed" in kwargs:
+            center = jnp.asarray(kwargs.pop("ld_fixed"))
+        elif variant.law == "quadratic" and "ld_uplus_uminus" in init:
+            sumdiff = jnp.asarray(init.pop("ld_uplus_uminus"))
+            center = jnp.stack(
+                ((sumdiff[:, 0] + sumdiff[:, 1]) / 2.0,
+                 (sumdiff[:, 0] - sumdiff[:, 1]) / 2.0), axis=-1,
+            )
+        else:
+            center = jnp.stack((init.pop("c1"), init.pop("c2")), axis=-1)
         scale, low, high, code = zeros, zeros, ones, 0
-        latent = zeros
+        latent = 0.5 * ones
     elif variant.name == "uniform_power2":
+        kwargs.pop("mu_u_ld", None)
+        kwargs.pop("sigma_u_ld", None)
         center, scale, low, high, code = zeros, -ones, zeros, ones, 1
         if "ld_decorrelated" in init:
-            latent = jnp.asarray(init.pop("ld_decorrelated"))
+            from models.ld_parameterization import Power2MaxtedTransform
+            latent = Power2MaxtedTransform().inv(
+                jnp.asarray(init.pop("ld_decorrelated"))
+            )
         else:
             coeff = jnp.stack((init.pop("c1"), init.pop("c2")), axis=-1)
-            latent = Power2MaxtedTransform()(coeff)
+            latent = coeff
     elif variant.name == "uniform_quadratic":
         center, scale = zeros, -ones
         low = jnp.broadcast_to(jnp.array([-1.0, -2.0]), (n, 2))
@@ -54,9 +67,10 @@ def _variant_stage(stage, variant):
         low = jnp.broadcast_to(jnp.array([0.0, -1.0]), (n, 2))
         high = ones
         code = 3
-        latent = jnp.stack(
-            (init.pop("limb_l"), init.pop("limb_delta")), axis=-1
-        )
+        initial_l = jnp.asarray(init.pop("limb_l"))
+        initial_delta = jnp.asarray(init.pop("limb_delta"))
+        initial_fraction = 0.5 + 2.0 * initial_delta / (1.0 - initial_l)
+        latent = jnp.stack((initial_l, initial_fraction), axis=-1)
     else:
         center = jnp.asarray(kwargs.pop("mu_u_ld"))
         scale = jnp.asarray(kwargs.pop("sigma_u_ld"))
@@ -70,13 +84,22 @@ def _variant_stage(stage, variant):
         else:
             latent = jnp.asarray(init.pop("u"))
     init.pop("u", None)
-    init["ld_variant_latent"] = latent
+    if variant.name == "sing_quadratic":
+        latent_low, latent_high = zeros, ones
+    else:
+        latent_low, latent_high = low, high
+    fraction = jnp.clip(
+        (latent - latent_low) / (latent_high - latent_low), 1e-8, 1.0 - 1e-8
+    )
+    init["ld_variant_latent"] = jnp.log(fraction) - jnp.log1p(-fraction)
     kwargs.update(
         ld_center=center, ld_scale=scale, ld_low=low, ld_high=high,
+        ld_latent_low=latent_low, ld_latent_high=latent_high,
         ld_map_code=jnp.asarray(code, dtype=jnp.int32),
     )
     varying = tuple(dict.fromkeys(
-        (*stage.channel_varying_kwargs, "ld_center", "ld_scale", "ld_low", "ld_high")
+        (*stage.channel_varying_kwargs, "ld_center", "ld_scale", "ld_low", "ld_high",
+         "ld_latent_low", "ld_latent_high")
     ))
     return replace(stage, init_params=init, model_kwargs=kwargs,
                    channel_varying_kwargs=varying)
@@ -88,11 +111,8 @@ def run_spectroscopic_loop(stage_paths, output_dir, *, samples=1000):
     import numpy as np
     import pandas as pd
     from tools.spectro_stage_inputs import load_stage_inputs
-    from tools.run_sampler_on_stage_inputs import (
-        _CompilationEvents, _chunk_inputs, _run_independent_chunk,
-        _concatenate_samples, _diagnostic_arrays, _diagnostic_summary,
-        _arviz_diagnostics,
-    )
+    import fit_jwst
+    from tools.run_sampler_on_stage_inputs import _CompilationEvents, _arviz_diagnostics
 
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -100,6 +120,8 @@ def run_spectroscopic_loop(stage_paths, output_dir, *, samples=1000):
     runners = {"power2": {}, "quadratic": {}}
     common_models = {}
     common_sampler_options = {}
+    runner_caches = {"power2": {}, "quadratic": {}}
+    joint_runner_caches = {"power2": {}, "quadratic": {}}
     compilation = _CompilationEvents()
     try:
         jax.monitoring.register_event_duration_secs_listener(compilation.listener)
@@ -128,26 +150,42 @@ def run_spectroscopic_loop(stage_paths, output_dir, *, samples=1000):
             common_sampler_options[variant.law] = (nuts_kwargs, mcmc_kwargs)
         else:
             nuts_kwargs, mcmc_kwargs = common_sampler_options[variant.law]
-        chunks, widths, diagnostics_rows = [], [], []
-        mark, started = compilation.mark(), time.perf_counter()
-        for index, start in enumerate(range(0, stage.num_channels, stage.chunk_size)):
-            end = min(start + stage.chunk_size, stage.num_channels)
-            chunk = _chunk_inputs(stage, start, end)
-            values, diagnostics = _run_independent_chunk(
-                "independent_nuts", stage, chunk,
-                jax.random.fold_in(stage.rng_key, index), runners[variant.law],
-                stage.chunk_size, nuts_kwargs, mcmc_kwargs, {},
-            )
-            chunks.append(jax.device_get(values)); widths.append(end - start)
-            diagnostics_rows.append(_diagnostic_summary(
-                _diagnostic_arrays(diagnostics)
-            ))
-        draws = _concatenate_samples(chunks, widths)
-        elapsed = time.perf_counter() - started
-        compile_stats = compilation.since(mark)
         stage_name = str(stage.meta.get("stage_kind", "stage"))
         variant_dir = output / name / stage_name
         variant_dir.mkdir(parents=True, exist_ok=True)
+        independent_builds_before = sum(
+            runner.program_build_count
+            for runner in runner_caches[variant.law].values()
+            if hasattr(runner, "program_build_count")
+        )
+        joint_runners_before = len(joint_runner_caches[variant.law])
+        mark, started = compilation.mark(), time.perf_counter()
+        posterior = fit_jwst.get_samples_chunked(
+            stage.model, stage.rng_key, stage.t, stage.yerr, stage.y,
+            stage.init_params, stage.chunk_size,
+            nuts_kwargs=nuts_kwargs, mcmc_kwargs=mcmc_kwargs,
+            output_dir=str(variant_dir), checkpoint_prefix="loop",
+            sampler_backend="independent_nuts",
+            channel_varying_kwargs=stage.channel_varying_kwargs,
+            checkpoint_signature={"stage": stage_name, "variant": name,
+                                  "ld_variant_as_data": True},
+            spectro_min_depth_ess=400.0, spectro_max_divergences=0,
+            adaptive_fallback_model=stage.model,
+            adaptive_fallback_init_params=stage.init_params,
+            # The observed production swap chain needs at most four adaptive
+            # lanes per chunk.  A four-lane joint fallback amortizes one
+            # low/high compile without paying for forty nuisance lanes.
+            adaptive_fallback_resident_width=4,
+            _joint_mcmc_runner_cache=joint_runner_caches[variant.law],
+            _independent_mcmc_runner_cache=runner_caches[variant.law],
+            **stage.model_kwargs,
+        )
+        draws = dict(posterior)
+        sampler_used = list(getattr(posterior, "sampler_used", None)
+                            or ["independent_nuts"] * stage.num_channels)
+        elapsed = time.perf_counter() - started
+        compile_stats = compilation.since(mark)
+        np.savez_compressed(variant_dir / "posterior_samples.npz", **draws)
         depth = np.asarray(draws["depths"])[..., 0]
         wavelength = np.asarray(stage.meta["wavelength"])
         wavelength_err = np.asarray(stage.meta.get(
@@ -156,6 +194,12 @@ def run_spectroscopic_loop(stage_paths, output_dir, *, samples=1000):
         depth_median = np.median(depth, axis=0)
         depth_error = np.std(depth, axis=0, ddof=1)
         sample_diagnostics = _arviz_diagnostics(draws, stage.num_channels)
+        independent_builds_after = sum(
+            runner.program_build_count
+            for runner in runner_caches[variant.law].values()
+            if hasattr(runner, "program_build_count")
+        )
+        joint_runners_after = len(joint_runner_caches[variant.law])
         table = pd.DataFrame({
             "wavelength": wavelength,
             "wavelength_err": wavelength_err,
@@ -163,14 +207,28 @@ def run_spectroscopic_loop(stage_paths, output_dir, *, samples=1000):
             "depth_err00": depth_error,
             "depth_ppm00": 1e6 * depth_median,
             "depth_err_ppm00": 1e6 * depth_error,
-            "sampler_used": "independent_nuts",
+            "sampler_used": sampler_used,
         })
         table.to_csv(variant_dir / "spectrum.csv", index=False)
         row = {"variant": name, "stage": stage.meta.get("stage_kind"),
                "wall_seconds": elapsed, **compile_stats,
-               "program_build_count": sum(r.program_build_count for r in runners[variant.law].values()),
+               "program_build_count": sum(
+                   runner.program_build_count
+                   for runner in runner_caches[variant.law].values()
+                   if hasattr(runner, "program_build_count")
+               ),
+               "new_independent_program_builds": (
+                   independent_builds_after - independent_builds_before
+               ),
+               "joint_runner_count": joint_runners_after,
+               "new_joint_runner_builds": (
+                   joint_runners_after - joint_runners_before
+               ),
                "sample_diagnostics": sample_diagnostics,
-               "chunks": diagnostics_rows}
+               "sampler_used_counts": {
+                   sampler: sampler_used.count(sampler)
+                   for sampler in sorted(set(sampler_used))
+               }}
         (variant_dir / "summary.json").write_text(json.dumps(row, indent=2) + "\n")
         summary.append(row)
     (output / "loop_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -200,6 +258,49 @@ SPECTRUM_COLUMNS = (
     "wavelength", "wavelength_err", "depth00", "depth_err00",
     "depth_ppm00", "depth_err_ppm00", "sampler_used",
 )
+
+
+def run_whitelight_variants(model, variant_inputs, *, t, yerr, y,
+                            output_dir, rng_key, nuts_kwargs=None,
+                            mcmc_kwargs=None):
+    """Run one white-light callable repeatedly with dynamic LD arguments.
+
+    ``variant_inputs`` contains ``(name, model_kwargs, init_values)`` tuples.
+    The returned posterior-median geometry is also written in the handoff JSON
+    consumed by stage-dump preparation.
+    """
+    import numpy as np
+    import numpyro
+    from models.jaxoplanet.builder import derive_geometry
+
+    nuts_kwargs = dict(nuts_kwargs or {})
+    mcmc_options = {"num_warmup": 1000, "num_samples": 1000,
+                    "progress_bar": False, "jit_model_args": True,
+                    **dict(mcmc_kwargs or {})}
+    sampler = numpyro.infer.NUTS(model, **nuts_kwargs)
+    mcmc = numpyro.infer.MCMC(sampler, **mcmc_options)
+    results = {}
+    for index, (name, model_kwargs, init_values) in enumerate(variant_inputs):
+        mcmc.sampler._init_strategy = numpyro.infer.init_to_value(
+            values=init_values
+        )
+        mcmc.run(jax.random.fold_in(rng_key, index), t, yerr, y=y,
+                 **model_kwargs)
+        samples = mcmc.get_samples(group_by_chain=False)
+        period = model_kwargs["prior_params"]["period"]
+        geometry = derive_geometry(samples, period)
+        medians = {
+            key: np.median(np.asarray(jax.device_get(value)), axis=0).tolist()
+            for key, value in geometry.items()
+        }
+        target = Path(output_dir) / name
+        target.mkdir(parents=True, exist_ok=True)
+        handoff = {"estimator": "posterior_median", "geometry": medians}
+        (target / "whitelight_geometry_handoff.json").write_text(
+            json.dumps(handoff, indent=2) + "\n", encoding="utf-8"
+        )
+        results[name] = {"samples": samples, "geometry": medians}
+    return results, mcmc
 
 
 def main(argv=None):

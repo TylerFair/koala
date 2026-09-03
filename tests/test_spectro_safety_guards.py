@@ -57,6 +57,101 @@ def test_explicit_ld_parameterization_overrides_prior_default():
         )
 
 
+@pytest.mark.parametrize(
+    ("detrend", "expected"),
+    [
+        ("linear", "laplace"),
+        ("quadratic", "laplace"),
+        ("explinear", "laplace"),
+        ("spot", "laplace"),
+        ("2spot", "adaptive"),
+        ("linear_discontinuity", "laplace"),
+        ("spot+linear_discontinuity", "adaptive"),
+    ],
+)
+def test_whitelight_metric_uses_validated_family_default(detrend, expected):
+    assert fit_jwst._resolve_whitelight_mass_matrix({}, detrend) == expected
+
+
+def test_whitelight_metric_default_has_explicit_opt_outs():
+    assert fit_jwst._resolve_whitelight_mass_matrix({}, "linear") == "laplace"
+    assert fit_jwst._resolve_whitelight_mass_matrix(
+        {"whitelight_complex_trend_adaptive": True}, "spot"
+    ) == "adaptive"
+    assert fit_jwst._resolve_whitelight_mass_matrix(
+        {"whitelight_complex_trend_adaptive": False}, "spot"
+    ) == "laplace"
+
+
+@pytest.mark.parametrize(
+    ("detrend", "expected"),
+    [
+        ("linear", "physical"),
+        ("quadratic", "physical"),
+        ("explinear", "physical"),
+        ("spot", "cadence"),
+        ("2spot", "physical"),
+        ("linear_discontinuity", "cadence"),
+    ],
+)
+def test_whitelight_trend_parameterization_family_defaults(
+    monkeypatch, detrend, expected
+):
+    monkeypatch.delenv("JWSTJAXFIT_WL_TREND_PARAMETERIZATION", raising=False)
+    assert fit_jwst._resolve_whitelight_trend_parameterization(
+        {}, detrend
+    ) == expected
+
+
+def test_whitelight_trend_parameterization_config_and_env_override(monkeypatch):
+    monkeypatch.delenv("JWSTJAXFIT_WL_TREND_PARAMETERIZATION", raising=False)
+    assert fit_jwst._resolve_whitelight_trend_parameterization(
+        {"whitelight_trend_parameterization": "physical"}, "spot"
+    ) == "physical"
+    monkeypatch.setenv("JWSTJAXFIT_WL_TREND_PARAMETERIZATION", "cadence")
+    assert fit_jwst._resolve_whitelight_trend_parameterization(
+        {"whitelight_trend_parameterization": "physical"}, "linear"
+    ) == "cadence"
+
+
+def test_two_spot_ordering_is_validated_and_legacy_by_default():
+    assert fit_jwst._resolve_whitelight_two_spot_ordering({}) == "legacy"
+    assert fit_jwst._resolve_whitelight_two_spot_ordering(
+        {"whitelight_2spot_ordering": "ordered"}
+    ) == "ordered"
+    with pytest.raises(ValueError, match="legacy.*ordered"):
+        fit_jwst._resolve_whitelight_two_spot_ordering(
+            {"whitelight_2spot_ordering": "sort_after_sampling"}
+        )
+
+
+def test_compile_and_ld_caches_default_on_with_explicit_opt_outs():
+    compile_options = fit_jwst._resolve_compile_cache_options({})
+    assert compile_options == {
+        "compile_box": True,
+        "persistent_cache": True,
+        "cache_dir": "/scratch/midway3/tfairnington/jax_cache",
+    }
+    assert fit_jwst._resolve_compile_cache_options({
+        "compile_box": False, "jax_persistent_cache": False,
+        "jax_compilation_cache_dir": "/tmp/compile-cache",
+    }) == {
+        "compile_box": False,
+        "persistent_cache": False,
+        "cache_dir": "/tmp/compile-cache",
+    }
+    assert fit_jwst._resolve_ld_prior_cache_options({}) == {
+        "enabled": True,
+        "cache_dir": "/scratch/midway3/tfairnington/ld_prior_cache",
+    }
+    assert fit_jwst._resolve_ld_prior_cache_options({
+        "ld_prior_cache": False, "ld_prior_cache_dir": "/tmp/ld-cache",
+    }) == {"enabled": False, "cache_dir": "/tmp/ld-cache"}
+    assert fit_jwst._resolve_whitelight_mass_matrix(
+        {"whitelight_mass_matrix": "laplace"}, "spot"
+    ) == "laplace"
+
+
 def _unprovenanced_plan():
     pilot = PilotDiagnostics(
         channel_indices=(0, 1),
