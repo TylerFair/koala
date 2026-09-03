@@ -2,40 +2,39 @@
 
 Transmission spectra inherit choices made while fitting each light curve. Reasonable limb-darkening priors or baseline trends can yield different depths even when every fit passes its sampler checks. Model stacking carries that uncertainty into the spectrum instead of selecting one assumption and treating it as known.
 
-This tutorial uses the WASP-39 b NIRSpec/G395H NRS1 visit. The final stage has 68 channels on the reference grid defined by `prism_template.csv`. Six complete pipeline fits compare four power-2 limb-darkening prescriptions with a linear trend, plus stellar-informed and uniform limb darkening with the visit discontinuity.
+This tutorial uses the HAT-P-18 b NIRSpec/G395M NRS1 visit. Its production reference grid has 208 wavelength channels. The scientific question is deliberately plain: how much does the transmission spectrum move when we change the limb-darkening treatment, and what spectrum results when we marginalize over that choice? Three full pipeline fits compare fixed power-2, uniform quadratic, and Sing quadratic limb darkening while holding the linear systematics trend fixed.
 
 ## The model matrix
 
 Each variant is a full pipeline run. It therefore gets its own white-light fit and geometry handoff, low-resolution bridge, and reference-grid spectroscopic fit. The matrix file uses small overrides on the checked stellar-informed configuration:
 
 ```yaml
-dataset: wasp39_nrs1_ref
+dataset: hatp18_nrs1_g395m_ref
 analysis_stage: all
 variants:
-  - name: informed_linear
-    overrides:
-      input_dir: /scratch/midway3/tfairnington/FITS
-      flags: {ld_prior: stellarprior, ld_profile: power2, detrending_type: linear}
-  - name: uniform_linear
-    overrides:
-      input_dir: /scratch/midway3/tfairnington/FITS
-      flags: {ld_prior: uniform, ld_profile: power2, detrending_type: linear}
-  - name: wide_linear
-    overrides:
-      input_dir: /scratch/midway3/tfairnington/FITS
-      flags: {ld_prior: widegaussian, ld_profile: power2, detrending_type: linear}
-  - name: fixed_linear
+  - name: fixed_power2_linear
     overrides:
       input_dir: /scratch/midway3/tfairnington/FITS
       flags: {ld_prior: fixed, ld_profile: power2, detrending_type: linear}
-  - name: informed_linear_step
+  - name: uniform_quadratic_linear
     overrides:
       input_dir: /scratch/midway3/tfairnington/FITS
-      flags: {ld_prior: stellarprior, ld_profile: power2, detrending_type: linear_discontinuity}
-  - name: uniform_linear_step
+      flags: {ld_prior: uniform, ld_profile: quadratic, detrending_type: linear}
+      sampling:
+        whitelight_ld_parameterization: coefficients
+        spectro_ld_parameterization: coefficients
+  - name: sing_quadratic_linear
     overrides:
       input_dir: /scratch/midway3/tfairnington/FITS
-      flags: {ld_prior: uniform, ld_profile: power2, detrending_type: linear_discontinuity}
+      stellar: {ld_mu_min: 0.2}
+      flags: {ld_prior: sing, ld_profile: quadratic, detrending_type: linear,
+              ld_sing_offset: fit}
+      sampling:
+        whitelight_ld_parameterization: coefficients
+        spectro_ld_parameterization: coefficients
+        sing_offset_calibration_warmup: 150
+        sing_offset_calibration_samples: 300
+        sing_offset_calibration_min_ess: 100
 ```
 
 Keep the sampling policy identical: independent NUTS, a Laplace metric, lognormal jitter, and a minimum depth ESS of 400. Changing both the scientific assumption and sampler policy would make the comparison difficult to interpret.
@@ -46,9 +45,9 @@ Keep the sampling policy identical: independent NUTS, a Laplace metric, lognorma
 
 ```bash
 python tools/stacking/run_matrix.py \
-  configs_fiducial_stellarinformed/WASP-39_nrs1_g395h_config.yaml \
-  configs_stacking/wasp39_nrs1_reference_matrix.yaml \
-  --queue-start 320
+  configs_fiducial_stellarinformed/HAT-P-18_nrs1_g395m_config.yaml \
+  configs_stacking/hatp18_nrs1_g395m_reference_matrix.yaml \
+  --queue-start 410
 ```
 
 After every fit has a successful exit marker, make the likelihood archives and combined products on CPU:
@@ -57,10 +56,10 @@ After every fit has a successful exit marker, make the likelihood archives and c
 export JAX_ENABLE_X64=1
 export JAX_PLATFORMS=cpu
 python tools/stacking/stack_spectra.py \
-  configs_stacking/wasp39_nrs1_reference_analysis.yaml \
+  configs_stacking/hatp18_nrs1_g395m_reference_analysis.yaml \
   --stage high_resolution \
   --output acceleration_reports/stacking \
-  --label wasp39_nrs1_reference \
+  --label hatp18_nrs1_g395m_reference \
   --n-out 20000
 ```
 
@@ -94,8 +93,8 @@ The CSV also retains every absolute model spectrum and an unaligned stacked spec
 
 ## Read the diagnostic figure
 
-```{image} ../_static/model_stacking_wasp39.png
-:alt: WASP-39 b NIRSpec G395H model-stacking diagnostics
+```{image} ../_static/model_stacking_hatp18.png
+:alt: HAT-P-18 b NIRSpec G395M model-stacking diagnostics
 :width: 900px
 :align: center
 ```
@@ -106,11 +105,17 @@ The third panel shows channel-specific stacking weights and pseudo-BMA+ weights.
 
 The final panel shows the maximum Pareto $\hat k$ and the disagreement ratio. Values below 0.7 support ordinary PSIS-LOO; a channel with points above 0.7 needs exact refits, moment matching, or a more appropriate grouped predictive unit. `disagreement` is the aligned 16--84 percent half-width divided by the smallest single-model half-width. Values near one mean shape robustness; values above one identify assumption-sensitive channels.
 
-For the validated four-model production run shown here, every channel has maximum $\hat k<0.7$ (global maximum 0.547). The discontinuity model dominates the predictive stack in all 68 channels, with mean weight 0.942. Offset alignment reduces the median disagreement from 1.032 to 1.020 and removes a much larger absolute-width excursion: the maximum falls from 1.811 to 1.181. Wide-Gaussian linear and uniform-plus-step fits are not included in this displayed result because their pre-fix white-light initialization failed before spectroscopy; the coordinate bug and exclusion are recorded in the acceleration report.
+For the HAT-P-18 run shown here, all 428,064 pointwise diagnostics satisfy $\hat k<0.7$; the global maximum is 0.541. Mean stacking weights are 0.669 for fixed power-2, 0.127 for uniform quadratic, and 0.204 for Sing quadratic. Fixed is dominant in 135 of 208 channels, but the other LD treatments matter in the remainder. Their fitted achromatic offsets are -11.0, -14.5, and +27.0 ppm. Once those gray shifts are removed, median disagreement is 1.008 and the largest channel reaches 1.526. The aligned spectrum differs from the staged stellar-informed production spectrum by -11.4 +/- 17.5 ppm, with a residual slope of 9.12 ppm/micron and a median error-bar ratio of 0.983.
+
+The Sing calibration stage ran, but its free gray-offset calibration missed the configured ESS gate (79.9 versus 100) with no divergences, so the documented tabulated Stagger offset fallback was used. This is a useful reminder that a completed model can still carry a calibration qualification worth reporting.
+
+## Second worked example: WASP-39 b
+
+The same machinery was also validated on four WASP-39 b G395H models over its 68-channel production grid. There the informed linear-plus-discontinuity model had mean stacking weight 0.942, global maximum $\hat k=0.547$, and the aligned stack agreed with production at -5.43 +/- 15.93 ppm. Its figure remains available as `docs/_static/model_stacking_wasp39.png`; full details, including two excluded initialization failures, are in `acceleration_reports/stacking/stacking.md`.
 
 ## Outputs
 
-- `*_stacked_spectrum.csv` is the portable table. Headline columns are aligned; `absolute_*` columns retain the unaligned mixture.
+- `*_stacked.csv` is the portable table. Headline columns are aligned; `absolute_*` columns retain the unaligned mixture.
 
 - `*_diagnostics.json` records offsets, Pareto summaries, and model-average weights.
 

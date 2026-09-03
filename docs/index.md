@@ -57,6 +57,7 @@ guides/samplers
 guides/configuration
 guides/outputs
 guides/gpu_and_clusters
+guides/model_stacking
 api
 citing
 ```

@@ -109,9 +109,68 @@ Products are `wasp39_nrs1_reference_four_stacked.csv`, `wasp39_nrs1_reference_fo
 JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false JAX_ENABLE_X64=1 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m pytest tests/test_ld_initialization.py tests/test_stacking.py -q
 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/stacking/run_matrix.py configs_fiducial_stellarinformed/WASP-39_nrs1_g395h_config.yaml configs_stacking/wasp39_nrs1_reference_initfix.yaml --queue-start 380
 JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false JAX_ENABLE_X64=1 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/stacking/stack_spectra.py configs_stacking/wasp39_nrs1_reference_analysis_four.yaml --output acceleration_reports/stacking --stage high_resolution --label wasp39_nrs1_reference_four --n-out 20000
-/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m sphinx -W -b html docs docs/_build/html
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m sphinx -E -W -b html docs docs/_build/html
 ```
 
 Initialization retries 322 and 326 failed because the former lost its Slurm step and the latter hit the wide-LD invalid initializer. Retry 333 reproduced the initializer failure. Runs 325 and 334 reproduced the uniform-step invalid initializer. Copied-output experiments 335 and 336 were correctly rejected by science-artifact fingerprint checks and were not used. No failed output was removed or overwritten. White-light Laplace BMA remains unavailable because these pipeline artifacts do not serialize the full Hessian and MAP log joint; the analytic implementation and test are present, but no LOO value is mislabeled as evidence.
 
 The literal `sphinx-build` command first failed with exit 127 because that console script is not on the login-node `PATH`. Running the same Sphinx warning-as-error build through the specified environment's Python succeeded with Sphinx 8.1.3. The combined LD-initialization and stacking test run passed 7 tests in 44.16 seconds.
+
+## HAT-P-18 G395M
+
+The documentation headline example is now HAT-P-18 b NIRSpec/G395M NRS1 on the exact 208-channel production reference grid. All three requested linear-trend variants completed: fixed power-2 (queue 410), uniform quadratic in physical coefficients (411), and Sing quadratic in physical coefficients with `mu_min=0.2` (412). Full-pipeline walls were 876, 735, and 933 seconds (14.6, 12.2, and 15.6 minutes).
+
+The spectroscopic gate/swap outputs contain all 208 channels for every model. Final `sampler_used` counts were:
+
+| Model | independent NUTS | independent HMC | joint NUTS | divergences recorded |
+|---|---:|---:|---:|---:|
+| fixed power-2 | 203 | 4 | 1 | 5 |
+| uniform quadratic | 203 | 5 | 0 | 15 |
+| Sing quadratic | 202 | 6 | 0 | 8 |
+
+Thus the automatic gate did route the difficult lanes instead of silently accepting the first sampler everywhere. The nonzero final diagnostic divergence totals remain a caveat even though all depth ESS routing completed and PSIS is stable. The Sing broad gray-offset calibration executed but failed its calibration ESS gate (`79.91 < 100`, zero divergences), so the pipeline explicitly fell back to the tabulated Stagger offsets (`delta_l=+0.020`, `delta_delta=-0.003`). No initialization failure or GPU retry occurred.
+
+### Offsets, weights, and PSIS
+
+The inverse-variance achromatic offsets relative to the across-model channel reference are:
+
+| Model | Delta (ppm) | Uncertainty (ppm) | mean stacking weight | mean pseudo-BMA+ weight | dominant channels |
+|---|---:|---:|---:|---:|---:|
+| fixed power-2 | -11.01 | 11.64 | 0.6687 | 0.4010 | 135 |
+| uniform quadratic | -14.52 | 14.69 | 0.1271 | 0.2719 | 29 |
+| Sing quadratic | +26.99 | 12.96 | 0.2042 | 0.3271 | 44 |
+
+LOO weights are computed from light-curve prediction and are unchanged by depth alignment. The headline mixture subtracts each Delta, mixes draws channel by channel, and restores the model-weighted average offset. The CSV retains the unaligned `absolute_*` mixture and each absolute candidate spectrum. Median aligned disagreement is 1.008 and its maximum is 1.526.
+
+All 428,064 Pareto diagnostics (3 models x 208 channels x 686 cadences) are below 0.7. The global maximum is 0.541; maxima for fixed, uniform, and Sing are 0.525, 0.541, and 0.457. There are no flagged channels.
+
+### Same-grid production comparison
+
+The staged production and stacked wavelength arrays match exactly, including all 208 channels. With inverse combined-variance weighting, aligned stack minus production is `-11.39 +/- 17.50 ppm`; the weighted residual slope is `+9.12 ppm/um`, and the median ratio of aligned-stack to production 68-percent half-width is 0.983. This directly measures the LD-marginalized example against the saved stellar-informed production spectrum; it is not an interpolated comparison.
+
+Products are `hatp18_nrs1_g395m_reference_stacked.csv`, `hatp18_nrs1_g395m_reference_diagnostics.json`, `hatp18_nrs1_g395m_reference_stacking_arrays.npz`, three float32 pointwise likelihood archives, and `hatp18_nrs1_g395m_reference_stacking.png`. The figure is copied to `docs/_static/model_stacking_hatp18.png`.
+
+### HAT-P-18 files and exact commands
+
+| File | Change |
+|---|---|
+| `configs_stacking/hatp18_nrs1_g395m_reference_matrix.yaml` | Three-model scientific matrix |
+| `configs_stacking/hatp18_nrs1_g395m_reference_analysis.yaml` | Completed-run analysis manifest |
+| `configs_stacking/hatp18_nrs1_g395m_ref_*.yaml` | Generated isolated pipeline configurations |
+| `tools/stacking/stack_spectra.py` | Added bounded-memory draw batching and streamed NPZ likelihood caches |
+| `docs/guides/model_stacking.md` | Recast tutorial around HAT-P-18 and retained WASP-39 as a second example |
+| `docs/_static/model_stacking_hatp18.png` | HAT-P-18 four-panel diagnostic figure |
+| `docs/conf.py`, `docs/index.md` | Removed the temporary guide exclusion and added it to the Guides navigation |
+| `acceleration_reports/stacking/hatp18_nrs1_g395m_reference_*` | Likelihood caches, stack table, arrays, diagnostics, and figure |
+
+```bash
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/stacking/run_matrix.py configs_fiducial_stellarinformed/HAT-P-18_nrs1_g395m_config.yaml configs_stacking/hatp18_nrs1_g395m_reference_matrix.yaml --queue-start 410
+while [ ! -f acceleration_reports/gpu_queue/done/410_stacking_fixed_power2_linear.exit ] || [ ! -f acceleration_reports/gpu_queue/done/411_stacking_uniform_quadratic_linear.exit ] || [ ! -f acceleration_reports/gpu_queue/done/412_stacking_sing_quadratic_linear.exit ]; do sleep 60; done
+JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/stacking/stack_spectra.py configs_stacking/hatp18_nrs1_g395m_reference_analysis.yaml --output acceleration_reports/stacking --stage high_resolution --label hatp18_nrs1_g395m_reference --n-out 20000
+JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false JAX_ENABLE_X64=1 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m pytest tests/test_stacking.py tests/test_ld_initialization.py -q
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m sphinx -E -W -b html docs docs/_build/html
+```
+
+The first CPU stacker attempt was killed with exit 137 because vectorizing all 1,000 draws across 208 channels materialized a very large JAX likelihood evaluation. No completed output was overwritten. The stacker now evaluates 25 draws at a time into one multi-member float32 NPZ and scores one channel at a time; the rerun completed with all draws and cadences. White-light Laplace BMA remains unavailable because the fit artifacts do not serialize the full white-light Hessian and MAP log joint. Open scientific risks remain model-list expansion bias, cadence-correlated residuals (which would require blocked LOO), the Sing calibration fallback, and whether trend selection should occur on white light or per channel.
+
+Final verification: `tests/test_stacking.py tests/test_ld_initialization.py` passed 10 tests in 25.74 seconds (three dependency deprecation warnings), and a clean `python -m sphinx -E -W -b html docs docs/_build/html` rendered all 18 sources, including `guides/model_stacking`, successfully with Sphinx 8.1.3.

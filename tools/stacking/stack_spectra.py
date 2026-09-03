@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Score completed stacking variants and write spectra and diagnostics."""
 from __future__ import annotations
-import argparse, json, pickle, re, sys
+import argparse, io, json, pickle, re, sys, zipfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import matplotlib.pyplot as plt
@@ -37,6 +37,42 @@ def _stage(result_dir, stage_kind):
     paths = sorted((result_dir / "stage_inputs").glob(f"*{stage_kind}_inputs.pkl"))
     if len(paths) != 1: raise FileNotFoundError(f"Expected one stage dump; found {len(paths)}")
     return load_stage_inputs(paths[0])
+
+def _write_loglik_batched(path, samples, stage, batch_size=25):
+    """Evaluate draws in bounded-memory batches and stream them into one NPZ."""
+    n_draw = next(iter(samples.values())).shape[0]
+    with zipfile.ZipFile(path, "x", compression=zipfile.ZIP_DEFLATED,
+                         compresslevel=4, allowZip64=True) as archive:
+        for start in range(0, n_draw, batch_size):
+            stop = min(start + batch_size, n_draw)
+            batch = {key: value[start:stop] for key, value in samples.items()}
+            values = pointwise_loglik(batch, stage).astype(np.float32)
+            payload = io.BytesIO()
+            np.lib.format.write_array(payload, values, allow_pickle=False)
+            archive.writestr(f"loglik_{start:06d}_{stop:06d}.npy", payload.getvalue())
+
+def _score_loglik_cache(path):
+    """Run PSIS a channel at a time without materializing the full cache."""
+    with np.load(path) as cached:
+        keys = sorted(cached.files)
+        if keys == ["loglik"]:
+            values = np.asarray(cached["loglik"], dtype=np.float32)
+        else:
+            shape = (sum(cached[key].shape[0] for key in keys),) + cached[keys[0]].shape[1:]
+            values = np.empty(shape, dtype=np.float32)
+            start = 0
+            for key in keys:
+                batch = cached[key]
+                values[start:start + batch.shape[0]] = batch
+                start += batch.shape[0]
+    elpd = np.empty(values.shape[1:], dtype=np.float64)
+    khat = np.empty(values.shape[1:], dtype=np.float64)
+    for channel in range(values.shape[1]):
+            elpd_channel, _, khat_channel = psis_loo(
+                np.asarray(values[:, channel:channel + 1, :], dtype=np.float64))
+            elpd[channel] = elpd_channel[0]
+            khat[channel] = khat_channel[0]
+    return elpd, khat
 
 def _plot(path, wave, names, depths, aligned_summary, absolute_summary,
           weights, pbma, khat):
@@ -83,10 +119,9 @@ def main():
         queue_number=int(spec["variants"][index].get("queue_number", args.queue_start+index))
         result=Path("/scratch/midway3/tfairnington/accel_gpu_results")/f"{queue_number}_stacking_{name}"
         samples=_load_chunks(fit); stage=_stage(result,args.stage); llpath=output/f"{args.label}_{name}_pointwise_loglik.npz"
-        if llpath.exists(): loglik=np.load(llpath)["loglik"].astype(np.float64)
-        else:
-            loglik=pointwise_loglik(samples,stage); np.savez_compressed(llpath,loglik=loglik.astype(np.float32))
-        elpd_i,_,khat=psis_loo(loglik); elpds.append(elpd_i); khats.append(khat)
+        if not llpath.exists():
+            _write_loglik_batched(llpath, samples, stage)
+        elpd_i,khat=_score_loglik_cache(llpath); elpds.append(elpd_i); khats.append(khat)
         depths.append(np.asarray(samples["rors"])[...,0]**2)
         current=np.asarray(stage.meta["wavelength"])
         if wave is None: wave=current
