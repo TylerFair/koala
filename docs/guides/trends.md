@@ -15,7 +15,7 @@ flags: {detrending_type: linear}
 | Quartic | `detrending_type: quartic` | Adds `v4` |
 | Spot | `detrending_type: spot` | Linear baseline plus a fixed-center/width spot template; set `spot_amp`, `spot_center`, `spot_width` |
 | Two spots | `detrending_type: 2spot` | Adds the `spot_amp2`, `spot_center2`, `spot_width2` template |
-| Step | `detrending_type: linear_discontinuity` | Linear baseline plus `t_jump` and `jump`; initialize with `t_jump_guess`, `jump_guess` |
+| Step | `detrending_type: linear_discontinuity` | Linear baseline plus `t_jump`, `jump`, and sigmoid `width`; initialize with `t_jump_guess`, `jump_guess` |
 | Exponential + linear | `detrending_type: explinear` | `c + vt + A exp(-t/tau)` |
 
 For fixed spectroscopic ramp timescales use:
@@ -91,11 +91,11 @@ Use this model for a localized in-transit feature coherent across wavelength.
 
 ## Discontinuities
 
-The step template is
+The default step template is a smooth sigmoid,
 
-$$H(t;t_j)=\tfrac12[1+\tanh((t-t_j)/10^{-4}\ {\rm day})].$$
+$$H(t;t_j,w)=\left[1+\exp(-(t-t_j)/w)\right]^{-1}.$$
 
-The white-light model is $S(t)=c+vx+jH(t;t_j)$. $t_j\sim\mathcal N(t_{j,\mathrm{guess}},0.01)$ day. $j\sim\mathcal N(j_\mathrm{guess},0.01)$.
+The white-light model is $S(t)=c+vx+jH(t;t_j,w)$. $t_j\sim\mathcal N(t_{j,\mathrm{guess}},0.01)$ day and $j\sim\mathcal N(j_\mathrm{guess},0.01)$. The width has a log-uniform prior from half the median cadence to 30 minutes and is reported in days and minutes. Set `step_width_mode: fixed` and `step_width_days` to reproduce a fixed-width configuration.
 
 ```yaml
 flags:
@@ -104,7 +104,7 @@ flags:
   jump_guess: 0.0
 ```
 
-The channel stage reuses the jump shape and fits `A_jump` on 0.5--2. Use this for a G395H detector tilt event or another abrupt common-mode step.
+The channel stage fixes both `t_jump` and `width` to their white-light posterior medians, then fits `A_jump` on 0.5--2. Use this for a G395H detector tilt event or another common-mode transition.
 
 ## Combined and GP models
 

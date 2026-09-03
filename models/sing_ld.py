@@ -29,8 +29,13 @@ def sing_to_quadratic(l, delta):
     return (u_plus + u_minus) / 2.0, (u_plus - u_minus) / 2.0
 
 
-def estimate_gray_offset(fitted_c, model_c, fitted_sigma):
-    """Inverse-variance weighted mean of fitted-minus-model in (l, delta)."""
+def estimate_gray_offset(fitted_c, model_c, fitted_sigma, ess=None, n_draws=None):
+    """ESS-aware inverse-variance mean of fitted-minus-model in (l, delta).
+
+    When supplied, ``ess`` is ``[channel, 2]`` for ``(l, delta)``.  Each
+    channel uncertainty is inflated by ``sqrt(n_draws / ESS)`` before
+    pooling, preventing a sticky channel from receiving excessive weight.
+    """
     fitted_c = np.asarray(fitted_c, dtype=float)
     model_c = np.asarray(model_c, dtype=float)
     fitted_sigma = np.asarray(fitted_sigma, dtype=float)
@@ -41,6 +46,13 @@ def estimate_gray_offset(fitted_c, model_c, fitted_sigma):
     # Linear error propagation, deliberately ignoring an unavailable c1/c2 covariance.
     sl = np.hypot(fitted_sigma[:, 0], fitted_sigma[:, 1])
     sd = fitted_sigma[:, 1] / 4.0
+    if ess is not None:
+        ess = np.asarray(ess, dtype=float)
+        if ess.shape != fitted_c.shape or n_draws is None or int(n_draws) < 1:
+            raise ValueError("ess must have shape [channel,2] and n_draws must be positive")
+        inflation = np.sqrt(float(n_draws) / np.minimum(ess, float(n_draws)))
+        sl = sl * inflation[:, 0]
+        sd = sd * inflation[:, 1]
     result = {}
     for name, residual, sigma in (("l", fl - ml, sl), ("delta", fd - md, sd)):
         good = np.isfinite(residual) & np.isfinite(sigma) & (sigma > 0)
@@ -50,6 +62,9 @@ def estimate_gray_offset(fitted_c, model_c, fitted_sigma):
         result[name] = float(np.sum(weights * residual[good]) / np.sum(weights))
         result[f"{name}_sigma"] = float(np.sqrt(1.0 / np.sum(weights)))
         result[f"{name}_n"] = int(np.sum(good))
+    if ess is not None:
+        result["ess_inflation_applied"] = True
+        result["n_draws"] = int(n_draws)
     return result
 
 

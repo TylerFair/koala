@@ -13,7 +13,6 @@ from numpyro.infer.util import log_density
 from models.ld_parameterization import (
     Power2LinearTransform,
     Power2MaxtedTransform,
-    QuadraticKippingTransform,
     gaussian_to_truncated_normal,
     gaussian_to_uniform,
 )
@@ -27,7 +26,14 @@ def test_decorrelated_support_factor_rejects_invalid_inverse_images():
     valid, _ = log_density(model, (jnp.asarray([0.2, 0.8]),), {}, {})
     invalid, _ = log_density(model, (jnp.asarray([0.2, -0.1]),), {}, {})
     assert valid == 0.0
-    assert jnp.isneginf(invalid)
+    assert invalid < -1.0e90
+
+    def sanitized_model(coefficients):
+        return _enforce_decorrelated_coefficient_support(
+            coefficients, 0.0, 1.0
+        )
+
+    assert jnp.all(jnp.isfinite(sanitized_model(jnp.asarray([jnp.nan, -1.0]))))
 
 
 def test_transformed_prior_is_exact_in_physical_coefficients():
@@ -77,16 +83,6 @@ def test_latent_gaussian_prior_quantiles_match_original_priors():
         jnp.quantile(direct_uniform, probabilities, axis=0),
         atol=0.012,
     )
-
-    quadratic_base = dist.Uniform(0.0, 1.0).expand([2]).to_event(1)
-    key = jax.random.PRNGKey(74)
-    direct_q = quadratic_base.sample(key, (20000,))
-    q = dist.TransformedDistribution(
-        quadratic_base, QuadraticKippingTransform()
-    ).sample(key, (20000,))
-    recovered_q = QuadraticKippingTransform().inv(q)
-    assert jnp.allclose(direct_q, recovered_q, rtol=0.0, atol=2e-15)
-
 
 def _coefficient_model(observed=None):
     coeff = numpyro.sample(

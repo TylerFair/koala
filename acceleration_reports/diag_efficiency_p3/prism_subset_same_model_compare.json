@@ -1,0 +1,95 @@
+{
+  "draw_for_draw_equal": true,
+  "sites": {
+    "A": {
+      "shape": [
+        300,
+        8
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    },
+    "c": {
+      "shape": [
+        300,
+        8
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    },
+    "c1": {
+      "shape": [
+        300,
+        8
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    },
+    "c2": {
+      "shape": [
+        300,
+        8
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    },
+    "depths": {
+      "shape": [
+        300,
+        8,
+        1
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    },
+    "log_jitter": {
+      "shape": [
+        300,
+        8
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    },
+    "log_tau": {
+      "shape": [
+        300,
+        8
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    },
+    "rors": {
+      "shape": [
+        300,
+        8,
+        1
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    },
+    "tau": {
+      "shape": [
+        300,
+        8
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    },
+    "total_error": {
+      "shape": [
+        300,
+        8
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    },
+    "v": {
+      "shape": [
+        300,
+        8
+      ],
+      "draw_for_draw_equal": true,
+      "max_abs_difference": 0.0
+    }
+  }
+}

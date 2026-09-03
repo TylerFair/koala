@@ -14,6 +14,7 @@ from .trends import (
     compute_lc_spot_linear_discontinuity_spectroscopic, compute_lc_spot_explinear_spectroscopic,
     compute_lc_2spot_explinear_spectroscopic
 )
+from .trends import sample_step_width
 from .gp import (
     compute_lc_gp_mean, compute_lc_linear_gp_mean, compute_lc_quadratic_gp_mean,
     compute_lc_cubic_gp_mean, compute_lc_quartic_gp_mean, compute_lc_explinear_gp_mean,
@@ -78,7 +79,7 @@ def _prepare_power2_poly(degree=12, n_mu=300):
     p = jnp.asarray(np.linalg.pinv(np.asarray(x)))
     return mus, p
     
-def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic', ld_mode='free'):
+def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic', ld_mode='free', step_width_mode='free'):
     print(f"Building whitelight model with: detrend_type='{detrend_type}', ld='{ld_mode}', ld_profile='{ld_profile}' for {n_planets} planets")
 
     detrend_components = _split_components(detrend_type)
@@ -153,6 +154,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             jump_guess = prior_params.get('jump_guess', 0.0)
             params['t_jump'] = numpyro.sample('t_jump', dist.Normal(t_jump_guess, 1e-2))
             params['jump'] = numpyro.sample('jump', dist.Normal(jump_guess, 0.01))
+            params['width'] = sample_step_width(t, prior_params, step_width_mode)
 
         if 'explinear' in detrend_components:
             params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1))
@@ -393,4 +395,3 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         numpyro.sample('obs', dist.Normal(y_model, error_broadcast), obs=y)
 
     return _vectorized_model_static
-

@@ -30,8 +30,8 @@ def materialize(base_config, matrix_spec, queue_start=300):
         spec = yaml.safe_load(stream)
     dataset = str(spec["dataset"])
     variants = list(spec["variants"])
-    if not variants or queue_start < 300 or queue_start + len(variants) - 1 > 419:
-        raise ValueError("The matrix must use one or more queue numbers in 300--419.")
+    if not variants or queue_start < 300 or queue_start + len(variants) - 1 > 429:
+        raise ValueError("The matrix must use one or more queue numbers in 300--429.")
     config_dir = REPO / "configs_stacking"
     queue_dir = REPO / "acceleration_reports/gpu_queue/pending"
     config_dir.mkdir(parents=True, exist_ok=True)

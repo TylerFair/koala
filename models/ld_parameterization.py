@@ -88,34 +88,3 @@ class Power2LinearTransform(Transform):
         del aux_data, params
         return cls()
 
-
-class QuadraticKippingTransform(Transform):
-    """Map physical quadratic ``(u1, u2)`` to Kipping (2013) ``(q1,q2)``."""
-
-    domain = constraints.real_vector
-    codomain = constraints.real_vector
-    bijective = True
-    sign = -1
-
-    def __call__(self, x):
-        u1, u2 = x[..., 0], x[..., 1]
-        total = u1 + u2
-        return jnp.stack((total ** 2, u1 / (2.0 * total)), axis=-1)
-
-    def _inverse(self, y):
-        q1, q2 = y[..., 0], y[..., 1]
-        total = jnp.sqrt(q1)
-        return jnp.stack((2.0 * total * q2,
-                          total * (1.0 - 2.0 * q2)), axis=-1)
-
-    def log_abs_det_jacobian(self, x, y, intermediates=None):
-        del y, intermediates
-        return jnp.zeros(jnp.shape(x)[:-1], dtype=jnp.asarray(x).dtype)
-
-    def tree_flatten(self):
-        return (), ()
-
-    @classmethod
-    def tree_unflatten(cls, aux_data, params):
-        del aux_data, params
-        return cls()

@@ -8,6 +8,8 @@ import hashlib
 import uuid
 import re
 import time
+import atexit
+from contextlib import contextmanager
 from functools import partial
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -82,6 +84,125 @@ TREND_PARAMS = [
 ]
 
 LD_PRIOR_MODES = {'fixed', 'widegaussian', 'informed', 'uniform'}
+
+
+# Opt-in observational timing only. This deliberately does not split or
+# reorder a NumPyro MCMC.run call, because doing so can change its trajectory.
+class _PipelinePhaseTimers:
+    def __init__(self):
+        self.enabled = False
+        self.output_path = None
+        self.started = time.perf_counter()
+        self.events = []
+        self.stack = []
+        self.compile = {}
+        self._registered = False
+
+    def enable(self, output_dir):
+        if self.enabled:
+            return
+        self.enabled = True
+        self.output_path = os.path.join(output_dir, "phase_timings.json")
+        if not self._registered:
+            try:
+                jax.monitoring.register_event_duration_secs_listener(
+                    self._compile_event
+                )
+                self._registered = True
+            except ValueError:
+                pass
+        atexit.register(self.write)
+
+    def _compile_event(self, event, duration, **metadata):
+        if not self.enabled or "compile" not in str(event).lower():
+            return
+        phase = self.stack[-1] if self.stack else "unattributed"
+        row = self.compile.setdefault(phase, {"count": 0, "seconds": 0.0})
+        row["count"] += 1
+        row["seconds"] += float(duration)
+
+    @contextmanager
+    def phase(self, name, **metadata):
+        if not self.enabled:
+            yield
+            return
+        started = time.perf_counter()
+        self.stack.append(str(name))
+        try:
+            yield
+        finally:
+            self.stack.pop()
+            self.events.append({
+                "phase": str(name),
+                "wall_seconds": time.perf_counter() - started,
+                **metadata,
+            })
+            self.write()
+
+    def write(self):
+        if not self.enabled or not self.output_path:
+            return
+        totals = {}
+        for event in self.events:
+            totals[event["phase"]] = totals.get(event["phase"], 0.0) + event["wall_seconds"]
+        payload = {
+            "schema_version": 1,
+            "note": "MCMC warmup+draw is atomic unless NumPyro exposes a non-perturbing split; compilation durations may overlap enclosing wall time.",
+            "process_wall_seconds": time.perf_counter() - self.started,
+            "phase_totals_seconds": totals,
+            "compile_events_by_phase": self.compile,
+            "events": self.events,
+        }
+        temporary = f"{self.output_path}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+        with open(temporary, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, indent=2, sort_keys=True)
+        os.replace(temporary, self.output_path)
+
+
+_PHASE_TIMERS = _PipelinePhaseTimers()
+
+
+def _install_timed_output_helpers(minimal_plots=False):
+    """Wrap output helpers after module load; never touches sampler inputs."""
+    helper_phases = {
+        "plot_noise_binning_robust": "plot_noise_binning",
+        "plot_poly_fit": "plot_polynomial",
+        "plot_transmission_spectrum": "plot_spectrum",
+        "plot_wavelength_offset_summary": "plot_lightcurve_grid",
+        "save_noise_binning_data": "csv_io",
+        "save_whitelight_timeseries": "csv_io",
+        "save_results": "csv_io",
+        "save_detailed_fit_results": "csv_io_and_lightcurve_grid",
+        "save_harmonica_limb_products": "plot_and_csv_limb_products",
+        "_atomic_save_npy": "checkpoint_io",
+        "_atomic_savez": "checkpoint_io",
+        "_atomic_savez_compressed": "checkpoint_io",
+        "_atomic_dataframe_csv": "csv_io",
+        "_write_whitelight_geometry_handoff": "geometry_handoff",
+        "_save_chunk_samples": "checkpoint_io",
+        "_load_chunk_samples": "checkpoint_io",
+    }
+    plot_helpers = {
+        "plot_noise_binning_robust", "plot_poly_fit",
+        "plot_wavelength_offset_summary",
+    }
+    for name, phase_name in helper_phases.items():
+        original = globals().get(name)
+        if original is None or getattr(original, "_phase_wrapped", False):
+            continue
+        def wrapped(*args, __original=original, __name=name,
+                    __phase=phase_name, **kwargs):
+            if minimal_plots and __name in plot_helpers:
+                _PHASE_TIMERS.events.append({
+                    "phase": __phase, "wall_seconds": 0.0,
+                    "skipped_by_minimal_plots": True,
+                })
+                _PHASE_TIMERS.write()
+                return None
+            with _PHASE_TIMERS.phase(__phase, helper=__name):
+                return __original(*args, **kwargs)
+        wrapped._phase_wrapped = True
+        globals()[name] = wrapped
 
 
 def _build_gaussian_trend_prior(detrend_type, num_channels, init_params, flags):
@@ -217,6 +338,14 @@ def _resolve_ld_parameterization(flags, flag_name, ld_prior_mode, ld_profile='po
             f"flags.{flag_name} must be coefficients, decorrelated, "
             "decorrelated_linear, or latent_gaussian."
         )
+    if ld_profile == 'quadratic' and value in {
+        'decorrelated', 'decorrelated_linear'
+    }:
+        raise ValueError(
+            f"flags.{flag_name} does not support decorrelated coordinates "
+            "for quadratic limb darkening; use coefficients or "
+            "latent_gaussian."
+        )
     return value
 
 
@@ -224,13 +353,13 @@ def _power2_ld_initial_sites(coefficients, parameterization):
     """Return initial values in the actual latent coordinates of the LD model."""
     coefficients = jnp.asarray(coefficients, dtype=jnp.float64)
     if parameterization == 'coefficients':
-        return {'c1': coefficients[0], 'c2': coefficients[1]}
+        return {'c1': coefficients[..., 0], 'c2': coefficients[..., 1]}
     if parameterization == 'decorrelated':
         return {'ld_decorrelated': Power2MaxtedTransform()(coefficients)}
     if parameterization == 'decorrelated_linear':
         return {'ld_decorrelated': Power2LinearTransform()(coefficients)}
     if parameterization == 'latent_gaussian':
-        return {'ld_latent': jnp.zeros(2, dtype=jnp.float64)}
+        return {'ld_latent': jnp.zeros_like(coefficients)}
     raise ValueError(f"Unknown power-2 LD parameterization: {parameterization}")
 
 
@@ -243,6 +372,102 @@ def _power2_ld_optimization_sites(parameterization):
     if parameterization == 'latent_gaussian':
         return ['ld_latent']
     raise ValueError(f"Unknown power-2 LD parameterization: {parameterization}")
+
+
+def _quadratic_uniform_initial_sites(coefficients, basis):
+    """Initialize the selected quadratic-uniform prior coordinates."""
+    coefficients = jnp.asarray(coefficients, dtype=jnp.float64)
+    if basis == 'coefficients':
+        return {'u': coefficients}
+    if basis == 'uplus_uminus':
+        return {'ld_uplus_uminus': jnp.stack(
+            (coefficients[..., 0] + coefficients[..., 1],
+             coefficients[..., 0] - coefficients[..., 1]), axis=-1)}
+    raise ValueError(f"Unknown quadratic uniform LD basis: {basis}")
+
+
+def _validate_whitelight_optimized_start(
+    solution,
+    *,
+    ld_profile,
+    ld_parameterization,
+    ld_prior_mode,
+    n_planets=1,
+):
+    """Validate physical LD and transit geometry before using an optimizer result."""
+    reasons = []
+    physical_site_names = {
+        'c1', 'c2', 'u', 'b', 'rors', 'depths', 'duration', 'a_rs',
+        'cos_i', 'inc', 'error',
+    }
+    physical_site_prefixes = (
+        'b_', 'rors_', 'depths_', 'duration_', 'a_rs_', 'cos_i_', 'inc_',
+    )
+    for name, value in solution.items():
+        if name in physical_site_names or name.startswith(physical_site_prefixes):
+            array = np.asarray(jax.device_get(value), dtype=float)
+            if not np.all(np.isfinite(array)):
+                reasons.append(f'deterministic physical site {name} is non-finite')
+    physical_ld = None
+    if ld_profile == 'power2':
+        if 'ld_decorrelated' in solution:
+            transform = (
+                Power2LinearTransform()
+                if ld_parameterization == 'decorrelated_linear'
+                else Power2MaxtedTransform()
+            )
+            physical_ld = transform.inv(jnp.asarray(solution['ld_decorrelated']))
+        elif 'c1' in solution and 'c2' in solution:
+            physical_ld = jnp.stack((solution['c1'], solution['c2']))
+        if physical_ld is not None:
+            values = np.asarray(jax.device_get(physical_ld), dtype=float)
+            low = np.asarray(
+                [0.0, 0.0 if ld_prior_mode == 'uniform' else 0.001]
+            )
+            if not np.all(np.isfinite(values)):
+                reasons.append('power-2 coefficients are non-finite')
+            elif np.any(values < low) or np.any(values > 1.0):
+                reasons.append(
+                    f'power-2 coefficients {values.tolist()} are outside '
+                    f'[{low.tolist()}, [1.0, 1.0]]'
+                )
+    elif ld_profile == 'quadratic' and 'u' in solution:
+        values = np.asarray(jax.device_get(solution['u']), dtype=float)
+        if not np.all(np.isfinite(values)):
+            reasons.append('quadratic coefficients are non-finite')
+        elif np.any(values < 0.0) or np.any(values > 1.0):
+            reasons.append(
+                f'quadratic coefficients {values.tolist()} are outside [0, 1]'
+            )
+
+    rors_min = float(np.sqrt(1.0e-6))
+    rors_max = float(np.sqrt(0.5))
+    for planet_index in range(int(n_planets)):
+        rors = solution.get(f'rors_{planet_index}')
+        if rors is None and int(n_planets) == 1:
+            rors = solution.get('rors')
+        raw_b = solution.get(f'_b_{planet_index}')
+        b = solution.get(f'b_{planet_index}')
+        if b is None and raw_b is not None:
+            b = jnp.abs(raw_b)
+        if b is None and int(n_planets) == 1:
+            b = solution.get('b')
+        if rors is None or b is None:
+            reasons.append(f'planet {planet_index} geometry sites are missing')
+            continue
+        rors_value = float(np.asarray(jax.device_get(rors)).reshape(-1)[0])
+        b_value = float(np.asarray(jax.device_get(b)).reshape(-1)[0])
+        if not np.isfinite(rors_value) or not (rors_min < rors_value < rors_max):
+            reasons.append(
+                f'planet {planet_index} rprs={rors_value} is outside '
+                f'({rors_min}, {rors_max})'
+            )
+        if not np.isfinite(b_value) or not (0.0 <= b_value < 1.0 + rors_value):
+            reasons.append(
+                f'planet {planet_index} b={b_value} violates '
+                f'0 <= b < 1+rprs={1.0 + rors_value}'
+            )
+    return not reasons, reasons
 
 def _param_at(params, name, idx=None):
     if name not in params:
@@ -263,7 +488,8 @@ def _poly_trend_np(params, t_shift, order, idx=None):
 _JUMP_WIDTH_DAYS = 1e-4
 
 def _soft_step_np(t, t_jump, width=_JUMP_WIDTH_DAYS):
-    return 0.5 * (1.0 + np.tanh((t - t_jump) / width))
+    scaled = np.clip((np.asarray(t) - t_jump) / width, -700.0, 700.0)
+    return 1.0 / (1.0 + np.exp(-scaled))
 
 def _trend_from_params_np(detrend_type, time, params, idx=None, gp_trend=None, spot_trend=None, spot_trend2=None, jump_trend=None, exp_trend=None):
     t_shift = time - np.min(time)
@@ -303,7 +529,12 @@ def _trend_from_params_np(detrend_type, time, params, idx=None, gp_trend=None, s
     trend = _param_at(params, "c", idx) if poly_order == 0 else _poly_trend_np(params, t_shift, poly_order, idx)
     if detrend_type == 'linear_discontinuity':
         if jump_trend is None:
-            jump_trend = _param_at(params, "jump", idx) * _soft_step_np(time, _param_at(params, "t_jump", idx))
+            width = _param_at(params, "width", idx)
+            if width is None:
+                width = _JUMP_WIDTH_DAYS
+            jump_trend = _param_at(params, "jump", idx) * _soft_step_np(
+                time, _param_at(params, "t_jump", idx), width
+            )
         trend = trend + jump_trend
     elif detrend_type == 'explinear':
         trend = trend + _param_at(params, "A", idx) * np.exp(-t_shift / _param_at(params, "tau", idx))
@@ -849,6 +1080,7 @@ def _continue_mcmc_until_geometry_gate(
     min_ess=400.0,
     max_divergences=0,
     max_extra_blocks=3,
+    failfast_ess=50.0,
 ):
     """Append post-warmup draws until the white-light geometry gate passes."""
     sample_blocks = [jax.device_get(mcmc.get_samples(group_by_chain=True))]
@@ -872,7 +1104,18 @@ def _continue_mcmc_until_geometry_gate(
             f"ESS={ess}, rhat={rhat or 'n/a'}, divergences={divergences}, "
             f"pass={passes}, extra_blocks={extra_count}."
         )
-        if passes or extra_count >= int(max_extra_blocks):
+        failfast = bool(
+            extra_count == 0
+            and ess
+            and min(ess.values()) < float(failfast_ess)
+        )
+        if failfast:
+            print(
+                "WHITE-LIGHT QUALITY GATE FAIL-FAST: first-block minimum "
+                f"science ESS is below {float(failfast_ess):g}; skipping "
+                "extension blocks."
+            )
+        if passes or failfast or extra_count >= int(max_extra_blocks):
             flat = {
                 name: values.reshape((-1,) + values.shape[2:])
                 for name, values in grouped.items()
@@ -885,6 +1128,7 @@ def _continue_mcmc_until_geometry_gate(
                 "whitelight_geometry_bulk_ess": ess,
                 "whitelight_geometry_rhat": rhat,
                 "whitelight_quality_gate_passed": passes,
+                "whitelight_failfast_triggered": failfast,
                 "whitelight_extra_blocks": extra_count,
                 "whitelight_total_retained_draws": int(
                     next(iter(flat.values())).shape[0]
@@ -2232,6 +2476,8 @@ def get_samples_chunked(
     gradient_diagnostic_strict=False,
     spectro_min_depth_ess=0.0,
     spectro_max_divergences=0,
+    adaptive_fallback_model=None,
+    adaptive_fallback_init_params=None,
     _joint_mcmc_runner_cache=None,
     _independent_mcmc_runner_cache=None,
     **model_kwargs,
@@ -2552,22 +2798,20 @@ def get_samples_chunked(
                 f"  chunk {start}:{end} - independent GPU {sampler_label} "
                 f"({end - start} active lanes, padded width {padded_width})"
             )
-            samples_chunk = independent_sampler(
-                model,
-                key_chunk,
-                t,
-                yerr_chunk,
-                y_chunk,
-                init_chunk,
-                nuts_kwargs=nuts_kwargs,
-                mcmc_kwargs=mcmc_kwargs,
-                diagnostics_path=diagnostics_path,
-                lane_width=padded_width,
-                channel_varying_kwargs=varying_for_chunk,
-                _runner=runner,
-                **backend_options,
-                **kwargs_chunk,
-            )
+            stage_name = str((checkpoint_signature or {}).get("stage", "spectro"))
+            with _PHASE_TIMERS.phase(
+                f"{stage_name}_chunk_sampling",
+                chunk_start=int(start), chunk_end=int(end),
+                backend=str(sampler_backend), resident_width=padded_width,
+            ):
+                samples_chunk = independent_sampler(
+                    model, key_chunk, t, yerr_chunk, y_chunk, init_chunk,
+                    nuts_kwargs=nuts_kwargs, mcmc_kwargs=mcmc_kwargs,
+                    diagnostics_path=diagnostics_path,
+                    lane_width=padded_width,
+                    channel_varying_kwargs=varying_for_chunk,
+                    _runner=runner, **backend_options, **kwargs_chunk,
+                )
         elif sampler_backend == "joint_nuts":
             runner = None
             if bool(dict(mcmc_kwargs or {}).get("jit_model_args", True)):
@@ -2586,19 +2830,18 @@ def get_samples_chunked(
                         f"  chunk {start}:{end} - reusing compiled "
                         f"joint-NUTS runner (width {resident_width})"
                     )
-            samples_chunk = get_samples(
-                model,
-                key_chunk,
-                t,
-                yerr_chunk,
-                y_chunk,
-                init_chunk,
-                nuts_kwargs=nuts_kwargs,
-                mcmc_kwargs=mcmc_kwargs,
-                diagnostics_path=diagnostics_path,
-                _mcmc_runner=runner,
-                **kwargs_chunk,
-            )
+            stage_name = str((checkpoint_signature or {}).get("stage", "spectro"))
+            with _PHASE_TIMERS.phase(
+                f"{stage_name}_chunk_sampling",
+                chunk_start=int(start), chunk_end=int(end),
+                backend=str(sampler_backend), resident_width=int(end - start),
+            ):
+                samples_chunk = get_samples(
+                    model, key_chunk, t, yerr_chunk, y_chunk, init_chunk,
+                    nuts_kwargs=nuts_kwargs, mcmc_kwargs=mcmc_kwargs,
+                    diagnostics_path=diagnostics_path,
+                    _mcmc_runner=runner, **kwargs_chunk,
+                )
         else:
             raise ValueError(
                 "sampler_backend must be one of "
@@ -2686,6 +2929,22 @@ def get_samples_chunked(
                         channel_varying_kwargs=varying_for_chunk, **fallback_kwargs,
                     )
                 else:
+                    adaptive_model = (
+                        model if adaptive_fallback_model is None
+                        else adaptive_fallback_model
+                    )
+                    if adaptive_fallback_init_params is not None:
+                        fallback_init = {}
+                        for name, value in adaptive_fallback_init_params.items():
+                            try:
+                                array = jnp.asarray(value)
+                            except (TypeError, ValueError):
+                                fallback_init[name] = value
+                                continue
+                            if array.ndim and array.shape[0] == num_lcs:
+                                fallback_init[name] = array[start:end][selected]
+                            else:
+                                fallback_init[name] = _select_lanes(value)
                     adaptive_nuts = {
                         key: value for key, value in fallback_nuts.items()
                         if key in {"dense_mass", "regularize_mass_matrix",
@@ -2698,7 +2957,8 @@ def get_samples_chunked(
                         target_accept_prob=0.95, max_tree_depth=10
                     )
                     fallback = get_samples(
-                        model, jax.random.fold_in(key_chunk, 99173 + attempt_index),
+                        adaptive_model,
+                        jax.random.fold_in(key_chunk, 99173 + attempt_index),
                         t, yerr_chunk[selected], y_chunk[selected], fallback_init,
                         nuts_kwargs=adaptive_nuts, mcmc_kwargs=mcmc_kwargs,
                         diagnostics_path=fallback_path, **fallback_kwargs,
@@ -2713,7 +2973,10 @@ def get_samples_chunked(
                     **fallback_gate,
                 })
                 samples_chunk = {
-                    name: jnp.asarray(values).at[:, selected].set(fallback[name])
+                    name: (
+                        jnp.asarray(values).at[:, selected].set(fallback[name])
+                        if name in fallback else values
+                    )
                     for name, values in samples_chunk.items()
                 }
                 for lane in selected:
@@ -3551,6 +3814,8 @@ def _run_sampling_stage(
     spectro_max_divergences=0,
     compile_box=False,
     dump_metadata=None,
+    adaptive_fallback_model=None,
+    adaptive_fallback_init_params=None,
     **model_kwargs,
 ):
     if compile_box:
@@ -3721,6 +3986,8 @@ def _run_sampling_stage(
             gradient_diagnostic_strict=gradient_diagnostic_strict,
             spectro_min_depth_ess=spectro_min_depth_ess,
             spectro_max_divergences=spectro_max_divergences,
+            adaptive_fallback_model=adaptive_fallback_model,
+            adaptive_fallback_init_params=adaptive_fallback_init_params,
             **model_kwargs,
         )
     if str(gradient_diagnostic_mode).lower() != "off":
@@ -4046,7 +4313,7 @@ def build_sing_ld_prior(quadratic_coefficients, flags, stellar_cfg, offsets_over
 
 
 def _assess_sing_gray_fit(samples, diagnostics_paths, min_ess=100.0):
-    """Validate the free-LD calibration before it can inform another fit."""
+    """Validate divergence/finite gates and report per-channel LD ESS."""
     if 'limb_l' not in samples or 'limb_delta' not in samples:
         return False, {'reason': "physical free-LD fit did not return limb_l and limb_delta"}
     physical = np.stack(
@@ -4056,12 +4323,12 @@ def _assess_sing_gray_fit(samples, diagnostics_paths, min_ess=100.0):
     if physical.ndim != 3 or physical.shape[-1] != 2 or not np.all(np.isfinite(physical)):
         return False, {'reason': f"invalid free-LD posterior shape/values: {physical.shape}"}
     try:
-        ess_values = [
-            float(az.ess(physical[None, :, channel, coefficient], method='bulk'))
+        ess_matrix = np.asarray([
+            [float(az.ess(physical[None, :, channel, coefficient], method='bulk'))
+             for coefficient in range(physical.shape[2])]
             for channel in range(physical.shape[1])
-            for coefficient in range(physical.shape[2])
-        ]
-        min_bulk_ess = float(np.nanmin(ess_values))
+        ])
+        min_bulk_ess = float(np.nanmin(ess_matrix))
     except Exception as error:
         return False, {'reason': f"bulk ESS calculation failed: {error}"}
     num_divergences = 0
@@ -4075,14 +4342,21 @@ def _assess_sing_gray_fit(samples, diagnostics_paths, min_ess=100.0):
     result = {
         'min_bulk_ess': min_bulk_ess,
         'required_min_bulk_ess': float(min_ess),
+        'bulk_ess_l_per_channel': ess_matrix[:, 0].tolist(),
+        'bulk_ess_delta_per_channel': ess_matrix[:, 1].tolist(),
+        'channels_below_ess_warning': np.flatnonzero(
+            np.any(ess_matrix < float(min_ess), axis=1)
+        ).astype(int).tolist(),
         'num_divergences': int(num_divergences),
         'missing_diagnostics': missing_diagnostics,
     }
-    passed = not missing_diagnostics and num_divergences == 0 and min_bulk_ess >= min_ess
+    passed = (not missing_diagnostics and num_divergences == 0
+              and np.all(np.isfinite(ess_matrix)))
     return passed, result
 
 
 def get_or_build_power2_ld_prior(stellar_cfg, wavelengths, wavelength_err, instrument, order=None, output_dir='.', cache_label='ld'):
+    phase_started = time.perf_counter()
     ld_prior_model = stellar_cfg.get('ld_prior_model', stellar_cfg.get('ld_model', 'stagger'))
     ld_data_path = stellar_cfg.get('ld_data_path', '../exotic_ld_data')
     ld_interpolate_type = stellar_cfg.get('ld_interpolate_type', 'trilinear')
@@ -4175,6 +4449,14 @@ def get_or_build_power2_ld_prior(stellar_cfg, wavelengths, wavelength_err, instr
                 flush=True,
             )
             sigma = np.maximum(sigma, min_sigma)
+            if _PHASE_TIMERS.enabled:
+                _PHASE_TIMERS.events.append({
+                    "phase": "ld_prior_construction",
+                    "wall_seconds": time.perf_counter() - phase_started,
+                    "cache": "hit", "cache_label": str(cache_label),
+                    "cache_path": cache_path,
+                })
+                _PHASE_TIMERS.write()
             if not has_vector_err:
                 return jnp.array(mu[0]), jnp.array(sigma[0])
             return jnp.array(mu), jnp.array(sigma)
@@ -4259,6 +4541,14 @@ def get_or_build_power2_ld_prior(stellar_cfg, wavelengths, wavelength_err, instr
             'c2_sigma_star': c2_star,
         })
         _atomic_dataframe_csv(out_df, cache_path, index=False)
+        if _PHASE_TIMERS.enabled:
+            _PHASE_TIMERS.events.append({
+                "phase": "ld_prior_construction",
+                "wall_seconds": time.perf_counter() - phase_started,
+                "cache": "miss", "cache_label": str(cache_label),
+                "cache_path": cache_path, "stellar_grid_points": len(combos),
+            })
+            _PHASE_TIMERS.write()
         print(f"[LD prior] Saved power2 grid cache to {cache_path}", flush=True)
         return jnp.array(np.column_stack([c1_mean, c2_mean])), jnp.array(np.column_stack([c1_tot, c2_tot]))
     else:
@@ -5435,8 +5725,11 @@ def main():
     flags.setdefault('whitelight_min_ess', 400)
     flags.setdefault('whitelight_max_divergences', 0)
     flags.setdefault('whitelight_max_extra_blocks', 3)
+    flags.setdefault('whitelight_failfast_ess', 50)
     flags.setdefault('whitelight_geometry_estimator', 'posterior_median')
     flags.setdefault('spectro_fixed_timescale_trends', True)
+    flags.setdefault('step_width_mode', 'free')
+    flags.setdefault('step_width_days', _JUMP_WIDTH_DAYS)
     if bool(flags.get('compile_box', False)):
         compilation_cache_dir = str(
             flags.get(
@@ -5474,6 +5767,19 @@ def main():
     output_dir = os.path.join(base_path, cfg.get('output_dir', planet_str + '_RESULTS'))
     fits_file = os.path.join(input_dir, cfg.get('fits_file'))
     if not os.path.exists(output_dir): os.makedirs(output_dir, exist_ok=True)
+    phase_timers_enabled = bool(flags.get('phase_timers', False)) or os.getenv(
+        'FIT_JWST_PHASE_TIMERS', '0'
+    ).strip().lower() in {'1', 'true', 'yes', 'on'}
+    if phase_timers_enabled:
+        _PHASE_TIMERS.enable(output_dir)
+        print(f"Phase timers enabled: {_PHASE_TIMERS.output_path}")
+    plots_mode = str(flags.get('plots', 'full')).strip().lower()
+    if plots_mode not in {'full', 'minimal'}:
+        raise ValueError("flags.plots must be one of {'full', 'minimal'}.")
+    if phase_timers_enabled or plots_mode == 'minimal':
+        _install_timed_output_helpers(minimal_plots=(plots_mode == 'minimal'))
+    if plots_mode == 'minimal':
+        print("Minimal plots enabled: diagnostic noise/poly/light-curve grids skipped.")
 
     detrending_type = flags.get('detrending_type', 'linear')
     interpolate_trend = flags.get('interpolate_trend', False)
@@ -5489,6 +5795,12 @@ def main():
     spot_sigma2 = flags.get('spot_width2', flags.get('spot_width_2', 0.0))
     t_jump_guess = flags.get('t_jump_guess', None)
     jump_guess = flags.get('jump_guess', 0.0)
+    step_width_mode = str(flags.get('step_width_mode', 'free')).lower()
+    step_width_days = float(flags.get('step_width_days', _JUMP_WIDTH_DAYS))
+    if step_width_mode not in {'free', 'fixed'}:
+        raise ValueError("flags.step_width_mode must be 'free' or 'fixed'.")
+    if not np.isfinite(step_width_days) or step_width_days <= 0.0:
+        raise ValueError("flags.step_width_days must be finite and positive.")
     hr_custom_ld_path = flags.get('hr_custom_ld_path', None)
     hr_custom_ld_smooth_window = int(flags.get('hr_custom_ld_smooth_window', 1) or 1)
     save_trace = flags.get('save_whitelight_trace', False)
@@ -5706,6 +6018,13 @@ def main():
     whitelight_ld_parameterization = _resolve_ld_parameterization(
         flags, 'whitelight_ld_parameterization', ld_prior_mode, ld_profile
     )
+    ld_uniform_basis = str(
+        flags.get('ld_uniform_basis', 'uplus_uminus')
+    ).strip().lower()
+    if ld_uniform_basis not in {'uplus_uminus', 'coefficients'}:
+        raise ValueError(
+            "flags.ld_uniform_basis must be 'uplus_uminus' or 'coefficients'."
+        )
     if hr_custom_ld_path and ld_profile != 'power2':
         raise ValueError("flags.hr_custom_ld_path currently supports only flags.ld_profile: 'power2'.")
     if transit_engine == 'harmonica' and ld_profile not in {'power2', 'quadratic'}:
@@ -5822,6 +6141,7 @@ def main():
             'param_method': param_method,
             'jaxoplanet_kernel': jaxoplanet_kernel,
             'ld_parameterization': whitelight_ld_parameterization,
+            'ld_uniform_basis': ld_uniform_basis,
         }
         _engine_spectro_kw = {
             'jitter_prior': spectro_jitter_prior,
@@ -5832,6 +6152,7 @@ def main():
             'transit_window': transit_window_optimization,
             'jaxoplanet_kernel': jaxoplanet_kernel,
             'ld_parameterization': spectro_ld_parameterization,
+            'ld_uniform_basis': ld_uniform_basis,
         }
         if trend_inference == 'gaussian_marginalized' and 'gp' in detrending_type:
             raise ValueError(
@@ -6049,23 +6370,18 @@ def main():
     data = None
     if reuse_spectro_data:
         try:
-            data = SpectroData.load(spectro_data_file)
+            with _PHASE_TIMERS.phase("data_load", cache="hit"):
+                data = SpectroData.load(spectro_data_file)
             print("Reusing fingerprinted spectroscopy data cache.")
         except (OSError, EOFError, pickle.UnpicklingError, ValueError, TypeError):
             print("Spectroscopy data cache is unreadable; rebuilding atomically.")
     if data is None:
-        data = process_spectroscopy_data(
-            instrument,
-            input_dir,
-            output_dir,
-            planet_str,
-            cfg,
-            fits_file,
-            mask_start,
-            mask_end,
-            mask_integrations_start,
-            mask_integrations_end,
-        )
+        with _PHASE_TIMERS.phase("data_load", cache="miss"):
+            data = process_spectroscopy_data(
+                instrument, input_dir, output_dir, planet_str, cfg, fits_file,
+                mask_start, mask_end, mask_integrations_start,
+                mask_integrations_end,
+            )
         temporary_data = (
             f"{spectro_data_file}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
         )
@@ -6146,6 +6462,9 @@ def main():
             "whitelight_sigma": whitelight_sigma,
             "ld_coefficients": U_mu_wl,
             "ld_uncertainties": U_sigma_wl,
+            "step_width_mode": step_width_mode,
+            "step_width_days": step_width_days,
+            "whitelight_failfast_ess": flags['whitelight_failfast_ess'],
         },
     )
     wl_geometry_handoff = _load_whitelight_geometry_handoff(
@@ -6206,6 +6525,7 @@ def main():
             if 'linear_discontinuity' in detrending_type:
                 hyper_params_wl['t_jump_guess'] = t_jump_guess if t_jump_guess is not None else 0.5 * (jnp.min(data.wl_time) + jnp.max(data.wl_time))
                 hyper_params_wl['jump_guess'] = jump_guess
+                hyper_params_wl['step_width_days'] = step_width_days
 
             hyper_params_wl['u'] = U_mu_wl
             if ld_profile == 'power2' and ld_prior_mode == 'informed' and U_sigma_wl is not None:
@@ -6219,6 +6539,11 @@ def main():
                 'rors': PRIOR_RPRS
             }
             init_params_wl['u'] = U_mu_wl
+            if ld_profile == 'quadratic' and ld_prior_mode == 'uniform':
+                init_params_wl.pop('u', None)
+                init_params_wl.update(_quadratic_uniform_initial_sites(
+                    U_mu_wl, ld_uniform_basis
+                ))
             # Power-2 models sample the native (c, alpha) coefficients at the
             # latent sites ``c1`` and ``c2``.  Supplying only ``u`` silently
             # falls back to NumPyro's default initialization and defeats the
@@ -6264,6 +6589,11 @@ def main():
                 else:
                     init_params_wl['t_jump'] = 0.5 * (jnp.min(data.wl_time) + jnp.max(data.wl_time))
                 init_params_wl['jump'] = jump_guess
+                if step_width_mode == 'free':
+                    cadence = float(np.median(np.diff(np.sort(np.asarray(data.wl_time)))))
+                    init_params_wl['log_width'] = np.log(
+                        np.sqrt(0.5 * cadence * (30.0 / (24.0 * 60.0)))
+                    )
             if 'spot' in detrending_type:
                 init_params_wl['spot_amp'] = spot_amp
                 init_params_wl['spot_mu'] = spot_mu
@@ -6280,6 +6610,7 @@ def main():
                 detrend_type=detrending_type,
                 n_planets=n_planets,
                 ld_mode=wl_ld_mode,
+                step_width_mode=step_width_mode,
                 **_engine_wl_kw,
             )
 
@@ -6425,6 +6756,7 @@ def main():
                     detrend_type='linear',
                     n_planets=n_planets,
                     ld_mode=wl_ld_mode,
+                    step_width_mode=step_width_mode,
                     **_engine_wl_kw,
                 )
                 init_params_prefit = init_params_wl.copy()
@@ -6434,7 +6766,8 @@ def main():
                     key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl
                 )
             else:
-                soln =  optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+                with _PHASE_TIMERS.phase("whitelight_optimizer"):
+                    soln = optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
             
             
             print("Plotting Initial vs. Optimized Model sanity check...")
@@ -6688,7 +7021,12 @@ def main():
                     if transit_engine == 'harmonica':
                         stage2_sites.extend(["c1", "c2"])
                     elif ld_profile == "quadratic":
-                        stage2_sites.append("u")
+                        stage2_sites.append(
+                            ('ld_uplus_uminus'
+                             if (wl_ld_mode == 'uniform'
+                                 and ld_uniform_basis == 'uplus_uminus')
+                             else 'u')
+                        )
                     elif ld_profile == "power2":
                         stage2_sites.extend(_power2_ld_optimization_sites(
                             whitelight_ld_parameterization
@@ -6708,6 +7046,73 @@ def main():
                     start=soln,
                 )
                 soln = stage3(keys[2], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+
+                # Constrained optimizers may return a Uniform latent exactly
+                # on its support edge.  That point has an infinite
+                # unconstrained coordinate and cannot initialize NumPyro.
+                if (
+                    'linear_discontinuity' in detrending_type
+                    and step_width_mode == 'free'
+                ):
+                    cadence = float(
+                        np.median(np.diff(np.sort(np.asarray(data.wl_time))))
+                    )
+                    log_width_lo = np.log(0.5 * cadence)
+                    log_width_hi = np.log(30.0 / (24.0 * 60.0))
+                    optimized_log_width = float(
+                        np.asarray(soln.get('log_width', np.nan))
+                    )
+                    edge_tolerance = 1.0e-8 * max(
+                        1.0, abs(log_width_hi - log_width_lo)
+                    )
+                    if (
+                        not np.isfinite(optimized_log_width)
+                        or optimized_log_width <= log_width_lo + edge_tolerance
+                        or optimized_log_width >= log_width_hi - edge_tolerance
+                    ):
+                        reset_log_width = 0.5 * (
+                            log_width_lo + log_width_hi
+                        )
+                        print(
+                            "WARNING: white-light optimizer placed log_width "
+                            "on or outside its support edge; resetting it to "
+                            "the interior prior midpoint before Laplace "
+                            "preparation."
+                        )
+                        soln = dict(soln)
+                        soln['log_width'] = jnp.asarray(reset_log_width)
+
+                optimized_start_valid, optimized_start_reasons = (
+                    _validate_whitelight_optimized_start(
+                        soln,
+                        ld_profile=ld_profile,
+                        ld_parameterization=whitelight_ld_parameterization,
+                        ld_prior_mode=ld_prior_mode,
+                        n_planets=n_planets_sanity,
+                    )
+                )
+                if not optimized_start_valid:
+                    print(
+                        "WARNING: discarding nonphysical white-light optimizer "
+                        "solution and falling back to the prior physical start: "
+                        + "; ".join(optimized_start_reasons),
+                        flush=True,
+                    )
+                    soln = dict(init_params_wl)
+                    fallback_valid, fallback_reasons = (
+                        _validate_whitelight_optimized_start(
+                            soln,
+                            ld_profile=ld_profile,
+                            ld_parameterization=whitelight_ld_parameterization,
+                            ld_prior_mode=ld_prior_mode,
+                            n_planets=n_planets_sanity,
+                        )
+                    )
+                    if not fallback_valid:
+                        raise RuntimeError(
+                            "White-light prior fallback start is invalid: "
+                            + "; ".join(fallback_reasons)
+                        )
 
                 params_opt = _soln_to_physical_params(soln, params_complete, n_planets=n_planets_sanity)
                 if "rors" not in params_opt and "depths" in params_opt:
@@ -6874,8 +7279,9 @@ def main():
                     "diverging", "accept_prob", "potential_energy", "num_steps"
                 ),
             }
-            mcmc.run(key_master, *wl_run_args, **wl_run_kwargs)
-            jax.block_until_ready(next(iter(mcmc.get_samples().values())))
+            with _PHASE_TIMERS.phase("whitelight_warmup_and_draws"):
+                mcmc.run(key_master, *wl_run_args, **wl_run_kwargs)
+                jax.block_until_ready(next(iter(mcmc.get_samples().values())))
             laplace_diagnostics["sampling_wall_seconds"] = (
                 time.perf_counter() - sampling_start
             )
@@ -6892,6 +7298,7 @@ def main():
                 min_ess=float(flags.get("whitelight_min_ess", 400)),
                 max_divergences=int(flags.get("whitelight_max_divergences", 0)),
                 max_extra_blocks=int(flags.get("whitelight_max_extra_blocks", 3)),
+                failfast_ess=float(flags.get("whitelight_failfast_ess", 50)),
             )
             laplace_diagnostics.update(wl_quality_diagnostics)
             laplace_diagnostics.setdefault("mass_matrix", "adaptive")
@@ -6932,6 +7339,7 @@ def main():
                     max_extra_blocks=int(
                         flags.get("whitelight_max_extra_blocks", 3)
                     ),
+                    failfast_ess=0.0,
                 )
                 laplace_diagnostics.update(wl_quality_diagnostics)
                 laplace_diagnostics["mass_matrix"] = "adaptive_fallback"
@@ -7157,6 +7565,10 @@ def main():
             if 'linear_discontinuity' in detrending_type:
                 set_param_stats('t_jump', wl_samples['t_jump'])
                 set_param_stats('jump', wl_samples['jump'])
+                set_param_stats('width', wl_samples['width'])
+                set_param_stats('width_minutes', wl_samples['width_minutes'])
+                if 'log_width' in wl_samples:
+                    set_param_stats('log_width', wl_samples['log_width'])
     
             if 'gp' in detrending_type:
                 set_param_stats('GP_log_sigma', wl_samples['GP_log_sigma'])
@@ -7231,7 +7643,10 @@ def main():
                     jnp.abs(bestfit_params_wl["spot_sigma2"])
                 )
             if 'linear_discontinuity' in detrending_type:
-                jump_trend = bestfit_params_wl["jump"] * _soft_step_np(np.array(data.wl_time), bestfit_params_wl["t_jump"])
+                jump_trend = bestfit_params_wl["jump"] * _soft_step_np(
+                    np.array(data.wl_time), bestfit_params_wl["t_jump"],
+                    bestfit_params_wl["width"],
+                )
 
             model_eval_params_wl = _select_transit_eval_params(
                 bestfit_params_wl,
@@ -7641,6 +8056,9 @@ def main():
                 add_scalar_param('spot_sigma2')
                 add_scalar_param('t_jump')
                 add_scalar_param('jump')
+                add_scalar_param('width')
+                add_scalar_param('width_minutes')
+                add_scalar_param('log_width')
                 add_scalar_param('GP_log_sigma')
                 add_scalar_param('GP_log_rho')
                 
@@ -7761,11 +8179,14 @@ def main():
             if not np.isnan(spot_amp2) and not np.isnan(spot_mu2) and not np.isnan(spot_sigma2):
                 spot_trend2 = spot_crossing(wl_time_good, spot_amp2, spot_mu2, np.abs(spot_sigma2))
     if 'linear_discontinuity' in detrending_type:
-        if {'t_jump', 'jump'}.issubset(bestfit_params_wl_df.columns):
+        if {'t_jump', 'jump', 'width'}.issubset(bestfit_params_wl_df.columns):
             t_jump = bestfit_params_wl_df['t_jump'].values[0]
             jump = bestfit_params_wl_df['jump'].values[0]
-            if not np.isnan(t_jump) and not np.isnan(jump):
-                jump_trend = jump * _soft_step_np(np.array(wl_time_good), t_jump)
+            width = bestfit_params_wl_df['width'].values[0]
+            if not np.isnan(t_jump) and not np.isnan(jump) and not np.isnan(width):
+                jump_trend = jump * _soft_step_np(
+                    np.array(wl_time_good), t_jump, width
+                )
     valid = None
     if need_lowres_analysis:
         # Compute the exact LD inputs before deciding whether a previous LR fit
@@ -7936,13 +8357,20 @@ def main():
             "u": U_mu_lr,
             "rors": jnp.tile(RORS_BASE, (num_lcs_lr, 1))
         }
+        if ld_profile == 'quadratic' and ld_prior_mode == 'uniform':
+            init_params_lr.pop('u', None)
+            init_params_lr.update(_quadratic_uniform_initial_sites(
+                U_mu_lr, ld_uniform_basis
+            ))
         if ld_prior_mode == 'sing':
             init_params_lr.pop('u', None)
             init_params_lr['limb_l'] = jnp.asarray(U_mu_lr)[:, 0]
             init_params_lr['limb_delta'] = jnp.asarray(U_mu_lr)[:, 1]
         if ld_profile == 'power2' and ld_prior_mode not in {'fixed', 'interpolated'}:
-            init_params_lr['c1'] = jnp.asarray(U_mu_lr)[:, 0]
-            init_params_lr['c2'] = jnp.asarray(U_mu_lr)[:, 1]
+            init_params_lr.pop('u', None)
+            init_params_lr.update(
+                _power2_ld_initial_sites(U_mu_lr, spectro_ld_parameterization)
+            )
         if transit_engine == 'harmonica':
             if harmonica_spectro_parameterization == 'delta_r':
                 init_val = (
@@ -8036,6 +8464,25 @@ def main():
             create_vectorized_model,
             **lr_model_builder_kwargs,
         )
+        lr_adaptive_fallback_model = None
+        lr_adaptive_fallback_init = None
+        if (
+            transit_engine == 'jaxoplanet'
+            and ld_profile == 'power2'
+            and lr_ld_mode not in {'fixed', 'interpolated'}
+            and spectro_ld_parameterization != 'coefficients'
+        ):
+            coefficient_builder_kwargs = dict(lr_model_builder_kwargs)
+            coefficient_builder_kwargs['ld_parameterization'] = 'coefficients'
+            lr_adaptive_fallback_model = _build_spectroscopic_model(
+                create_vectorized_model, **coefficient_builder_kwargs
+            )
+            lr_adaptive_fallback_init = dict(init_params_lr)
+            lr_adaptive_fallback_init.pop('ld_decorrelated', None)
+            lr_adaptive_fallback_init.pop('ld_latent', None)
+            lr_adaptive_fallback_init.update(
+                _power2_ld_initial_sites(U_mu_lr, 'coefficients')
+            )
 
         model_run_args_lr = {
             'mu_duration': DURATION_BASE,
@@ -8129,7 +8576,7 @@ def main():
             and not flags.get('ld_sing_offset_path')
         ):
             gray_fingerprint_inputs = {
-                'kind': 'sing_gray_offset_v2_physical_ld',
+                'kind': 'sing_gray_offset_v3_uplus_uminus_ess_weighted',
                 'time': np.asarray(time_lr),
                 'flux': np.asarray(flux_lr),
                 'flux_err': np.asarray(flux_err_lr),
@@ -8160,7 +8607,7 @@ def main():
                 except (OSError, ValueError, TypeError, json.JSONDecodeError):
                     fitted_offsets = None
             if fitted_offsets is None:
-                print("[Sing LD] running broad physical (l, delta) coarse calibration pass", flush=True)
+                print("[Sing LD] running broad independent (u_plus, u_minus) coarse calibration pass", flush=True)
                 gray_builder_kwargs = dict(lr_model_builder_kwargs)
                 gray_builder_kwargs['ld_mode'] = 'sing_free'
                 gray_model = _build_spectroscopic_model(
@@ -8169,13 +8616,17 @@ def main():
                 gray_init = dict(init_params_lr)
                 gray_init.pop('limb_l', None)
                 gray_init.pop('limb_delta', None)
+                gray_init.pop('limb_u_plus', None)
+                gray_init.pop('limb_u_minus', None)
                 gray_init.pop('u', None)
                 gray_l_init, gray_delta_init = quadratic_to_sing(
                     np.asarray(sing_model_c_lr)[:, 0],
                     np.asarray(sing_model_c_lr)[:, 1],
                 )
-                gray_init['limb_l'] = jnp.asarray(gray_l_init)
-                gray_init['limb_delta'] = jnp.asarray(gray_delta_init)
+                gray_u_plus_init = 1.0 - np.asarray(gray_l_init)
+                gray_u_minus_init = gray_u_plus_init - 8.0 * np.asarray(gray_delta_init)
+                gray_init['limb_u_plus'] = jnp.asarray(gray_u_plus_init)
+                gray_init['limb_u_minus'] = jnp.asarray(gray_u_minus_init)
                 gray_args = dict(model_run_args_lr)
                 gray_args.pop('mu_u_ld', None)
                 gray_args.pop('sigma_u_ld', None)
@@ -8235,6 +8686,14 @@ def main():
                     )
                     if not gray_ok:
                         raise RuntimeError(f"gray calibration diagnostics failed: {gray_diagnostics}")
+                    if gray_diagnostics['channels_below_ess_warning']:
+                        print(
+                            "[Sing LD] WARNING: calibration LD bulk ESS below "
+                            f"{gray_diagnostics['required_min_bulk_ess']:.0f} in channels "
+                            f"{gray_diagnostics['channels_below_ess_warning']}; "
+                            "retaining the fit with ESS-inflated pooling weights.",
+                            flush=True,
+                        )
                     fitted_c = np.column_stack((
                         np.nanmedian(np.asarray(gray_samples['c1'], dtype=float), axis=0),
                         np.nanmedian(np.asarray(gray_samples['c2'], dtype=float), axis=0),
@@ -8243,12 +8702,20 @@ def main():
                         np.nanstd(np.asarray(gray_samples['c1'], dtype=float), axis=0, ddof=1),
                         np.nanstd(np.asarray(gray_samples['c2'], dtype=float), axis=0, ddof=1),
                     ))
+                    gray_ess = np.column_stack((
+                        gray_diagnostics['bulk_ess_l_per_channel'],
+                        gray_diagnostics['bulk_ess_delta_per_channel'],
+                    ))
                     fitted_offsets = estimate_gray_offset(
-                        fitted_c, np.asarray(sing_model_c_lr), fitted_c_sigma
+                        fitted_c, np.asarray(sing_model_c_lr), fitted_c_sigma,
+                        ess=gray_ess,
+                        n_draws=np.asarray(gray_samples['c1']).shape[0],
                     )
                     fitted_offsets['diagnostics'] = gray_diagnostics
                     fitted_offsets['tabulated_l'] = SING_TABULATED_OFFSET['l']
                     fitted_offsets['tabulated_delta'] = SING_TABULATED_OFFSET['delta']
+                    fitted_offsets['tabulated_l_sigma'] = SING_TABULATED_SCATTER['l']
+                    fitted_offsets['tabulated_delta_sigma'] = SING_TABULATED_SCATTER['delta']
                     write_offset_artifact(
                         gray_artifact_path, fitted_offsets, gray_fingerprint_inputs
                     )
@@ -8410,6 +8877,8 @@ def main():
                 ),
                 'transit_engine': transit_engine,
             },
+            adaptive_fallback_model=lr_adaptive_fallback_model,
+            adaptive_fallback_init_params=lr_adaptive_fallback_init,
             **model_run_args_lr,
         )
         if samples_lr is None:
@@ -8808,13 +9277,22 @@ def main():
         model_run_args_hr['mu_omega'] = HARMONICA_OMEGA
 
     init_params_hr = { "rors": jnp.tile(RORS_BASE, (num_lcs_hr, 1)), "u": U_mu_hr_init if hr_ld_mode!='interpolated' else ld_interpolated_hr }
+    if ld_profile == 'quadratic' and hr_ld_mode == 'uniform':
+        init_params_hr.pop('u', None)
+        init_params_hr.update(_quadratic_uniform_initial_sites(
+            U_mu_hr_init, ld_uniform_basis
+        ))
     if hr_ld_mode == 'sing':
         init_params_hr.pop('u', None)
         init_params_hr['limb_l'] = jnp.asarray(U_mu_hr_init)[:, 0]
         init_params_hr['limb_delta'] = jnp.asarray(U_mu_hr_init)[:, 1]
     if ld_profile == 'power2' and hr_ld_mode not in {'fixed', 'interpolated'}:
-        init_params_hr['c1'] = jnp.asarray(U_mu_hr_init)[:, 0]
-        init_params_hr['c2'] = jnp.asarray(U_mu_hr_init)[:, 1]
+        init_params_hr.pop('u', None)
+        init_params_hr.update(
+            _power2_ld_initial_sites(
+                U_mu_hr_init, spectro_ld_parameterization
+            )
+        )
     if transit_engine == 'harmonica':
         if harmonica_spectro_parameterization == 'delta_r':
             init_val = (
@@ -8909,6 +9387,25 @@ def main():
         create_vectorized_model,
         **hr_model_builder_kwargs,
     )
+    hr_adaptive_fallback_model = None
+    hr_adaptive_fallback_init = None
+    if (
+        transit_engine == 'jaxoplanet'
+        and ld_profile == 'power2'
+        and hr_ld_mode not in {'fixed', 'interpolated'}
+        and spectro_ld_parameterization != 'coefficients'
+    ):
+        coefficient_builder_kwargs = dict(hr_model_builder_kwargs)
+        coefficient_builder_kwargs['ld_parameterization'] = 'coefficients'
+        hr_adaptive_fallback_model = _build_spectroscopic_model(
+            create_vectorized_model, **coefficient_builder_kwargs
+        )
+        hr_adaptive_fallback_init = dict(init_params_hr)
+        hr_adaptive_fallback_init.pop('ld_decorrelated', None)
+        hr_adaptive_fallback_init.pop('ld_latent', None)
+        hr_adaptive_fallback_init.update(
+            _power2_ld_initial_sites(U_mu_hr_init, 'coefficients')
+        )
     
     if 'gp_spectroscopic' in detrend_type_multiwave:
         model_run_args_hr['gp_trend'] = gp_trend
@@ -9106,6 +9603,8 @@ def main():
             ),
             'transit_engine': transit_engine,
         },
+        adaptive_fallback_model=hr_adaptive_fallback_model,
+        adaptive_fallback_init_params=hr_adaptive_fallback_init,
         **model_run_args_hr
     )
     if samples_hr is None:

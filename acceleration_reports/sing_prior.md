@@ -394,3 +394,55 @@ channel scatter. The fitted offset therefore produces a measurable additional
 shift relative to the tabulated population correction. No speedup claim is
 made: the v3 and second-pass runs include different calibration workloads, and
 the STELLARINFORMED comparison changes the LD law as well as the prior.
+
+## 2026-09-02 addendum: calibration coordinates and ESS-aware pooling
+
+Section 3.3 of [Sing et al. (2026), arXiv:2609.00263](https://arxiv.org/abs/2609.00263)
+says the `(l, delta)` reparameterization “is not designed to be used as the
+variables fit in a transit light curve model.” The paper instead advocates
+fitting `(u+, u-)` or `(c1, c2)` with sufficiently wide uninformative priors and
+transforming afterward. The first implementation missed that distinction: its
+free calibration sampled `l ~ Uniform(0,1)` and conditionally sampled
+`delta` inside `+/-(1-l)/4`. That interval collapses for weak limb darkening as
+`l` approaches one.
+
+The free calibration now samples independent `u+ ~ Uniform(-1,2)` and
+`u- ~ Uniform(-2,2)`. This broad rectangular support follows the paper's
+uninformative-prior recommendation and, unlike a physically truncated wedge,
+has no channel-dependent collapsing boundary. The model saves `l=1-u+`,
+`delta=(u+-u-)/8`, `c1=(u++u-)/2`, and `c2=(u+-u-)/2` as deterministic sites.
+The affine `(l,delta)` prior and its physical truncation in the second-stage fit
+are unchanged.
+
+Calibration pooling is also ESS-aware. For each channel and each transformed
+coefficient, its posterior uncertainty is multiplied by
+`max(1, sqrt(N/ESS_bulk))` before inverse-variance weighting. A bulk ESS below
+100 now emits a warning and is recorded in the artifact; it no longer discards
+an otherwise finite, zero-divergence calibration. Missing/non-finite diagnostics,
+non-finite pooled results, or any divergence remain hard failures. Artifacts now
+store both per-channel ESS vectors and the Table 3 population offsets and
+scatters for comparison.
+
+HAT-P-18 G395M queue 420 validated the change on 11 R20 calibration channels.
+All calibration ESS values exceeded 100: `l` ESS was
+`[397.90, 328.59, 335.59, 364.42, 328.53, 370.97, 321.85, 268.57, 300.78, 356.75, 343.69]`;
+`delta` ESS was
+`[402.17, 324.62, 325.12, 319.75, 275.26, 424.17, 396.19, 235.89, 300.22, 348.99, 346.01]`.
+There were zero calibration divergences. The fitted values were
+`Delta_l=+0.007245 +/- 0.017447` and
+`Delta_delta=+0.003486 +/- 0.003655`, compared with Table 3 values
+`+0.020 +/- 0.031` and `-0.003 +/- 0.016`. Each difference is smaller than the
+corresponding star-to-star scatter. The stage-input-to-artifact timestamp
+interval was approximately 76 seconds; this is a filesystem proxy, while the
+full pipeline wall was 982 seconds.
+
+## 2026-09-03 completion note
+
+Queue 420 subsequently reached a terminal exit code of zero. The reference
+stage explicitly logged the fitted artifact as its offset source and completed
+with all 208 lanes passing the production gate: 200 used independent NUTS and
+8 used independent HMC after swap, with zero accepted divergences and minimum
+accepted depth ESS 718.07. The fitted values and calibration ESS table above
+are therefore final rather than pending. The updated HAT-P-18 model stack also
+replaces the pre-default uniform run with queue 421's wide-`u+`/`u-` posterior;
+full numerical consequences are recorded in `stacking/stacking.md`.

@@ -45,7 +45,15 @@ def _rebuild_model(spec: Mapping[str, Any]):
     callable_value = _resolve_identity(str(spec["identity"]))
     if bool(spec.get("callable_is_model", False)):
         return callable_value
-    return callable_value(**dict(spec.get("kwargs", {})))
+    kwargs = dict(spec.get("kwargs", {}))
+    # Dumps created before the quadratic-uniform prior change have no basis
+    # field and must replay the historical U(0,1)^2 coefficient prior.  New
+    # pipeline dumps serialize the explicit default in their builder kwargs.
+    if (kwargs.get("ld_mode") == "uniform"
+            and kwargs.get("ld_profile") == "quadratic"
+            and "ld_uniform_basis" not in kwargs):
+        kwargs["ld_uniform_basis"] = "coefficients"
+    return callable_value(**kwargs)
 
 
 def _slice_value(value, channel_slice: slice, num_channels: int):
@@ -231,4 +239,3 @@ def load_stage_inputs(
                 f"absolute difference={abs(measured - expected):.3e}."
             )
     return result
-

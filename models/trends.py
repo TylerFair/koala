@@ -1,13 +1,39 @@
 import jax.numpy as jnp
+from jax.nn import sigmoid
+import numpyro
+import numpyro.distributions as dist
 from .common import compute_transit_model_auto
 
 def _trend_time(t):
     return t - jnp.min(t)
 
 _JUMP_WIDTH_DAYS = 1e-4
+_MAX_JUMP_WIDTH_DAYS = 30.0 / (24.0 * 60.0)
+
+
+def sample_step_width(t, prior_params, mode=None):
+    """Sample or fix the sigmoid width and expose common physical units."""
+    mode = str(mode or prior_params.get("step_width_mode", "free")).lower()
+    if mode == "fixed":
+        width = jnp.asarray(
+            prior_params.get("step_width_days", _JUMP_WIDTH_DAYS), dtype=jnp.float64
+        )
+    elif mode == "free":
+        cadence = jnp.median(jnp.diff(jnp.sort(jnp.asarray(t))))
+        log_width = numpyro.sample(
+            "log_width",
+            dist.Uniform(jnp.log(0.5 * cadence), jnp.log(_MAX_JUMP_WIDTH_DAYS)),
+        )
+        width = jnp.exp(log_width)
+    else:
+        raise ValueError("step_width_mode must be 'free' or 'fixed'.")
+    width = numpyro.deterministic("width", width)
+    numpyro.deterministic("width_minutes", width * 24.0 * 60.0)
+    return width
 
 def _soft_step(t, t_jump, width=_JUMP_WIDTH_DAYS):
-    return 0.5 * (1.0 + jnp.tanh((t - t_jump) / width))
+    """Smooth unit step with ``width`` expressed in days."""
+    return sigmoid((t - t_jump) / width)
 
 def _poly_trend(params, t_norm, order):
     trend = params["c"] + params["v"] * t_norm
@@ -60,7 +86,9 @@ def compute_lc_quartic(params, t):
 def compute_lc_linear_discontinuity(params, t):
     t_norm = _trend_time(t)
     lc_transit = compute_transit_model_auto(params, t)
-    jump = params["jump"] * _soft_step(t, params["t_jump"])
+    jump = params["jump"] * _soft_step(
+        t, params["t_jump"], params.get("width", _JUMP_WIDTH_DAYS)
+    )
     trend = _poly_trend(params, t_norm, order=1) + jump
     return lc_transit + trend
 
@@ -95,7 +123,9 @@ def compute_lc_spot_linear_discontinuity(params, t):
     t_norm = _trend_time(t)
     lc_transit = compute_transit_model_auto(params, t)
     spot = spot_crossing(t, params["spot_amp"], params["spot_mu"], params["spot_sigma"])
-    jump = params["jump"] * _soft_step(t, params["t_jump"])
+    jump = params["jump"] * _soft_step(
+        t, params["t_jump"], params.get("width", _JUMP_WIDTH_DAYS)
+    )
     trend = _poly_trend(params, t_norm, order=1) + spot + jump
     return lc_transit + trend
 

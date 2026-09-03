@@ -32,13 +32,22 @@ def main():
     parser.add_argument("--chunk-size", type=int, default=40)
     parser.add_argument("--warmup", type=int, default=1000)
     parser.add_argument("--samples", type=int, default=1000)
+    parser.add_argument("--ld-uniform-basis", choices=("uplus_uminus", "coefficients"),
+                        default="uplus_uminus")
     args = parser.parse_args()
     prefix = Path(args.output_prefix).resolve()
     prefix.parent.mkdir(parents=True, exist_ok=True)
     stage = load_stage_inputs(
         args.dump, potential_atol=1e-4,
-        builder_overrides={"ld_parameterization": "coefficients"},
+        builder_overrides={"ld_parameterization": "coefficients",
+                           "ld_uniform_basis": args.ld_uniform_basis},
     )
+    init_params = dict(stage.init_params)
+    if args.ld_uniform_basis == "uplus_uminus":
+        coefficients = np.asarray(init_params.pop("u"), dtype=float)
+        init_params["ld_uplus_uminus"] = np.stack(
+            (coefficients[:, 0] + coefficients[:, 1],
+             coefficients[:, 0] - coefficients[:, 1]), axis=1)
     nuts = dict(stage.nuts_kwargs)
     nuts.pop("init_strategy", None)
     nuts.update(
@@ -53,7 +62,7 @@ def main():
     key, source = _base_key_for_seed(stage, args.seed)
     started = time.perf_counter()
     samples = fit_jwst.get_samples_chunked(
-        stage.model, key, stage.t, stage.yerr, stage.y, stage.init_params,
+        stage.model, key, stage.t, stage.yerr, stage.y, init_params,
         chunk_size=args.chunk_size, nuts_kwargs=nuts, mcmc_kwargs=mcmc,
         output_dir=str(prefix.parent), checkpoint_prefix=prefix.name,
         sampler_backend="independent_nuts",
@@ -62,7 +71,9 @@ def main():
         ),
         checkpoint_signature={
             "stage_dump": str(Path(args.dump).resolve()),
-            "ld_parameterization": "coefficients", "seed_index": args.seed,
+            "ld_parameterization": "coefficients",
+            "ld_uniform_basis": args.ld_uniform_basis,
+            "seed_index": args.seed,
         },
         spectro_min_depth_ess=400.0, spectro_max_divergences=0,
         **stage.model_kwargs,

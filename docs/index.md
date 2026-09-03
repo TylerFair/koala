@@ -58,6 +58,7 @@ guides/configuration
 guides/outputs
 guides/gpu_and_clusters
 guides/model_stacking
+guides/loop_mode
 api
 citing
 ```

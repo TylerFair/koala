@@ -50,10 +50,11 @@ def test_explicit_ld_parameterization_overrides_prior_default():
         "spectro_ld_parameterization",
         "widegaussian",
     ) == "coefficients"
-    assert fit_jwst._resolve_ld_parameterization(
-        {"spectro_ld_parameterization": "decorrelated"},
-        "spectro_ld_parameterization", "uniform", "quadratic",
-    ) == "decorrelated"
+    with pytest.raises(ValueError, match="does not support decorrelated"):
+        fit_jwst._resolve_ld_parameterization(
+            {"spectro_ld_parameterization": "decorrelated"},
+            "spectro_ld_parameterization", "uniform", "quadratic",
+        )
 
 
 def _unprovenanced_plan():

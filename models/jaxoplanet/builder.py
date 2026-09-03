@@ -9,7 +9,6 @@ from ..linear_marginalization import marginalized_log_likelihood_and_conditional
 from ..ld_parameterization import (
     Power2LinearTransform,
     Power2MaxtedTransform,
-    QuadraticKippingTransform,
     gaussian_to_truncated_normal,
     gaussian_to_uniform,
 )
@@ -24,19 +23,30 @@ from ..gp import (
     build_gp, build_gp_linear, build_gp_quadratic, build_gp_cubic,
     build_gp_quartic, build_gp_explinear,
 )
-from ..trends import spot_crossing
+from ..trends import sample_step_width, spot_crossing
 
 
 def _enforce_decorrelated_coefficient_support(coefficients, low, high):
-    """Retain the bounded base-prior support in real-valued LD coordinates."""
+    """Apply a numerically zero outside-support density and safe model values."""
     coefficients = jnp.asarray(coefficients)
+    low = jnp.asarray(low, dtype=coefficients.dtype)
+    high = jnp.asarray(high, dtype=coefficients.dtype)
     inside = jnp.all(
-        (coefficients >= jnp.asarray(low))
-        & (coefficients <= jnp.asarray(high)), axis=-1
+        jnp.isfinite(coefficients)
+        & (coefficients >= low)
+        & (coefficients <= high), axis=-1
     )
+    # Unit validates its log factor when NumPyro validation is enabled, so an
+    # IEEE -inf raises before HMC can reject the point. exp(-1e100) is exactly
+    # zero in float64 while remaining a valid finite Unit parameter.
     numpyro.factor(
-        "ld_decorrelated_support", jnp.where(inside, 0.0, -jnp.inf)
+        "ld_decorrelated_support", jnp.where(inside, 0.0, -1.0e100)
     )
+    midpoint = 0.5 * (low + high)
+    safe = jnp.nan_to_num(
+        coefficients, nan=midpoint, posinf=high, neginf=low
+    )
+    return jnp.clip(safe, low, high)
 
 from ..harmonica.core import (
     harmonica_a_rs_from_duration,
@@ -55,6 +65,91 @@ NUTS_KWARGS = {
     "regularize_mass_matrix": True,
     "target_accept_prob": 0.8,
 }
+
+
+LD_MAP_COEFFICIENTS = 0
+LD_MAP_POWER2_MAXTED = 1
+LD_MAP_QUADRATIC_SUMDIFF = 2
+LD_MAP_SING = 3
+
+
+def _finite_log_density(value):
+    """Turn support violations into the finite rejection value used by NUTS."""
+    return jnp.where(jnp.isfinite(value), value, -1.0e100)
+
+
+def _ld_variant_data_form(latent, center, scale, low, high, map_code, law):
+    """Return physical LD coefficients and the exact data-selected log prior.
+
+    ``scale == 0`` denotes fixed coefficients, ``scale < 0`` a uniform
+    distribution, and ``scale > 0`` a truncated-normal distribution.  The
+    latent always has a standard-normal base density; ``log_correction``
+    replaces it with the requested coordinate density.  For fixed LD the
+    latent remains an independent standard-normal nuisance variable.
+    """
+    latent = jnp.asarray(latent, dtype=jnp.float64)
+    center = jnp.broadcast_to(jnp.asarray(center, dtype=latent.dtype), latent.shape)
+    scale = jnp.broadcast_to(jnp.asarray(scale, dtype=latent.dtype), latent.shape)
+    low = jnp.broadcast_to(jnp.asarray(low, dtype=latent.dtype), latent.shape)
+    high = jnp.broadcast_to(jnp.asarray(high, dtype=latent.dtype), latent.shape)
+    code = jnp.asarray(map_code, dtype=jnp.int32)
+    base_logp = jnp.sum(dist.Normal(0.0, 1.0).log_prob(latent), axis=-1)
+
+    def coordinate_density(x, lo, hi, loc, scl):
+        uniform_logp = jnp.sum(dist.Uniform(lo, hi).log_prob(x), axis=-1)
+        safe_scale = jnp.where(scl > 0.0, scl, 1.0)
+        normal_logp = jnp.sum(
+            dist.TruncatedNormal(loc, safe_scale, low=lo, high=hi).log_prob(x),
+            axis=-1,
+        )
+        fixed = jnp.all(scl == 0.0, axis=-1)
+        uniform = jnp.all(scl < 0.0, axis=-1)
+        target = jnp.where(uniform, uniform_logp, normal_logp)
+        return jnp.where(fixed, base_logp, _finite_log_density(target))
+
+    def coefficients(_):
+        fixed = jnp.all(scale == 0.0, axis=-1)
+        physical = jnp.where(fixed[..., None], center, latent)
+        return physical, coordinate_density(latent, low, high, center, scale)
+
+    def maxted(_):
+        transform = Power2MaxtedTransform()
+        physical = transform.inv(latent)
+        physical_logp = coordinate_density(physical, low, high, center, scale)
+        jacobian = transform.log_abs_det_jacobian(physical, latent)
+        return physical, _finite_log_density(physical_logp - jacobian)
+
+    def sumdiff(_):
+        physical = jnp.stack(
+            ((latent[..., 0] + latent[..., 1]) / 2.0,
+             (latent[..., 0] - latent[..., 1]) / 2.0), axis=-1,
+        )
+        return physical, coordinate_density(latent, low, high, center, scale)
+
+    def sing(_):
+        limb_l, limb_delta = latent[..., 0], latent[..., 1]
+        u_plus = 1.0 - limb_l
+        physical = jnp.stack(
+            (u_plus - 4.0 * limb_delta, 4.0 * limb_delta), axis=-1
+        )
+        l_logp = dist.TruncatedNormal(
+            center[..., 0], jnp.maximum(scale[..., 0], 1e-12),
+            low=low[..., 0], high=high[..., 0],
+        ).log_prob(limb_l)
+        delta_logp = dist.TruncatedNormal(
+            center[..., 1], jnp.maximum(scale[..., 1], 1e-12),
+            low=-u_plus / 4.0, high=u_plus / 4.0,
+        ).log_prob(limb_delta)
+        return physical, _finite_log_density(l_logp + delta_logp)
+
+    if law == "power2":
+        branches = (coefficients, maxted, coefficients, coefficients)
+    elif law == "quadratic":
+        branches = (coefficients, coefficients, sumdiff, sing)
+    else:
+        raise ValueError(f"Unsupported LD law for data form: {law}")
+    physical, target_logp = jax.lax.switch(code, branches, operand=None)
+    return physical, target_logp - base_logp
 
 
 def _resolve_builder_kernel(jaxoplanet_kernel, ld_profile, param_method, *, ld_mode=None):
@@ -163,12 +258,17 @@ def derive_geometry(wl_samples, period, ecc=0.0, omega=0.0):
 def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic',
                             ld_mode='free', param_method='duration',
                             jaxoplanet_kernel='auto',
-                            ld_parameterization='coefficients'):
+                            ld_parameterization='coefficients',
+                            ld_uniform_basis='uplus_uminus',
+                            step_width_mode='free',
+                            ld_variant_as_data=False):
     """Jaxoplanet white-light model with duration- or a_rs-based geometry."""
     if param_method not in ('duration', 'a_rs'):
         raise ValueError(f"Unknown param_method: {param_method}")
     if ld_parameterization not in {'coefficients', 'decorrelated', 'decorrelated_linear', 'latent_gaussian'}:
         raise ValueError("Unknown ld_parameterization.")
+    if ld_uniform_basis not in {'uplus_uminus', 'coefficients'}:
+        raise ValueError("ld_uniform_basis must be 'uplus_uminus' or 'coefficients'.")
     power2_transform = (
         Power2LinearTransform()
         if ld_parameterization == 'decorrelated_linear'
@@ -186,7 +286,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
           f"param_method='{param_method}', kernel='{selected_kernel}' "
           f"for {n_planets} planets")
 
-    def _whitelight_model(t, yerr, y=None, prior_params=None):
+    def _whitelight_model(t, yerr, y=None, prior_params=None,
+                          ld_center=None, ld_scale=None, ld_low=None,
+                          ld_high=None, ld_map_code=0):
         def _prior_array(name, default):
             arr = jnp.atleast_1d(jnp.asarray(prior_params.get(name, default), dtype=jnp.float64))
             if arr.size == 1 and n_planets > 1:
@@ -252,7 +354,26 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             cos_is.append(cos_i_i)
             incs.append(inc_i)
 
-        if ld_profile == 'quadratic':
+        if ld_variant_as_data:
+            if any(value is None for value in (ld_center, ld_scale, ld_low, ld_high)):
+                raise ValueError("LD data form requires center, scale, low, and high arrays.")
+            ld_latent = numpyro.sample(
+                'ld_variant_latent', dist.Normal(0.0, 1.0).expand([2]).to_event(1)
+            )
+            coefficients, correction = _ld_variant_data_form(
+                ld_latent, ld_center, ld_scale, ld_low, ld_high,
+                ld_map_code, ld_profile,
+            )
+            numpyro.factor('ld_variant_prior', correction)
+            if ld_profile == 'quadratic':
+                u = numpyro.deterministic('u', coefficients)
+            else:
+                c1 = numpyro.deterministic('c1', coefficients[0])
+                c2 = numpyro.deterministic('c2', coefficients[1])
+                if selected_kernel != "native_power2":
+                    prof = get_I_power2(c1, c2, MUS)
+                    u = P @ (1.0 - prof)
+        elif ld_profile == 'quadratic':
             if ld_mode in {'free', 'widegaussian', 'informed'}:
                 u_prior = jnp.asarray(prior_params['u'], dtype=jnp.float64)
                 if ld_mode == 'informed':
@@ -271,24 +392,25 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     u = numpyro.deterministic(
                         'u', gaussian_to_truncated_normal(z, u_prior, u_sigma, 0.0, 1.0)
                     )
-                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'} and ld_mode in {'free', 'widegaussian'}:
-                    q = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
-                        coefficient_prior, QuadraticKippingTransform()))
-                    u = numpyro.deterministic('u', QuadraticKippingTransform().inv(q))
-                    _enforce_decorrelated_coefficient_support(u, 0.0, 1.0)
                 else:
                     u = numpyro.sample("u", coefficient_prior)
             elif ld_mode == 'uniform':
-                coefficient_prior = dist.Uniform(0.0, 1.0).expand([2]).to_event(1)
-                if ld_parameterization == 'latent_gaussian':
+                if ld_uniform_basis == 'uplus_uminus':
+                    ld_sumdiff = numpyro.sample(
+                        'ld_uplus_uminus',
+                        dist.Uniform(jnp.array([-1.0, -2.0]),
+                                     jnp.array([2.0, 2.0])).to_event(1),
+                    )
+                    u1 = numpyro.deterministic('u1', 0.5 * (ld_sumdiff[0] + ld_sumdiff[1]))
+                    u2 = numpyro.deterministic('u2', 0.5 * (ld_sumdiff[0] - ld_sumdiff[1]))
+                    numpyro.deterministic('l', 1.0 - ld_sumdiff[0])
+                    numpyro.deterministic('delta', (ld_sumdiff[0] - ld_sumdiff[1]) / 8.0)
+                    u = numpyro.deterministic('u', jnp.stack((u1, u2)))
+                elif ld_parameterization == 'latent_gaussian':
                     z = numpyro.sample('ld_latent', dist.Normal(0.0, 1.0).expand([2]).to_event(1))
                     u = numpyro.deterministic('u', gaussian_to_uniform(z, 0.0, 1.0))
-                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'}:
-                    q = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
-                        coefficient_prior, QuadraticKippingTransform()))
-                    u = numpyro.deterministic('u', QuadraticKippingTransform().inv(q))
-                    _enforce_decorrelated_coefficient_support(u, 0.0, 1.0)
                 else:
+                    coefficient_prior = dist.Uniform(0.0, 1.0).expand([2]).to_event(1)
                     u = numpyro.sample("u", coefficient_prior)
             elif ld_mode == 'fixed':
                 u = numpyro.deterministic("u", jnp.asarray(prior_params['u'], dtype=jnp.float64))
@@ -318,9 +440,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                 elif ld_parameterization in {'decorrelated', 'decorrelated_linear'} and ld_mode in {'free', 'widegaussian'}:
                     h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, power2_transform))
-                    coefficients = power2_transform.inv(h)
-                    _enforce_decorrelated_coefficient_support(
-                        coefficients, jnp.asarray([0.0, 0.001]), 1.0
+                    coefficients = _enforce_decorrelated_coefficient_support(
+                        power2_transform.inv(h),
+                        jnp.asarray([0.0, 0.001]), 1.0
                     )
                     c1 = numpyro.deterministic('c1', coefficients[0])
                     c2 = numpyro.deterministic('c2', coefficients[1])
@@ -339,8 +461,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                 elif ld_parameterization in {'decorrelated', 'decorrelated_linear'}:
                     h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, power2_transform))
-                    coefficients = power2_transform.inv(h)
-                    _enforce_decorrelated_coefficient_support(coefficients, 0.0, 1.0)
+                    coefficients = _enforce_decorrelated_coefficient_support(
+                        power2_transform.inv(h), 0.0, 1.0
+                    )
                     c1 = numpyro.deterministic('c1', coefficients[0])
                     c2 = numpyro.deterministic('c2', coefficients[1])
                 else:
@@ -403,6 +526,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             jump_guess = prior_params.get('jump_guess', 0.0)
             params['t_jump'] = numpyro.sample('t_jump', dist.Normal(t_jump_guess, 1e-2))
             params['jump'] = numpyro.sample('jump', dist.Normal(jump_guess, 0.01))
+            params['width'] = sample_step_width(t, prior_params, step_width_mode)
 
         if 'explinear' in detrend_components:
             params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1))
@@ -458,7 +582,9 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                             jitter_prior='log_uniform',
                             jitter_prior_scale=2.0,
                             jitter_prior_center=0.5,
-                            ld_parameterization='coefficients'):
+                            ld_parameterization='coefficients',
+                            ld_uniform_basis='uplus_uminus',
+                            ld_variant_as_data=False):
     """Jaxoplanet spectroscopic model with WL-fixed duration- or a_rs-based geometry.
 
     ``jitter_prior`` selects the prior on the per-channel white-noise jitter:
@@ -477,6 +603,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         raise ValueError(f"Unknown param_method: {param_method}")
     if ld_parameterization not in {'coefficients', 'decorrelated', 'decorrelated_linear', 'latent_gaussian'}:
         raise ValueError("Unknown ld_parameterization.")
+    if ld_uniform_basis not in {'uplus_uminus', 'coefficients'}:
+        raise ValueError("ld_uniform_basis must be 'uplus_uminus' or 'coefficients'.")
     power2_transform = (
         Power2LinearTransform()
         if ld_parameterization == 'decorrelated_linear'
@@ -533,7 +661,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                           exp_trend=None, fixed_tau=None,
                           precomputed_yerr_per_lc=None,
                           trend_prior_mean=None, trend_prior_scale=None,
-                          likelihood_mask=None):
+                          likelihood_mask=None, ld_center=None, ld_scale=None,
+                          ld_low=None, ld_high=None, ld_map_code=0):
 
         num_lcs = jnp.atleast_2d(yerr).shape[0]
         t0s = mu_t0
@@ -589,14 +718,46 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             jitter[:, None] ** 2 + yerr_matrix ** 2
         )
 
-        if ld_mode in {'free', 'widegaussian', 'informed', 'sing', 'sing_free'}:
+        if ld_variant_as_data:
+            if any(value is None for value in (ld_center, ld_scale, ld_low, ld_high)):
+                raise ValueError("LD data form requires center, scale, low, and high arrays.")
+            ld_latent = numpyro.sample(
+                'ld_variant_latent',
+                dist.Normal(0.0, 1.0).expand([num_lcs, 2]).to_event(1),
+            )
+            coefficients, correction = _ld_variant_data_form(
+                ld_latent, ld_center, ld_scale, ld_low, ld_high,
+                ld_map_code, ld_profile,
+            )
+            numpyro.factor('ld_variant_prior', jnp.sum(correction))
+            if ld_profile == 'quadratic':
+                u = numpyro.deterministic('u', coefficients)
+            else:
+                c1 = numpyro.deterministic('c1', coefficients[:, 0])
+                c2 = numpyro.deterministic('c2', coefficients[:, 1])
+                if selected_kernel != "native_power2":
+                    profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
+                    u = (P_LD @ (1.0 - profs).T).T
+        elif ld_mode in {'free', 'widegaussian', 'informed', 'sing', 'sing_free'}:
             if ld_profile == 'quadratic':
                 if ld_mode in {'sing', 'sing_free'}:
                     if ld_mode == 'sing' and sigma_u_ld is None:
                         raise ValueError("ld_mode='sing' requires (l, delta) sigma_u_ld.")
                     if ld_mode == 'sing_free':
-                        limb_l = numpyro.sample(
-                            'limb_l', dist.Uniform(0.0, 1.0).expand([num_lcs])
+                        # Sing et al. (2026), Sec. 3.3 recommend fitting the
+                        # quadratic coefficients (or u+/u-) rather than the
+                        # derived (l, delta) coordinates.  Independent broad
+                        # boxes avoid delta's collapsing conditional support
+                        # as l approaches one in weak-LD infrared channels.
+                        limb_u_plus = numpyro.sample(
+                            'limb_u_plus', dist.Uniform(-1.0, 2.0).expand([num_lcs])
+                        )
+                        limb_u_minus = numpyro.sample(
+                            'limb_u_minus', dist.Uniform(-2.0, 2.0).expand([num_lcs])
+                        )
+                        limb_l = numpyro.deterministic('limb_l', 1.0 - limb_u_plus)
+                        limb_delta = numpyro.deterministic(
+                            'limb_delta', (limb_u_plus - limb_u_minus) / 8.0
                         )
                     else:
                         sing_mu = jnp.asarray(mu_u_ld, dtype=jnp.float64)
@@ -607,11 +768,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                         )
                     u_plus = 1.0 - limb_l
                     # c1 >= 0, c1 + 2*c2 >= 0, and c1+c2 <= 1.
-                    if ld_mode == 'sing_free':
-                        limb_delta = numpyro.sample(
-                            'limb_delta', dist.Uniform(-u_plus / 4.0, u_plus / 4.0)
-                        )
-                    else:
+                    if ld_mode != 'sing_free':
                         limb_delta = numpyro.sample(
                             'limb_delta',
                             dist.TruncatedNormal(
@@ -640,17 +797,6 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                                 z, mu_u_ld, u_scale, 0.0, 1.0
                             ),
                         )
-                    elif ld_parameterization in {'decorrelated', 'decorrelated_linear'} and ld_mode in {'free', 'widegaussian'}:
-                        q = numpyro.sample(
-                            'ld_decorrelated',
-                            dist.TransformedDistribution(
-                                u_prior_dist, QuadraticKippingTransform()
-                            ),
-                        )
-                        u = numpyro.deterministic(
-                            'u', QuadraticKippingTransform().inv(q)
-                        )
-                        _enforce_decorrelated_coefficient_support(u, 0.0, 1.0)
                     else:
                         u = numpyro.sample('u', u_prior_dist)
             elif ld_profile == 'power2':
@@ -686,9 +832,9 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                             coefficient_prior, power2_transform
                         ),
                     )
-                    coefficients = power2_transform.inv(h)
-                    _enforce_decorrelated_coefficient_support(
-                        coefficients, jnp.asarray([0.0, 0.001]), 1.0
+                    coefficients = _enforce_decorrelated_coefficient_support(
+                        power2_transform.inv(h),
+                        jnp.asarray([0.0, 0.001]), 1.0
                     )
                     c1 = numpyro.deterministic('c1', coefficients[:, 0])
                     c2 = numpyro.deterministic('c2', coefficients[:, 1])
@@ -704,8 +850,20 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 raise ValueError(f"Unknown ld_profile: {ld_profile}")
         elif ld_mode == 'uniform':
             if ld_profile == 'quadratic':
-                coefficient_prior = dist.Uniform(0.0, 1.0).expand([num_lcs, 2]).to_event(1)
-                if ld_parameterization == 'latent_gaussian':
+                if ld_uniform_basis == 'uplus_uminus':
+                    low = jnp.broadcast_to(jnp.array([-1.0, -2.0]), (num_lcs, 2))
+                    high = jnp.broadcast_to(jnp.array([2.0, 2.0]), (num_lcs, 2))
+                    ld_sumdiff = numpyro.sample(
+                        'ld_uplus_uminus', dist.Uniform(low, high).to_event(1))
+                    u1 = numpyro.deterministic(
+                        'u1', 0.5 * (ld_sumdiff[:, 0] + ld_sumdiff[:, 1]))
+                    u2 = numpyro.deterministic(
+                        'u2', 0.5 * (ld_sumdiff[:, 0] - ld_sumdiff[:, 1]))
+                    numpyro.deterministic('l', 1.0 - ld_sumdiff[:, 0])
+                    numpyro.deterministic(
+                        'delta', (ld_sumdiff[:, 0] - ld_sumdiff[:, 1]) / 8.0)
+                    u = numpyro.deterministic('u', jnp.stack((u1, u2), axis=1))
+                elif ld_parameterization == 'latent_gaussian':
                     z = numpyro.sample(
                         'ld_latent',
                         dist.Normal(0.0, 1.0).expand([num_lcs, 2]).to_event(1),
@@ -713,12 +871,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     u = numpyro.deterministic(
                         'u', gaussian_to_uniform(z, 0.0, 1.0)
                     )
-                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'}:
-                    q = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
-                        coefficient_prior, QuadraticKippingTransform()))
-                    u = numpyro.deterministic('u', QuadraticKippingTransform().inv(q))
-                    _enforce_decorrelated_coefficient_support(u, 0.0, 1.0)
                 else:
+                    coefficient_prior = dist.Uniform(0.0, 1.0).expand([num_lcs, 2]).to_event(1)
                     u = numpyro.sample('u', coefficient_prior)
             elif ld_profile == 'power2':
                 coefficient_prior = dist.Uniform(0.0, 1.0).expand([num_lcs, 2]).to_event(1)
@@ -733,8 +887,9 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 elif ld_parameterization in {'decorrelated', 'decorrelated_linear'}:
                     h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, power2_transform))
-                    coefficients = power2_transform.inv(h)
-                    _enforce_decorrelated_coefficient_support(coefficients, 0.0, 1.0)
+                    coefficients = _enforce_decorrelated_coefficient_support(
+                        power2_transform.inv(h), 0.0, 1.0
+                    )
                     c1 = numpyro.deterministic('c1', coefficients[:, 0])
                     c2 = numpyro.deterministic('c2', coefficients[:, 1])
                 else:

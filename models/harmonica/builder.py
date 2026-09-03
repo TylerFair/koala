@@ -18,7 +18,7 @@ from .core import (
     harmonica_half_area_coefficients_from_area_radius,
 )
 from ..detrend import _split_components
-from ..trends import spot_crossing
+from ..trends import _soft_step, sample_step_width, spot_crossing
 
 NUTS_KWARGS = {
     "dense_mass": True,
@@ -176,7 +176,7 @@ def derive_geometry(wl_samples, period, ecc=0.0, omega=0.0):
 
 def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='free',
                             max_harmonic_order=1, param_method='duration',
-                            ld_profile='power2'):
+                            ld_profile='power2', step_width_mode='free'):
     """Harmonica white-light model with power-2 or fixed quadratic LD.
 
     param_method='duration' samples (logD, _b) and derives a_rs/inc.
@@ -352,6 +352,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='free',
             jump_guess = prior_params.get('jump_guess', 0.0)
             params['t_jump'] = numpyro.sample('t_jump', dist.Normal(t_jump_guess, 1e-2))
             params['jump'] = numpyro.sample('jump', dist.Normal(jump_guess, 0.01))
+            params['width'] = sample_step_width(t, prior_params, step_width_mode)
 
         if 'explinear' in detrend_components:
             params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1))
@@ -387,8 +388,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='free',
             if 'A' in params:
                 trend = trend + params['A'] * jnp.exp(-t_norm / params['tau'])
             if 't_jump' in params:
-                trend = trend + params['jump'] * (
-                    0.5 * (1.0 + jnp.tanh((t - params['t_jump']) / 1e-4)))
+                trend = trend + params['jump'] * _soft_step(
+                    t, params['t_jump'], params['width']
+                )
             if 'spot_amp' in params:
                 trend = trend + spot_crossing(
                     t, params['spot_amp'], params['spot_mu'], params['spot_sigma']
@@ -514,8 +516,15 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             if ld_mode == 'sing' and sigma_u_ld is None:
                 raise ValueError("ld_mode='sing' requires (l, delta) sigma_u_ld.")
             if ld_mode == 'sing_free':
-                limb_l = numpyro.sample(
-                    'limb_l', dist.Uniform(0.0, 1.0).expand([num_lcs])
+                limb_u_plus = numpyro.sample(
+                    'limb_u_plus', dist.Uniform(-1.0, 2.0).expand([num_lcs])
+                )
+                limb_u_minus = numpyro.sample(
+                    'limb_u_minus', dist.Uniform(-2.0, 2.0).expand([num_lcs])
+                )
+                limb_l = numpyro.deterministic('limb_l', 1.0 - limb_u_plus)
+                limb_delta = numpyro.deterministic(
+                    'limb_delta', (limb_u_plus - limb_u_minus) / 8.0
                 )
             else:
                 sing_mu = jnp.asarray(mu_u_ld, dtype=jnp.float64)
@@ -527,11 +536,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     ),
                 )
             u_plus = 1.0 - limb_l
-            if ld_mode == 'sing_free':
-                limb_delta = numpyro.sample(
-                    'limb_delta', dist.Uniform(-u_plus / 4.0, u_plus / 4.0)
-                )
-            else:
+            if ld_mode != 'sing_free':
                 limb_delta = numpyro.sample(
                     'limb_delta',
                     dist.TruncatedNormal(

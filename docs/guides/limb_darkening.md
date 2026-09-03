@@ -25,7 +25,11 @@ flags: {ld_profile: quadratic, ld_prior: fixed}
 flags: {ld_profile: power2, ld_prior: widegaussian}
 ```
 
-**Free uniform.** Sample within the model's native physical bounds.
+**Free uniform.** For quadratic LD, `uniform` means wide flat priors on
+$u_+=u_1+u_2$ and $u_-=u_1-u_2$ following Sing et al. (2026); `sing` means the
+offset-corrected informed prior. The wide box is $u_+\in[-1,2]$ and
+$u_-\in[-2,2]$; set `ld_uniform_basis: coefficients` for the historical
+$u_1,u_2\in[0,1]$ prior.
 
 ```yaml
 flags: {ld_profile: power2, ld_prior: uniform}
@@ -65,7 +69,7 @@ The disk center is $\mu=1$ and the geometric limb is $\mu=0$. Quadratic LD is re
 | `fixed` | Atmosphere coefficients are exact | Deterministic coefficients | Controlled comparisons | Does not propagate LD uncertainty into depth |
 | `widegaussian` | Atmosphere values are useful centers | Truncated Normal, width 0.2 | Weakly informed fits | Permits broader LD-depth covariance |
 | `informed` | Stagger intensities and stellar errors describe the star | Propagated truncated Gaussian | Standard power-2 analysis | Constrains chromatic LD while retaining stellar uncertainty |
-| `uniform` | Only coefficient support is known | Uniform on $[0,1]$ | Sensitivity tests | Can enlarge depth uncertainty |
+| `uniform` | Wide uninformative quadratic LD | Flat $u_+\in[-1,2]$, $u_-\in[-2,2]$ | Sensitivity tests | Can enlarge depth uncertainty |
 | `sing` | Stagger shape needs a shared gray correction | Truncated Gaussian in $(l,\delta)$ | Sing et al. quadratic analysis | Separates common and chromatic profile differences |
 
 ## Informed prior construction
@@ -95,7 +99,13 @@ The `free` alias resolves to `widegaussian`. Use `uniform` for the explicit flat
 flags: {ld_profile: power2, ld_prior: uniform}
 ```
 
-Uniform mode preserves a flat prior on both physical coefficient dimensions on $[0,1]$. Wide-Gaussian and uniform/free power-2 priors are sampled in Maxted $h_1,h_2$ coordinates by default, with the analytic Jacobian preserving the original physical-coefficient prior exactly. Quadratic priors remain in coefficient coordinates by default; Kipping $q_1,q_2$ remains explicitly selectable, and builders still write the physical coefficients as deterministic sites.
+For quadratic LD, uniform mode uses independent flat priors on
+$u_+=u_1+u_2\in[-1,2]$ and $u_-=u_1-u_2\in[-2,2]$. This deliberately enlarges
+the prior relative to the legacy coefficient box; it is not a reparameterized
+version of the same prior. Set `ld_uniform_basis: coefficients` to recover flat
+$u_1,u_2\in[0,1]$. Wide-Gaussian and uniform/free power-2 priors retain their
+existing behavior. Builders save `u1`, `u2`, `l`, `delta`, and `u` for the new
+quadratic path so downstream output remains in familiar quantities.
 
 ## Sing coordinates and calibration
 

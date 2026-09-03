@@ -21,6 +21,23 @@ def test_gray_offset_estimator_recovers_synthetic_star():
     np.testing.assert_allclose(result['delta'], -0.003, atol=1e-14)
 
 
+def test_gray_offset_estimator_downweights_low_ess_channel():
+    model = np.array([[0.30, 0.20], [0.30, 0.20]])
+    ml, md = quadratic_to_sing(model[:, 0], model[:, 1])
+    fitted = np.column_stack(sing_to_quadratic(
+        ml + np.array([0.02, 0.20]), md - 0.003))
+    sigma = np.full_like(model, 0.01)
+    result = estimate_gray_offset(
+        fitted, model, sigma, ess=np.array([[1000.0, 1000.0], [10.0, 10.0]]),
+        n_draws=1000,
+    )
+    # The second channel has 100 times less inverse-variance weight after
+    # sqrt(N/ESS) uncertainty inflation.
+    expected_l = (0.02 * 100.0 + 0.20) / 101.0
+    np.testing.assert_allclose(result['l'], expected_l, atol=1e-14)
+    assert result['ess_inflation_applied']
+
+
 def test_sing_prior_trace_has_physical_quadratic_coefficients():
     import jax
     import jax.numpy as jnp
@@ -45,7 +62,7 @@ def test_sing_prior_trace_has_physical_quadratic_coefficients():
     assert np.all(c1 + c2 <= 1 + 1e-12)
 
 
-def test_sing_free_trace_uses_broad_physical_coordinates():
+def test_sing_free_trace_uses_independent_uplus_uminus_coordinates():
     import jax
     import jax.numpy as jnp
     from numpyro import handlers
@@ -59,10 +76,19 @@ def test_sing_free_trace_uses_broad_physical_coordinates():
         mu_depths=jnp.full((2, 1), 0.01), PERIOD=jnp.array([3.0]),
     )
     trace = handlers.trace(handlers.seed(model, jax.random.PRNGKey(9))).get_trace(**kwargs)
-    l = np.asarray(trace['limb_l']['value'])
-    delta = np.asarray(trace['limb_delta']['value'])
-    assert np.all((l >= 0) & (l <= 1))
-    assert np.all(np.abs(delta) <= (1 - l) / 4 + 1e-14)
+    u_plus = np.asarray(trace['limb_u_plus']['value'])
+    u_minus = np.asarray(trace['limb_u_minus']['value'])
+    np.testing.assert_allclose(trace['limb_l']['value'], 1.0 - u_plus)
+    np.testing.assert_allclose(
+        trace['limb_delta']['value'], (u_plus - u_minus) / 8.0)
+    assert trace['limb_u_plus']['type'] == 'sample'
+    assert trace['limb_u_minus']['type'] == 'sample'
+    assert trace['limb_l']['type'] == 'deterministic'
+    assert trace['limb_delta']['type'] == 'deterministic'
+    # Neither fitted site's distribution depends on the other draw: there is
+    # no conditional delta support that collapses as l approaches one.
+    assert np.shape(trace['limb_u_plus']['fn'].base_dist.low) == ()
+    assert np.shape(trace['limb_u_minus']['fn'].base_dist.low) == ()
     assert trace['c1']['type'] == 'deterministic'
     assert trace['c2']['type'] == 'deterministic'
 

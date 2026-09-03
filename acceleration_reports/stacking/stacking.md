@@ -112,6 +112,9 @@ JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false
 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m sphinx -E -W -b html docs docs/_build/html
 ```
 
+Final follow-up verification passed: 12 Sing/stacking tests in 70.36 seconds,
+and the clean warning-as-error Sphinx build rendered all 18 sources.
+
 Initialization retries 322 and 326 failed because the former lost its Slurm step and the latter hit the wide-LD invalid initializer. Retry 333 reproduced the initializer failure. Runs 325 and 334 reproduced the uniform-step invalid initializer. Copied-output experiments 335 and 336 were correctly rejected by science-artifact fingerprint checks and were not used. No failed output was removed or overwritten. White-light Laplace BMA remains unavailable because these pipeline artifacts do not serialize the full Hessian and MAP log joint; the analytic implementation and test are present, but no LOO value is mislabeled as evidence.
 
 The literal `sphinx-build` command first failed with exit 127 because that console script is not on the login-node `PATH`. Running the same Sphinx warning-as-error build through the specified environment's Python succeeded with Sphinx 8.1.3. The combined LD-initialization and stacking test run passed 7 tests in 44.16 seconds.
@@ -174,3 +177,131 @@ JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false
 The first CPU stacker attempt was killed with exit 137 because vectorizing all 1,000 draws across 208 channels materialized a very large JAX likelihood evaluation. No completed output was overwritten. The stacker now evaluates 25 draws at a time into one multi-member float32 NPZ and scores one channel at a time; the rerun completed with all draws and cadences. White-light Laplace BMA remains unavailable because the fit artifacts do not serialize the full white-light Hessian and MAP log joint. Open scientific risks remain model-list expansion bias, cadence-correlated residuals (which would require blocked LOO), the Sing calibration fallback, and whether trend selection should occur on white light or per channel.
 
 Final verification: `tests/test_stacking.py tests/test_ld_initialization.py` passed 10 tests in 25.74 seconds (three dependency deprecation warnings), and a clean `python -m sphinx -E -W -b html docs docs/_build/html` rendered all 18 sources, including `guides/model_stacking`, successfully with Sphinx 8.1.3.
+
+### 2026-09-02 fitted-Sing calibration follow-up
+
+Queue 420 reran the complete HAT-P-18 Sing-quadratic pipeline at a new root,
+`sing_quadratic_linear_fitted_v2`, after changing the calibration variables from
+the sampler-hostile conditional `(l,delta)` wedge to independent broad
+`u+ in [-1,2]`, `u- in [-2,2]`. The full pipeline wall was 982 seconds. The
+calibration itself took approximately 76 seconds from stage-input dump to JSON
+artifact creation (a filesystem-timestamp proxy, not an internally timed wall).
+
+All 11 calibration channels passed the revised validity rule: zero divergences,
+finite results, and minimum bulk ESS 235.89. Per-channel bulk ESS values were:
+
+| channel | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| l | 397.90 | 328.59 | 335.59 | 364.42 | 328.53 | 370.97 | 321.85 | 268.57 | 300.78 | 356.75 | 343.69 |
+| delta | 402.17 | 324.62 | 325.12 | 319.75 | 275.26 | 424.17 | 396.19 | 235.89 | 300.22 | 348.99 | 346.01 |
+
+ESS-aware inverse-variance pooling measured `Delta_l=+0.007245 +/- 0.017447`
+and `Delta_delta=+0.003486 +/- 0.003655`. The Table 3 comparisons are
+`+0.020 +/- 0.031` and `-0.003 +/- 0.016`; differences of -0.01276 and +0.00649
+are within the respective star-to-star scatters. The saved artifact includes the
+two ESS vectors, fitted uncertainties, and tabulated values. Both low- and
+high-resolution second stages consumed this fitted artifact.
+
+The updated three-model stack uses queues 410, 411, and 420. Mean stacking
+weights are 0.7037 fixed power-2, 0.1325 uniform quadratic, and 0.1638 fitted
+Sing quadratic; pseudo-BMA+ means are 0.4007, 0.2715, and 0.3278. Dominant-channel
+counts are 144, 27, and 37. Achromatic spectrum offsets are -4.35 +/- 11.64,
+-7.82 +/- 14.69, and +13.75 +/- 12.93 ppm. All 428,064 PSIS values remain below
+0.7 (global maximum 0.541). Median/max aligned disagreement is 1.007/1.526.
+Against the exact-grid staged production spectrum the aligned result is
+`-15.16 +/- 17.45 ppm`, slope `+8.34 ppm/um`, with median error ratio 0.983.
+Relative to the earlier tabulated-fallback stack, the median depth shift is
+-4.81 ppm and the largest per-channel absolute shift is 79.68 ppm.
+
+New products use the immutable prefix
+`hatp18_nrs1_g395m_reference_fitted_sing_*`; the new figure is copied as
+`docs/_static/model_stacking_hatp18_fitted_sing.png`. The 420 reference-stage
+sampler used 200 independent-NUTS and 8 independent-HMC lanes and recorded 10
+divergences after routing, which remains a sampler caveat separate from the
+zero-divergence calibration stage.
+
+Exact follow-up commands:
+
+```bash
+JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false JAX_ENABLE_X64=1 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m pytest tests/test_sing_ld.py tests/test_stacking.py -q
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/stacking/run_matrix.py configs_fiducial_stellarinformed/HAT-P-18_nrs1_g395m_config.yaml configs_stacking/hatp18_nrs1_g395m_sing_calibration_v2_matrix.yaml --queue-start 420
+while [ ! -f acceleration_reports/gpu_queue/done/420_stacking_sing_quadratic_linear_fitted_v2.exit ]; do sleep 60; done
+JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false JAX_ENABLE_X64=1 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/stacking/stack_spectra.py configs_stacking/hatp18_nrs1_g395m_reference_analysis_fitted_sing.yaml --output acceleration_reports/stacking --stage high_resolution --label hatp18_nrs1_g395m_reference_fitted_sing --n-out 20000
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m sphinx -E -W -b html docs docs/_build/html
+```
+
+The final follow-up verification passed 12 Sing/stacking tests in 70.36 seconds;
+the clean warning-as-error documentation build rendered all 18 sources.
+
+### 2026-09-03 completed Sing calibration and wide-uniform restack
+
+Queue 420 exited zero and completed the fresh full pipeline in 982 seconds.
+Its 11-channel calibration sampled independent broad `u+ in [-1,2]` and
+`u- in [-2,2]`, then transformed to `(l,delta)`. ESS-aware pooling measured
+`Delta_l=+0.007245 +/- 0.017447` and
+`Delta_delta=+0.003486 +/- 0.003655`, versus the Table 3 Stagger values
+`+0.020 +/- 0.031` and `-0.003 +/- 0.016`. The differences, -0.01276 and
++0.00649, are smaller than their quoted star-to-star scatters.
+
+| calibration channel | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| bulk ESS, l | 397.90 | 328.59 | 335.59 | 364.42 | 328.53 | 370.97 | 321.85 | 268.57 | 300.78 | 356.75 | 343.69 |
+| bulk ESS, delta | 402.17 | 324.62 | 325.12 | 319.75 | 275.26 | 424.17 | 396.19 | 235.89 | 300.22 | 348.99 | 346.01 |
+
+The calibration had zero divergences and minimum bulk ESS 235.89. Its measured
+wall was approximately 76 seconds from sampler-input dump to artifact creation
+(filesystem timestamp proxy); the pipeline did not record a separate internal
+calibration timer. The log explicitly reports `offset source=fit:<artifact>`
+before the reference stage, so both stage-two fits used the fitted correction.
+
+The older uniform-quadratic queue 411 predates the new wide-uniform default and
+was not reused. Queue 421 reran the full pipeline with explicit
+`ld_uniform_basis: uplus_uminus` at a fresh root and exited zero in 692 seconds.
+All 208 accepted reference lanes passed the depth-ESS/divergence gate. Sampler
+use was 199 independent NUTS and 9 independent HMC; the nine primary-attempt
+divergences were replaced, leaving zero in the accepted lanes and minimum
+accepted depth ESS 706.26. Queue 420's Sing reference stage similarly passed all
+208 lanes with 200 NUTS and 8 HMC, zero accepted divergences, and minimum
+accepted depth ESS 718.07. The fixed queue 410 used 203 NUTS, 4 HMC, and one
+joint-NUTS lane, with minimum accepted ESS 563.85 and zero accepted divergences.
+
+The definitive three-model stack therefore uses queues 410, 421, and 420:
+
+| model | mean stacking weight | mean pseudo-BMA+ weight | dominant channels | Delta_m (ppm) |
+|---|---:|---:|---:|---:|
+| fixed power-2 | 0.6728 | 0.4259 | 140 | -11.36 +/- 11.64 |
+| wide-uniform quadratic | 0.1196 | 0.2253 | 24 | +5.73 +/- 15.80 |
+| fitted-Sing quadratic | 0.2075 | 0.3488 | 44 | +6.13 +/- 12.93 |
+
+All 428,064 PSIS values are below 0.7; model maxima are 0.525, 0.537,
+and 0.452. Median/max aligned disagreement is 1.010/2.084; the corresponding
+absolute values are 1.012/2.143. Against the exact same 208-channel staged
+production grid, aligned stack minus production is `-9.80 +/- 17.67 ppm`, its
+weighted residual slope is `+9.99 ppm/um`, and its median error-bar ratio is
+0.991. Relative to the earlier stack that used legacy coefficient-uniform queue
+411, the median channel shift is +3.17 ppm, the RMS shift is 70.89 ppm, and the
+largest absolute channel shift is 436.62 ppm. That change is expected because
+the wide rectangular support is a different prior, not only a coordinate change.
+
+New immutable products use prefix
+`hatp18_nrs1_g395m_reference_fitted_sing_uplus_v2_*`; the four-panel figure is
+copied to `docs/_static/model_stacking_hatp18_fitted_sing_uplus_v2.png`.
+
+Exact additional commands:
+
+```bash
+while [ ! -f acceleration_reports/gpu_queue/done/421_stacking_uniform_quadratic_linear_uplus_v2.exit ]; do sleep 60; done; cat acceleration_reports/gpu_queue/done/421_stacking_uniform_quadratic_linear_uplus_v2.exit
+JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false JAX_ENABLE_X64=1 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/stacking/stack_spectra.py configs_stacking/hatp18_nrs1_g395m_reference_analysis_fitted_sing_uplus_v2.yaml --output acceleration_reports/stacking --stage high_resolution --label hatp18_nrs1_g395m_reference_fitted_sing_uplus_v2 --n-out 20000
+```
+
+Open risks remain cadence-correlated residuals, sensitivity to the candidate
+model list, and the visibly prior-sensitive uniform spectrum. White-light
+Laplace BMA remains unavailable because these artifacts do not serialize the
+complete MAP Hessian and log joint.
+
+Final verification used the mandated CPU environment: `tests/test_sing_ld.py
+tests/test_stacking.py tests/test_quadratic_uniform_prior.py` passed 18 tests in
+75.58 seconds (three dependency warnings). A clean
+`python -m sphinx -E -W -b html docs docs/_build/html` build passed. Final queue
+audit found both 420 and 421 terminal with exit zero and no task job numbered
+421--429 pending or running.

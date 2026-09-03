@@ -21,7 +21,7 @@ continue to default to `coefficients`.
 | File | Change |
 |---|---|
 | `fit_jwst.py` | New production defaults, mode-dependent targets/depths, two-stage selective sampler swap, ESS/divergence gate, checkpoint schema v4, per-channel sampler provenance, CSV provenance. |
-| `models/ld_parameterization.py` | New Maxted power-2 and Kipping quadratic bijections with analytic Jacobians. |
+| `models/ld_parameterization.py` | New Maxted power-2 bijection with an analytic Jacobian. |
 | `models/jaxoplanet/builder.py` | Opt-in exact transformed priors for white-light and spectroscopic free/wide/uniform LD; physical deterministic sites retained. |
 | `tests/test_spectro_safety_guards.py` | Directional swap-order and real tiny-model selective-swap test. |
 | `tests/test_ld_parameterization.py` | Exact induced-prior and posterior-MC parity tests. |
@@ -158,7 +158,7 @@ Exact GPU commands are the contents of preserved scripts
 - The exact transformed prior is correct, but the current Newton/FD Laplace
   preparation is not robust in those coordinates. `decorrelated` remains
   opt-in; no speed or convergence claim is made.
-- The Kipping transform is implemented and CPU prior-tested, but the real GPU
+- A bounded-triangle quadratic reparameterisation was CPU prior-tested, but the real GPU
   benchmark exercised power-2/Maxted only.
 - G395H completed twice but the dispatcher recorded exit 127 after each shell
   script had produced its final marker. The products and gate results exist,
@@ -349,7 +349,7 @@ divergences, LD ESS minima near four, and parity outliers up to 0.674 sigma.
 
 The prior-dependent default is now `decorrelated` for `widegaussian`,
 `uniform`, and the `free` alias in both white-light and spectroscopic model
-builders. Power-2 LD uses Maxted h1,h2 and quadratic LD uses Kipping q1,q2.
+builders. Power-2 LD uses Maxted h1,h2; quadratic LD uses physical coefficients.
 All other prior modes default to `coefficients`; in particular,
 stellar-informed and Sing are unchanged. Either parameterization flag still
 overrides this resolution explicitly.
@@ -488,26 +488,26 @@ queued scripts 345 and 346 exited 0 after printing `SKIPPED` and ran no fit.
 
 The automatic Jacobian-coordinate default is now restricted to power-2
 wide-Gaussian and uniform/free LD. Quadratic LD resolves to `coefficients` for
-both white light and spectroscopy; an explicit `decorrelated` flag still
-selects Kipping q1,q2. Stellar-informed, Sing, and fixed modes are unchanged.
+both white light and spectroscopy; an explicit `decorrelated` flag raises an
+error for quadratic LD. Stellar-informed, Sing, and fixed modes are unchanged.
 Because the resolved builder parameterization is part of the checkpoint
 signature, quadratic wide/free jobs no longer reuse checkpoints made with the
-old automatic Kipping choice.
+old automatic bounded-triangle quadratic choice.
 
 | File | Change |
 |---|---|
 | `fit_jwst.py` | Made LD resolution depend on both prior and profile; restored depth 10 for the legacy adaptive fallback. |
 | `models/independent_hmc.py` | Carried `laplace_fd_batch_size` through HMC option resolution so selective fallback accepts production NUTS inputs. |
-| `models/jaxoplanet/builder.py` | Enforced the bounded physical support after inverse decorrelation, closing a transformed-distribution support leak. |
-| `tools/diagnose_quadratic_map_path.py` | Added a one-lane CPU trace of potential, gradient, Hessian spectrum, q, and recovered u along the production MAP iterations. |
+| `models/jaxoplanet/builder.py` | Removed the experimental quadratic coordinate branches; quadratic LD now samples physical coefficients or the inverse-CDF latent alternative. |
+| `tools/diagnose_quadratic_map_path.py` | Retired the campaign-only quadratic MAP diagnostic. |
 | `tools/run_production_swap_on_stage_inputs.py` | Added a stage-dump replay of the production gate and exact-MCMC swap chain with sampler provenance. |
 | `tools/campaign/compare_ld_coordinate_runs.py` | Added an explicit candidate legend label for mixed production samplers. |
 | `tests/test_ld_parameterization.py`, `tests/test_spectro_safety_guards.py`, `tests/test_independent_hmc.py` | Added support, profile-resolution, explicit-override, and HMC FD-batching coverage. |
 | `SPECTRO_ACCELERATION.md`, `docs/guides/limb_darkening.md`, `docs/guides/samplers.md` | Documented the power-2-only automatic transform and coefficient default for quadratic LD. |
-| `acceleration_reports/quadratic_kipping_map_path_channel40.json` | Saved the channel-40 MAP trace. |
+| Quadratic MAP trace artifact | Saved the channel-40 MAP trace during the experiment; the artifact is now cleared. |
 | `acceleration_reports/ld_coefficients_production_swap_vs_legacy_WASP-39_G395H_corrected.png` | Legacy-versus-production spectrum and per-channel difference figure. |
 
-#### Why Kipping failed here
+#### Why the bounded-triangle quadratic reparameterisation failed here
 
 Channel 40 did not start on an edge: q=(0.04801, 0.18581), corresponding to
 u=(0.08142, 0.13768), with gradient norm 457 and Hessian condition number
@@ -519,22 +519,21 @@ Thus the initial point was not the problem, and the 1e8 cap was a downstream
 symptom rather than the initiating cause.
 
 The direct cause was a support leak, not evidence that the physical posterior
-sat on the Kipping triangle edge. The custom transform advertised a real-vector
+sat on the physical triangle edge. The custom transform advertised a real-vector
 codomain; NumPyro therefore did not apply a bounded support transform, while
 the base Uniform log density assumed support had already been enforced. The
 MAP could consequently obtain a finite potential after its inverse left
 [0,1]^2, then follow an almost flat, nonphysical direction until Hessian repair
-hit 1e8. An explicit zero/-infinity support factor now preserves the intended
-bounded prior for opt-in decorrelated coordinates. Quadratic remains in
-coefficient coordinates by default because even a corrected hard boundary is
-poor geometry for this Laplace preparation.
+hit 1e8. The experimental coordinate implementation and its support path have
+now been removed completely. Quadratic uses physical coefficients, with the
+inverse-CDF latent option as its only alternative.
 
 #### Full 68-channel production result
 
 | Sampler result | wall (s) | retained lanes: Laplace NUTS / HMC-8 / adaptive | attempted divergences: NUTS / HMC / adaptive | depth ESS min / median | u1 ESS min / median | u2 ESS min / median | offset (ppm) | slope (ppm/um) | RMS after offset / MC RMS (ppm) | error ratio p05 / med / p95 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | Legacy joint NUTS, coefficients | 217.14 | 0 / 0 / 68 | 0 | not recomputed | not recomputed | not recomputed | reference | reference | reference | reference |
-| Raw Laplace NUTS, Kipping (rejected) | 83.78 | 68 / 0 / 0 | 18,761 / 0 / 0 | 1.32 / 8.42 | unusable | unusable | +144.642 | -99.916 +/- 59.484 | 239.272 / 5.599 | 0.00045 / 0.00662 / 1.157 |
+| Raw Laplace NUTS, bounded-triangle coordinates (rejected) | 83.78 | 68 / 0 / 0 | 18,761 / 0 / 0 | 1.32 / 8.42 | unusable | unusable | +144.642 | -99.916 +/- 59.484 | 239.272 / 5.599 | 0.00045 / 0.00662 / 1.157 |
 | Production coefficient gate + swap | 326.44 | 53 / 9 / 6 | 35 / 1 / 0 | 389.94 / 782.23 | 8.32 / 100.48 | 8.67 / 103.82 | -1.538 | +1.686 +/- 59.484 | 6.266 / 6.349 | 0.928 / 0.999 / 1.075 |
 
 The final retained mixed posterior has zero divergences by construction: each
@@ -561,7 +560,7 @@ CPU diagnosis and comparison:
 JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false \
 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/diagnose_quadratic_map_path.py \
 /scratch/midway3/tfairnington/accel_gpu_results/348_uniform_quadratic_dump_retry2/stage_inputs/WASP-39_NIRSPEC_G395H_nrs1_Rreference_high_resolution_inputs.pkl \
---channel 40 --iterations 200 --output acceleration_reports/quadratic_kipping_map_path_channel40.json
+--channel 40 --iterations 200 --output acceleration_reports/quadratic_map_path_channel40.json
 
 JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false \
 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/campaign/compare_ld_coordinate_runs.py \
@@ -594,3 +593,175 @@ group passed 28 tests in 38.49 s, `tests/test_independent_nuts.py` passed 11
 tests in 93.45 s (three dependency warnings in each invocation), and
 `python -m sphinx -W -b html docs docs/_build/html` succeeded. Queue exit
 codes were 390=1, 391=1, and 392=0; all are terminal and none is pending.
+
+### White-light optimized-start validation and fallback (2026-09-02)
+
+The white-light optimizer result is now validated before it can seed NUTS.
+For power-2 and quadratic LD the deterministic physical coefficients must be
+finite and inside the prior support; radius ratio must be inside its prior
+range; and each planet must satisfy `0 <= b < 1 + rprs`.  A failed check is
+discarded, logged with its reasons, and replaced by the already transformed
+prior/physical-coordinate start.  This is a start-selection safeguard only;
+it does not change the posterior.
+
+The observed regression is covered literally.  The test supplies
+`ld_decorrelated=(316.73443542, 0.44949058)`, `b=2`, and `rprs=0.70710678`;
+validation rejects the resulting non-finite `c2` and invalid geometry. Queue
+395 exercised the same branch on the real data and logged the fallback to
+finite `ld_decorrelated=(0.92406627, 0.29518621)`, `b=0.4498`, and
+`rprs=0.1457`. Its pre-NUTS directional gradient check then passed at
+2.495e-5, proving that the invalid-location failure no longer reaches NUTS.
+
+The spectroscopic path already enforced transformed physical support. During
+this work that guard was made safe under NumPyro validation: invalid inverse
+points receive a finite `-1e100` log factor (zero probability in float64), and
+sanitized coefficients are used only to keep eager likelihood evaluation
+finite. Spectroscopic initial values are now constructed in the model's
+actual batched latent coordinates. The final adaptive safety net now rebuilds
+the coefficient-coordinate model and starts from physical coefficients, so it
+is genuinely the legacy exact-MCMC fallback rather than another run against
+the difficult transformed boundary.
+
+| File | Change |
+|---|---|
+| `fit_jwst.py` | Added white-light physical/geometry validation and logged fallback; made power-2 initialization batch-safe; supplied a coefficient-basis model and physical starts to the legacy spectroscopic adaptive fallback. |
+| `models/jaxoplanet/builder.py` | Made transformed support rejection NumPyro-safe and prevented non-finite inverse values from entering likelihood construction. |
+| `tests/test_ld_initialization.py` | Added the observed bad-value regression, valid-start coverage, and batched spectroscopic transform coverage. |
+| `tests/test_ld_parameterization.py` | Updated invalid-support coverage for the finite zero-probability penalty and sanitized inverse. |
+| `configs_stacking/wasp39_nrs1_ref_wide_linear_safety395.yaml` through `safety399.yaml` | Added immutable retry configs with fresh output roots. |
+| `acceleration_reports/gpu_queue/{done,pending}/395_*.sh` through `399_*.sh` | Preserved the exact GPU launch scripts and terminal records. |
+
+#### Real stacking run and gates
+
+No run produced the requested complete reference-grid spectrum before the
+authorized queue range ended. The strongest completed evidence is queue 399:
+white light initialized with finite physical values, the complete five-lane
+R20 spectrum was written, and its retained sampler mix was 0 Laplace NUTS / 2
+HMC-8 / 3 coefficient-basis adaptive NUTS. The three adaptive lanes had zero
+divergences and depth ESS 1092.79, 1564.94, and 1177.15; the two HMC lanes had
+zero divergences and depth ESS 3486.94 and 1891.19. Thus all five low-resolution
+lanes passed the production gate.
+
+White light retained 4000 adaptive-fallback draws with geometry ESS
+3776.31/1815.09/3316.17/2121.36 for t0/b/duration/rprs, but had eight
+divergences and therefore did not pass its strict zero-divergence gate after
+all three extra blocks. As designed, the pipeline continued using the exact
+adaptive posterior. The high-resolution 0:40 primary run and HMC retry
+finished; 35 lanes then entered valid coefficient-basis adaptive sampling.
+Allocation 57474887 expired during that sampling and the dispatcher recorded
+exit 143 at 23:53:59 CDT, about 24 minutes after launch. No high-resolution
+checkpoint or final spectrum was claimed.
+
+| Queue | exit | outcome |
+|---:|---:|---|
+| 395 | 1 | White fallback succeeded; model then hit NumPyro validation on an infinite support factor. |
+| 396 | 1 | Finite support guard worked; adaptive spectroscopic fallback still started in unrestricted Maxted coordinates and failed its gate. |
+| 397 | 1 | Batched latent start worked; R20 adaptive fallback had five divergences because it was not yet the coefficient-basis legacy model. |
+| 398 | 1 | R20 spectrum completed; high-resolution coefficient fallback received an unsliced 68-channel start. |
+| 399 | 143 | R20 passed all lane gates; high-resolution coefficient fallback began correctly, then the GPU allocation expired. |
+
+Exact CPU verification command:
+
+```bash
+JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false \
+/home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m pytest -q \
+tests/test_ld_initialization.py tests/test_ld_parameterization.py \
+tests/test_spectro_safety_guards.py
+```
+
+This passed 29 tests in 27.57 s. A subsequent focused rerun of initialization
+and safety guards passed 25 tests in 14.84 s. The GPU command in every case was
+`python fit_jwst.py --config <new safety config>` under the mandated dispatcher
+environment; exact paths and timing wrappers are in queue scripts 395--399.
+
+Open risk: the requested full 68-channel completion and its final wall/gate
+table remain unverified because the last authorized job was externally killed.
+All queue 395--399 jobs are terminal and none remains pending.
+
+After the final full-channel slicing correction, the exact three-file CPU
+command above was rerun and passed 29 tests in 51.56 s (nine warnings).
+
+## 2026-09-03: wide u-plus/u-minus default for quadratic uniform LD
+
+Following Section 3.3 of Sing et al. (2026), quadratic `ld_prior: uniform` now
+samples independent `u_plus=u1+u2 ~ Uniform(-1,2)` and
+`u_minus=u1-u2 ~ Uniform(-2,2)`. The rectangular box is intentionally wide and
+uninformative. It is not the old prior in different coordinates: it admits
+quadratic coefficients outside the former independent `u1,u2 in [0,1]` square.
+The model emits deterministic `u1`, `u2`, `l=1-u_plus`,
+`delta=(u_plus-u_minus)/8`, and joint `u`, preserving downstream quantities.
+Set `flags.ld_uniform_basis: coefficients` to recover the exact historical
+coefficient prior. New pipeline builder metadata and checkpoint signatures
+include `ld_uniform_basis`; pre-change stage dumps with the absent field are
+explicitly reconstructed as `coefficients` before potential validation.
+
+`free` remains an alias for the calculated-center wide-Gaussian mode, and
+`widegaussian` remains a truncated Gaussian rather than being silently changed
+to a flat prior. This isolates the deliberate prior decision to `uniform`.
+`ld_prior: sing` remains the offset-corrected informed quadratic mode.
+
+### Same-input, same-seed WASP-39 comparison
+
+Queues 432 and 433 replayed all 68 channels from the queue-348 G395H NRS1
+high-resolution dump with its dumped pipeline key and 1,000 retained draws.
+Queue 432 used the legacy coefficient box with adaptive joint NUTS. Queue 433
+used the wide sum/difference box with the production Laplace-NUTS gate/swap
+chain.
+
+| Metric | Legacy coefficients | Wide u-plus/u-minus |
+|---|---:|---:|
+| wall | 184.62 s | 117.48 s |
+| minimum depth bulk ESS | 1033.90 | 792.54 |
+| primary-attempt divergences | 0 | 1 |
+| accepted lanes | 68 joint NUTS | 67 independent NUTS, 1 independent HMC |
+| lanes swapped | 0 | 1 |
+
+The one wide-prior NUTS lane was rerun by the production chain with HMC, which
+had zero divergences; the aggregate chunk diagnostics retain the one rejected
+primary-attempt divergence. Wide minus legacy has inverse-variance weighted
+offset `-26.53 ppm` and slope `-55.11 ppm/um`. After removing both, its RMS is
+`44.35 ppm`. The estimated median Monte Carlo floor is `5.87 ppm`, using
+`1.2533*sigma/sqrt(ESS)` per chain and channel, so the residual shape difference
+is `7.55` times that floor. The median wide/legacy 68-percent error-bar ratio is
+`1.123`. This confirms a measurable prior effect rather than sampling-coordinate
+parity, as expected from the user-selected wider support.
+
+The two-panel product is
+`acceleration_reports/ld_uplus_uminus_vs_legacy_WASP-39_G395H.png`; its machine
+readable metrics are in the same-named JSON.
+
+### Files, commands, failures, and risks
+
+| File | Change |
+|---|---|
+| `models/jaxoplanet/builder.py` | Wide quadratic-uniform prior and deterministic legacy output sites |
+| `fit_jwst.py` | Flag validation, builder plumbing, and coordinate-aware initial sites |
+| `tools/spectro_stage_inputs.py` | Backward-compatible interpretation of pre-change dumps |
+| `tools/run_production_swap_on_stage_inputs.py` | Selectable uniform basis and transformed replay initial point |
+| `tools/compare_ld_uplus_prior.py` | Matched spectra, diagnostics, MC-floor calculation, and figure |
+| `tests/test_quadratic_uniform_prior.py` | Default/legacy supports, transforms, white-light outputs, old-dump replay, fingerprint coverage |
+| `SPECTRO_ACCELERATION.md`, `docs/guides/limb_darkening.md` | User-facing default and legacy escape hatch |
+
+```bash
+JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false JAX_ENABLE_X64=1 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python -m pytest tests/test_quadratic_uniform_prior.py tests/test_sing_ld.py tests/test_spectro_safety_guards.py tests/test_mcmc_runner_reuse.py -q
+python tools/run_sampler_on_stage_inputs.py /scratch/midway3/tfairnington/accel_gpu_results/348_uniform_quadratic_dump_retry2/stage_inputs/WASP-39_NIRSPEC_G395H_nrs1_Rreference_high_resolution_inputs.pkl --backend joint_nuts --platform gpu --seed 0 --warmup 1000 --samples 1000 --chunk-size 40 --builder-override ld_uniform_basis=coefficients --output-prefix /scratch/midway3/tfairnington/accel_gpu_results/432_ld_uniform_legacy_coefficients_v2/legacy_coefficients
+python tools/run_production_swap_on_stage_inputs.py /scratch/midway3/tfairnington/accel_gpu_results/348_uniform_quadratic_dump_retry2/stage_inputs/WASP-39_NIRSPEC_G395H_nrs1_Rreference_high_resolution_inputs.pkl --output-prefix /scratch/midway3/tfairnington/accel_gpu_results/433_ld_uniform_uplus_uminus_v2/uplus_uminus --seed 0 --chunk-size 40 --warmup 1000 --samples 1000 --ld-uniform-basis uplus_uminus
+JAX_PLATFORMS=cpu OMP_NUM_THREADS=8 XLA_FLAGS=--xla_cpu_multi_thread_eigen=false JAX_ENABLE_X64=1 /home/tfairnington/miniconda3/envs/jaxoplanet/bin/python tools/compare_ld_uplus_prior.py
+```
+
+Queues 430 and 431 failed before sampling because the changed builder default
+made the old dump reconstruct with the new prior during its stored-potential
+validation. The compatibility rule above fixed the cause; fresh-root retries
+432 and 433 both exited zero. No failed artifact was removed or overwritten.
+Open risks are the intentionally nonphysical portions of the broad rectangular
+prior and the substantial prior-sensitive chromatic slope seen here. Users who
+require physical intensity profiles should compare the informed Sing mode or
+explicitly choose a physically constrained prior rather than interpreting
+`uniform` as such a constraint.
+
+Final verification: the four-file focused regression command above passed 42
+tests in 79.82 s (three dependency deprecation warnings), and
+`python -m sphinx -E -W -b html docs docs/_build/html` completed successfully.
+The final queue audit found 430/431 terminal with exit 1 and their corrected,
+fresh-output-root replacements 432/433 terminal with exit 0; no job numbered
+430--439 remains pending or running.

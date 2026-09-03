@@ -315,7 +315,6 @@ def _prepare_unconstrained_initial_values(
             from .ld_parameterization import (
                 Power2MaxtedTransform,
                 Power2LinearTransform,
-                QuadraticKippingTransform,
             )
 
             physical = jnp.stack(
@@ -331,7 +330,6 @@ def _prepare_unconstrained_initial_values(
                         (
                             Power2MaxtedTransform,
                             Power2LinearTransform,
-                            QuadraticKippingTransform,
                         ),
                     )
                 ),

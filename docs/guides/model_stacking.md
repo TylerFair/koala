@@ -19,7 +19,8 @@ variants:
   - name: uniform_quadratic_linear
     overrides:
       input_dir: /scratch/midway3/tfairnington/FITS
-      flags: {ld_prior: uniform, ld_profile: quadratic, detrending_type: linear}
+      flags: {ld_prior: uniform, ld_profile: quadratic,
+              ld_uniform_basis: uplus_uminus, detrending_type: linear}
       sampling:
         whitelight_ld_parameterization: coefficients
         spectro_ld_parameterization: coefficients
@@ -93,7 +94,7 @@ The CSV also retains every absolute model spectrum and an unaligned stacked spec
 
 ## Read the diagnostic figure
 
-```{image} ../_static/model_stacking_hatp18.png
+```{image} ../_static/model_stacking_hatp18_fitted_sing_uplus_v2.png
 :alt: HAT-P-18 b NIRSpec G395M model-stacking diagnostics
 :width: 900px
 :align: center
@@ -105,9 +106,14 @@ The third panel shows channel-specific stacking weights and pseudo-BMA+ weights.
 
 The final panel shows the maximum Pareto $\hat k$ and the disagreement ratio. Values below 0.7 support ordinary PSIS-LOO; a channel with points above 0.7 needs exact refits, moment matching, or a more appropriate grouped predictive unit. `disagreement` is the aligned 16--84 percent half-width divided by the smallest single-model half-width. Values near one mean shape robustness; values above one identify assumption-sensitive channels.
 
-For the HAT-P-18 run shown here, all 428,064 pointwise diagnostics satisfy $\hat k<0.7$; the global maximum is 0.541. Mean stacking weights are 0.669 for fixed power-2, 0.127 for uniform quadratic, and 0.204 for Sing quadratic. Fixed is dominant in 135 of 208 channels, but the other LD treatments matter in the remainder. Their fitted achromatic offsets are -11.0, -14.5, and +27.0 ppm. Once those gray shifts are removed, median disagreement is 1.008 and the largest channel reaches 1.526. The aligned spectrum differs from the staged stellar-informed production spectrum by -11.4 +/- 17.5 ppm, with a residual slope of 9.12 ppm/micron and a median error-bar ratio of 0.983.
+For the HAT-P-18 run shown here, all 428,064 pointwise diagnostics satisfy $\hat k<0.7$; the global maximum is 0.537. Mean stacking weights are 0.673 for fixed power-2, 0.120 for wide-uniform quadratic, and 0.208 for Sing quadratic. Fixed is dominant in 140 of 208 channels, while uniform and Sing dominate 24 and 44 channels. Their fitted achromatic depth offsets are -11.4, +5.7, and +6.1 ppm. Once those gray shifts are removed, median disagreement is 1.010 and the largest channel reaches 2.084. The aligned spectrum differs from the staged stellar-informed production spectrum by -9.8 +/- 17.7 ppm, with a residual slope of 9.99 ppm/micron and a median error-bar ratio of 0.991.
 
-The Sing calibration stage ran, but its free gray-offset calibration missed the configured ESS gate (79.9 versus 100) with no divergences, so the documented tabulated Stagger offset fallback was used. This is a useful reminder that a completed model can still carry a calibration qualification worth reporting.
+Here `uniform` uses the current wide flat priors $u_+\in[-1,2]$ and
+$u_-\in[-2,2]$, following Sing et al. (2026). This is a broader prior than the
+historical independent $u_1,u_2\in[0,1]$ box, so the uniform model was rerun
+rather than reusing its older posterior.
+
+The revised Sing calibration follows Section 3.3 of Sing et al. (2026): it fits independent broad $u_+$ and $u_-$ coordinates, transforms the posterior to $(l,\delta)$, and uses ESS-inflated channel uncertainties for pooling. It measured $\Delta l=+0.00725\pm0.01745$ and $\Delta\delta=+0.00349\pm0.00366$. All 11 channels exceeded bulk ESS 235, with zero calibration divergences, so the fitted correction—not the tabulated fallback—was used. Both measurements agree with the Table 3 population values within their quoted star-to-star scatter.
 
 ## Second worked example: WASP-39 b
 

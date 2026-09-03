@@ -38,8 +38,13 @@ model. `spectro_ld_parameterization` and `whitelight_ld_parameterization`
 default to `decorrelated` for wide-Gaussian and uniform/free power-2 priors,
 using the Maxted h1,h2 coordinates. The transformed distribution includes the
 analytic Jacobian, so this changes sampling coordinates only and leaves the
-prior on the physical coefficients unchanged. Quadratic LD defaults to
-`coefficients`; Kipping q1,q2 coordinates remain explicitly selectable.
+prior on the physical coefficients unchanged. Quadratic `ld_prior: uniform`
+now defaults to independent wide flat priors `u_plus in [-1,2]` and
+`u_minus in [-2,2]`, following Sing et al. (2026), and emits deterministic
+`u1`, `u2`, `l`, `delta`, and joint `u` sites. This is a wider prior, not merely
+a coordinate transform. Set `ld_uniform_basis: coefficients` to recover the
+historical independent `u1,u2 in [0,1]` prior. Decorrelated quadratic
+coordinates are unsupported.
 Stellar-informed, Sing, and fixed LD modes keep their established
 parameterizations. An explicit flag still overrides the prior-dependent
 default; `latent_gaussian` and `decorrelated_linear` remain opt-in alternatives.

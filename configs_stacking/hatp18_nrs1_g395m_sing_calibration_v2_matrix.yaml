@@ -1,0 +1,22 @@
+dataset: hatp18_nrs1_g395m_ref
+analysis_stage: all
+variants:
+  - name: sing_quadratic_linear_fitted_v2
+    overrides:
+      input_dir: /scratch/midway3/tfairnington/FITS
+      stellar:
+        ld_mu_min: 0.2
+      flags:
+        ld_profile: quadratic
+        ld_prior: sing
+        whitelight_ld_parameterization: coefficients
+        spectro_ld_parameterization: coefficients
+        detrending_type: linear
+        ld_sing_offset: fit
+        ld_sing_calibration_warmup: 150
+        ld_sing_calibration_samples: 300
+        ld_sing_calibration_min_ess: 100
+        spectro_laplace_hessian_method: finite_difference
+        spectro_laplace_warmup: 150
+        spectro_laplace_target_accept: 0.95
+        spectro_laplace_max_tree_depth: 6
