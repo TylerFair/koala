@@ -251,7 +251,10 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
     return _whitelight_model_static
 
 def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free', n_planets=1, ld_profile='quadratic'):
-    print(f"Building vectorized model with: detrend='{detrend_type}', ld='{ld_mode}', trend='{trend_mode}' for {n_planets} planets")
+    print(
+        f"Building vectorized model with: detrend='{detrend_type}', "
+        f"ld='{ld_mode}', ld_profile='{ld_profile}' for {n_planets} planets"
+    )
 
     detrend_components = _split_components(detrend_type)
     try:

@@ -15,7 +15,7 @@ from tools.regenerate_harmonica_limb_products import (
     load_limb_samples,
     regenerate_limb_products,
     resolve_wavelength_axis,
-    schema_v2_output_paths,
+    schema_v3_output_paths,
 )
 
 
@@ -110,20 +110,20 @@ def test_dry_run_uses_new_names_and_refuses_existing_schema_product(tmp_path):
         },
     )
     # A legacy product is intentionally ignored and remains protected by the
-    # distinct schema-v2 output suffix.
+    # distinct schema-v3 output suffix.
     (tmp_path / f"{prefix}_limb_spectra.csv").write_text("legacy\n")
 
     summary = regenerate_limb_products(tmp_path, dry_run=True)
-    expected = schema_v2_output_paths(tmp_path, prefix)
+    expected = schema_v3_output_paths(tmp_path, prefix)
     assert summary["output_paths"] == expected
-    assert all("schema_v2" in path.name for path in expected.values())
+    assert all("schema_v3" in path.name for path in expected.values())
 
     expected["csv"].write_text("already generated\n")
     with pytest.raises(FileExistsError, match="Refusing to overwrite"):
         regenerate_limb_products(tmp_path, dry_run=True)
 
 
-def test_full_regeneration_writes_schema_v2_once(tmp_path):
+def test_full_regeneration_writes_schema_v3_once(tmp_path):
     prefix = "planet_R50"
     _write_pickle(
         tmp_path / "chunks" / f"{prefix}_chunk_0_2.pkl",
@@ -143,11 +143,11 @@ def test_full_regeneration_writes_schema_v2_once(tmp_path):
         assert path.stat().st_size > 0
     csv_text = summary["output_paths"]["csv"].read_text()
     assert "limb_product_schema_version" in csv_text.splitlines()[0]
-    assert ",2," in csv_text.splitlines()[1]
+    assert ",3," in csv_text.splitlines()[1]
     with np.load(summary["output_paths"]["posterior_samples"], allow_pickle=False) as saved:
         assert saved["sample_axes"].item() == "draw,wavelength"
-        assert saved["depth_evening"].shape == (5, 2)
-        assert saved["depth_morning"].shape == (5, 2)
+        assert saved["depth_two"].shape == (5, 2)
+        assert saved["depth_one"].shape == (5, 2)
 
     with pytest.raises(FileExistsError, match="Refusing to overwrite"):
         regenerate_limb_products(tmp_path)

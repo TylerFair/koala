@@ -58,18 +58,12 @@ resolution:
 flags:
   vmap_chunk: 40                # Resident GPU lanes.
   detrending_type: linear       # c + v(t-tmin).
-  interpolate_trend: false      # Fit channel trends directly.
-  interpolate_ld: false         # Build channel LD priors directly.
   ld_prior: stellarprior        # Alias for informed.
   need_lowres: true
   ld_profile: power2
   spectro_sampler: independent_nuts
-  spectro_mass_matrix: laplace
-  spectro_jitter_prior: lognormal
-  whitelight_geometry_estimator: posterior_median
   mask_start: jnp.min(t)        # Mask initial settling.
   mask_end: jnp.min(t) + 0.007
-  mask_integrations_start: null
 outlier_clip:
   whitelight_sigma: 5
   spectroscopic_sigma: 5

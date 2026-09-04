@@ -54,17 +54,10 @@ resolution:
 flags:
   vmap_chunk: 40
   detrending_type: explinear    # Linear baseline plus exponential ramp.
-  spectro_fixed_timescale_trends: true
-  interpolate_trend: false
-  interpolate_ld: false
   ld_prior: stellarprior
   need_lowres: true
   ld_profile: power2
   spectro_sampler: independent_nuts
-  spectro_mass_matrix: laplace
-  spectro_jitter_prior: lognormal
-  whitelight_geometry_estimator: posterior_median
-  mask_integrations_start: null
 outlier_clip:
   whitelight_sigma: 4
   spectroscopic_sigma: 4

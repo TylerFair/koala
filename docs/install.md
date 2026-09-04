@@ -19,7 +19,8 @@ export JAX_COMPILATION_CACHE_DIR=/scratch/$USER/jax_cache
 python fit_jwst.py -c config.yaml
 ```
 
-`FIT_JWST_SEED` overrides `flags.random_seed`. `JWSTJAXFIT_ANALYSIS_STAGE` and `JWSTJAXFIT_CHUNK_MODE` override the corresponding stage controls.
+`FIT_JWST_SEED` overrides `flags.random_seed`, and
+`JWSTJAXFIT_ANALYSIS_STAGE` overrides the corresponding stage control.
 
 ## Verify the environment
 
@@ -40,6 +41,10 @@ JAX provides compiled array operations and automatic differentiation. NumPyro pr
 ExoTiC-LD calculates wavelength-dependent stellar intensity coefficients. Astropy reads the FITS extraction. pandas writes result tables.
 
 matplotlib writes the numbered diagnostic figures. jaxopt and numpyro-ext support numerical optimization. tinygp is required by GP trend models.
+
+`scienceplots` and `cmcrameri` are optional publication-style enhancements.
+Plotting falls back to Matplotlib's serif fonts and `mediumorchid` accent when
+either package is unavailable.
 
 ArviZ provides posterior summaries and effective-sample-size diagnostics. PyYAML reads the configuration.
 
@@ -77,15 +82,11 @@ Use an absolute path on a cluster when the submission working directory may vary
 
 ## Persistent compilation cache
 
-The environment variable configures JAX generally. The fitter can configure its cache explicitly:
-
-```yaml
-flags:
-  compile_box: true
-  jax_compilation_cache_dir: /scratch/account/user/jax_cache
-```
-
-Use node-visible fast storage. Cache entries depend on JAX/XLA versions and static shapes. A cache does not eliminate the first compilation for a new model shape.
+The fitter enables its validated compilation strategy automatically. Use the
+standard `JAX_COMPILATION_CACHE_DIR` environment variable shown above when the
+cache must live on node-visible fast storage. Cache entries depend on JAX/XLA
+versions and static shapes, and a cache does not eliminate the first
+compilation for a new model shape.
 
 ## Documentation build
 

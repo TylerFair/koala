@@ -9,12 +9,7 @@ $$
 
 where $T$ is the transit light curve, $r_j=R_{p,j}/R_\star$ is the channel radius ratio, $\boldsymbol{g}$ is the shared orbital geometry, $\boldsymbol{u}_j$ describes limb darkening, and $S_j$ is the channel systematics trend. The likelihood uses the uncertainty supplied for every integration. An additional channel jitter is added in quadrature.
 
-```yaml
-flags:
-  spectro_sampler: independent_nuts
-  spectro_mass_matrix: laplace
-  whitelight_geometry_estimator: posterior_median
-```
+The validated default uses independent NUTS for the spectroscopic channels.
 
 ## White light first
 
@@ -22,12 +17,7 @@ The first fit sums the spectral time series into a white-light curve. This curve
 
 The white-light model also measures the shape of a visit-level systematics component. For example, an `explinear` white-light fit samples both the exponential amplitude and its decay time. The white-light posterior is saved before spectroscopic fitting starts.
 
-Its median geometry is passed to both spectroscopic stages. The production setting is:
-
-```yaml
-flags:
-  whitelight_geometry_estimator: posterior_median
-```
+Its median geometry is passed to both spectroscopic stages.
 
 The handoff fixes all channel fits to one coherent geometry. It prevents low-signal channels from trading wavelength-dependent depth against impact parameter or duration. It also avoids fitting hundreds of copies of parameters that describe the same orbit.
 
@@ -85,13 +75,9 @@ This is why the method is called Laplace-metric independent NUTS or HMC.
 
 A chain can finish without producing a trustworthy posterior. Two checks guard the spectroscopic result. The effective sample size, or ESS, estimates how many independent draws the correlated chain contains.
 
-A divergence marks a numerical integration failure in Hamiltonian dynamics. The production gate requires depth ESS of at least 400 and zero divergences.
-
-```yaml
-flags:
-  spectro_min_depth_ess: 400
-  spectro_max_divergences: 0
-```
+A divergence marks a numerical integration failure in Hamiltonian dynamics.
+The validated production gate requires depth ESS of at least 400 and zero
+divergences; these are internal safeguards rather than per-dataset settings.
 
 When a chunk fails, {{ project }} does not silently write the poor chain as the final posterior. It retries the affected work with the alternate exact sampler. Independent NUTS swaps to Laplace-metric HMC with eight integration steps.
 

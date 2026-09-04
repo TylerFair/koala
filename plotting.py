@@ -1,9 +1,23 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 import jax.numpy as jnp
 from models.common import compute_transit_model_auto
 from models.harmonica.core import _ALL_ODD_COEFF_SPECS
+from plotting_style import (
+    DATA_MARKER_STYLE,
+    ERRORBAR_COLOR,
+    MODEL_COLOR,
+    OUTLIER_MARKER_STYLE,
+    ZERO_LINE_COLOR,
+    _infer_half_widths,
+    accent_color_for_label,
+    add_instrument_stamp,
+    apply_publication_style,
+    choose_symmetric_residual_ticks,
+    related_accent_colors,
+    save_figure,
+    style_axis,
+)
 
 # Use the full catalogue here so plotting can handle any saved results.
 HARMONICA_ODD_HARMONICS = tuple(name for name, _ in _ALL_ODD_COEFF_SPECS)
@@ -99,389 +113,888 @@ def _single_curve_transit_signal(t, map_params, transit_params, idx):
 
     return np.asarray(compute_transit_model_auto(params, jnp.asarray(t)))
 
-def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear'):
-    """
-    Plot the MAP fits for each wavelength. The transit parameters (period, duration,
-    impact parameter, and transit time) are provided via transit_params, and detrend_offset
-    is the value used to detrend the light curve.
-    """
-    nrows = int(np.ceil(len(wavelengths) / ncols))
-    fig = plt.figure(figsize=(15, 3 * nrows))
-    gs = gridspec.GridSpec(nrows, ncols, hspace=0, wspace=0)
-    norm = plt.Normalize(wavelengths.min(), wavelengths.max())
-    colors = plt.cm.winter(norm(wavelengths))
 
-    
-    for i in range(len(wavelengths)):
-        ax = plt.subplot(gs[i // ncols, i % ncols])
-        # Extract MAP parameters for this wavelength
-        rors_i = map_params['rors'][i]
-        u_i = map_params['u'][i]
-        if detrend_type != 'none':
-            c_i = map_params['c'][i]
-            v_i = map_params['v'][i]
+def _broadcast_error(error, size):
+    values = np.asarray(error, dtype=float)
+    if values.ndim == 0:
+        return np.full(size, float(values))
+    values = np.ravel(values)
+    if values.size == 1:
+        return np.full(size, float(values[0]))
+    if values.size != size:
+        raise ValueError(f"Expected one uncertainty or {size} values, got {values.size}.")
+    return values
 
-        model = _single_curve_transit_signal(t, map_params, transit_params, i)
 
-        if detrend_type == 'linear':
-            trend = c_i + v_i * (t - jnp.min(t))
-        elif detrend_type in {'quadratic_spot', 'quadratic+spot'}:
-            spot_amp = map_params['spot_amp'][i]
-            spot_mu = map_params['spot_mu'][i]
-            spot_sigma = map_params['spot_sigma'][i]
-            v2_i = map_params['v2'][i]
-            t_shift = t - jnp.min(t)
-            trend = c_i + v_i * t_shift + v2_i * t_shift**2 + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
-        elif detrend_type == 'explinear':
-            A_i = map_params['A'][i]
-            tau_i = map_params['tau'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)
-        elif detrend_type == 'spot':
-            spot_amp = map_params['spot_amp'][i]
-            spot_mu = map_params['spot_mu'][i]
-            spot_sigma = map_params['spot_sigma'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
-        elif detrend_type == '2spot':
-            spot_amp = map_params['spot_amp'][i]
-            spot_mu = map_params['spot_mu'][i]
-            spot_sigma = map_params['spot_sigma'][i]
-            spot_amp2 = map_params['spot_amp2'][i]
-            spot_mu2 = map_params['spot_mu2'][i]
-            spot_sigma2 = map_params['spot_sigma2'][i]
-            spot_term = spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2)
-            spot_term2 = spot_amp2 * jnp.exp(-0.5 * (t - spot_mu2)**2 / spot_sigma2**2)
-            trend = c_i + v_i * (t - jnp.min(t)) + spot_term + spot_term2
-        elif detrend_type == 'none':
-            trend = 1.0
-        else:
-            # Fallback for complex detrending types in plots (simplification)
-            if detrend_type != 'none':
-                 try:
-                    trend = c_i + v_i * (t - jnp.min(t))
-                 except:
-                    trend = 1.0
-            else:
-                 trend = 1.0
-            
-        model = model + trend
-        ax.errorbar(t, indiv_y[i], yerr=jitter[i], fmt='.', alpha=0.3,
-                    color=colors[i], label='Data', ms=1, zorder=2)
-        ax.plot(t, model, c='k', alpha=1, lw=2.8,
-                label='MAP Model', zorder=3)
-        ax.text(0.05, 0.95, f'λ = {wavelengths[i]:.2f} μm',
-                transform=ax.transAxes, fontsize=10)
-        if i == 0:
-            ax.legend(fontsize=8)
-        ax.set_xticks([])
-        ax.set_yticks([])
-    plt.savefig(filename, dpi=200)
+def _time_from_midtransit_hours(time, t0_reference=None):
+    time = np.asarray(time, dtype=float)
+    if t0_reference is None:
+        reference = float(np.nanmedian(time))
+    else:
+        reference = float(np.ravel(np.asarray(t0_reference, dtype=float))[0])
+    return (time - reference) * 24.0
+
+
+def _first_value(values, index=0):
+    array = np.asarray(values)
+    if array.ndim == 0:
+        return float(array)
+    return float(array.ravel()[index])
+
+
+def _format_pm(value, err_low=None, err_high=None, fmt=".6f"):
+    value = float(value)
+    if err_low is None or err_high is None:
+        return format(value, fmt)
+    return (
+        f"{format(value, fmt)} "
+        f"-{format(float(err_low), fmt)} +{format(float(err_high), fmt)}"
+    )
+
+
+def plot_whitelight_curve(
+    time,
+    flux,
+    flux_err,
+    bestfit_model,
+    filename,
+    instrument_label=None,
+    t0_reference=None,
+    outlier_mask=None,
+    flux_label="Normalized Flux",
+):
+    """Write the house-style white-light curve and residual panels."""
+    apply_publication_style()
+    time = np.asarray(time, dtype=float)
+    x = _time_from_midtransit_hours(time, t0_reference)
+    flux = np.asarray(flux, dtype=float)
+    model = np.asarray(bestfit_model, dtype=float)
+    error = _broadcast_error(flux_err, time.size)
+    if outlier_mask is None:
+        outlier = np.zeros(time.size, dtype=bool)
+    else:
+        outlier = np.asarray(outlier_mask, dtype=bool)
+        if outlier.shape != time.shape:
+            raise ValueError("outlier_mask must match the white-light time axis.")
+    good = ~outlier
+    residual_ppm = (flux - model) * 1e6
+    error_ppm = error * 1e6
+    accent = accent_color_for_label(instrument_label or str(filename))
+
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(8.8, 6.2),
+        sharex=True,
+        gridspec_kw={"height_ratios": [3, 1]},
+    )
+    if np.any(outlier):
+        axes[0].plot(x[outlier], flux[outlier], zorder=1, **OUTLIER_MARKER_STYLE)
+    axes[0].plot(
+        x[good],
+        flux[good],
+        marker=DATA_MARKER_STYLE["fmt"],
+        color=accent,
+        zorder=2,
+        **{key: value for key, value in DATA_MARKER_STYLE.items() if key not in {"fmt", "elinewidth", "capsize"}},
+    )
+    axes[0].plot(x, model, color=MODEL_COLOR, lw=1.9, zorder=3)
+    axes[0].set_ylabel(flux_label)
+    main_ticks = axes[0].get_yticks()
+    stamp_y = main_ticks[1] if len(main_ticks) >= 2 else np.nanmin(flux[good])
+    add_instrument_stamp(
+        axes[0],
+        instrument_label or str(filename),
+        fontsize=17,
+        y_data=stamp_y,
+    )
+
+    if np.any(outlier):
+        axes[1].plot(
+            x[outlier], residual_ppm[outlier], zorder=1, **OUTLIER_MARKER_STYLE
+        )
+    axes[1].errorbar(
+        x[good],
+        residual_ppm[good],
+        yerr=error_ppm[good],
+        color=accent,
+        ecolor=accent,
+        zorder=2,
+        **DATA_MARKER_STYLE,
+    )
+    axes[1].axhline(0.0, color=ZERO_LINE_COLOR, lw=1.7, ls="--", zorder=3)
+    axes[1].set_xlabel("Time from Mid-Transit [hr]")
+    axes[1].set_ylabel("Residuals [ppm]")
+    limit, ticks = choose_symmetric_residual_ticks(
+        residual_ppm[good], error_ppm[good]
+    )
+    axes[1].set_ylim(-limit, limit)
+    axes[1].set_yticks(ticks)
+    for ax in axes:
+        style_axis(ax)
+    axes[1].set_yticks(ticks)
+    fig.align_ylabels(axes)
+    save_figure(fig, filename)
     return fig
 
 
-def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear'):
-    """
-    Plot the residuals for each wavelength using the transit parameters provided via transit_params.
-    """
-    nrows = int(np.ceil(len(wavelengths) / ncols))
-    fig = plt.figure(figsize=(15, 3 * nrows))
-    gs = gridspec.GridSpec(nrows, ncols, hspace=0, wspace=0)
-    norm = plt.Normalize(wavelengths.min(), wavelengths.max())
-    colors = plt.cm.winter(norm(wavelengths))
+def plot_whitelight_residuals(
+    time,
+    residual,
+    flux_err,
+    filename,
+    instrument_label=None,
+    t0_reference=None,
+    outlier_mask=None,
+):
+    """Write the retained standalone white-light residual diagnostic."""
+    apply_publication_style()
+    time = np.asarray(time, dtype=float)
+    x = _time_from_midtransit_hours(time, t0_reference)
+    residual_ppm = np.asarray(residual, dtype=float) * 1e6
+    error_ppm = _broadcast_error(flux_err, time.size) * 1e6
+    outlier = (
+        np.zeros(time.size, dtype=bool)
+        if outlier_mask is None
+        else np.asarray(outlier_mask, dtype=bool)
+    )
+    good = ~outlier
+    accent = accent_color_for_label(instrument_label or str(filename))
+    fig, ax = plt.subplots(figsize=(8.8, 4.0))
+    if np.any(outlier):
+        ax.plot(x[outlier], residual_ppm[outlier], zorder=1, **OUTLIER_MARKER_STYLE)
+    ax.errorbar(
+        x[good],
+        residual_ppm[good],
+        yerr=error_ppm[good],
+        color=accent,
+        ecolor=accent,
+        zorder=2,
+        **DATA_MARKER_STYLE,
+    )
+    ax.axhline(0.0, color=ZERO_LINE_COLOR, lw=1.7, ls="--", zorder=3)
+    ax.set_xlabel("Time from Mid-Transit [hr]")
+    ax.set_ylabel("Residuals [ppm]")
+    limit, ticks = choose_symmetric_residual_ticks(
+        residual_ppm[good], error_ppm[good]
+    )
+    ax.set_ylim(-limit, limit)
+    ax.set_yticks(ticks)
+    add_instrument_stamp(ax, instrument_label or str(filename))
+    style_axis(ax)
+    ax.set_yticks(ticks)
+    save_figure(fig, filename)
+    return fig
 
-    for i in range(len(wavelengths)):
-        ax = plt.subplot(gs[i // ncols, i % ncols])
-        rors_i = map_params['rors'][i]
-        u_i = map_params['u'][i]
-        if detrend_type != 'none':
-            c_i = map_params['c'][i]
-            v_i = map_params['v'][i]
-        
-        model = _single_curve_transit_signal(t, map_params, transit_params, i)
-        if detrend_type == 'linear':
-            trend = c_i + v_i * (t - jnp.min(t))
-        elif detrend_type in {'quadratic_spot', 'quadratic+spot'}:
-            spot_amp = map_params['spot_amp'][i]
-            spot_mu = map_params['spot_mu'][i]
-            spot_sigma = map_params['spot_sigma'][i]
-            v2_i = map_params['v2'][i]
-            t_shift = t - jnp.min(t)
-            trend = c_i + v_i * t_shift + v2_i * t_shift**2 + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
-        elif detrend_type == 'explinear':
-            A_i = map_params['A'][i]
-            tau_i = map_params['tau'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)
-        elif detrend_type == 'spot':
-            spot_amp = map_params['spot_amp'][i]
-            spot_mu = map_params['spot_mu'][i]
-            spot_sigma = map_params['spot_sigma'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
-        elif detrend_type == '2spot':
-            spot_amp = map_params['spot_amp'][i]
-            spot_mu = map_params['spot_mu'][i]
-            spot_sigma = map_params['spot_sigma'][i]
-            spot_amp2 = map_params['spot_amp2'][i]
-            spot_mu2 = map_params['spot_mu2'][i]
-            spot_sigma2 = map_params['spot_sigma2'][i]
-            spot_term = spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2)
-            spot_term2 = spot_amp2 * jnp.exp(-0.5 * (t - spot_mu2)**2 / spot_sigma2**2)
-            trend = c_i + v_i * (t - jnp.min(t)) + spot_term + spot_term2
-        elif detrend_type == 'none':
-            trend = 1.0
-        else:
-             # Fallback
-            if detrend_type != 'none':
-                 try:
-                    trend = c_i + v_i * (t - jnp.min(t))
-                 except:
-                    trend = 1.0
-            else:
-                 trend = 1.0
 
-        model = model + trend
-        residuals = indiv_y[i] - model
-        
-        ax.errorbar(t, residuals, yerr=jitter[i], fmt='.', alpha=0.3,
-                    ms=1, color=colors[i])
-        ax.axhline(y=0, color='k', alpha=1, lw=2.8, zorder=3)
-        ax.text(0.05, 0.95, f'λ = {wavelengths[i]:.3f} μm',
-                transform=ax.transAxes, fontsize=10)
-        rms = 1.4826 * np.nanmedian(np.abs(residuals - np.nanmedian(residuals))) * 1e6
-        ax.text(0.05, 0.85, f'Noise = {round(rms)}',
-                transform=ax.transAxes, fontsize=10)
-        ax.set_xticks([])
-        ax.set_yticks([])
-    plt.savefig(filename, dpi=200)
+def plot_whitelight_summary(params, filename, instrument_label=None):
+    """Write a compact one-annotation white-light parameter summary."""
+    apply_publication_style()
+    rors = np.atleast_1d(np.asarray(params["rors"], dtype=float))
+    lines = [str(instrument_label or "White-light fit")]
+    period = np.atleast_1d(np.asarray(params.get("period", np.nan), dtype=float))
+    for index in range(rors.size):
+        prefix = f"Planet {index + 1}: " if rors.size > 1 else ""
+        depth = _first_value(params.get("depths", rors**2), index) * 1e6
+        lines.extend(
+            [
+                f"{prefix}P = {_format_pm(period[min(index, period.size - 1)], fmt='.8f')} d",
+                "Duration = "
+                + _format_pm(
+                    _first_value(params["duration"], index),
+                    _first_value(params.get("duration_err_low", 0.0), index),
+                    _first_value(params.get("duration_err_high", 0.0), index),
+                )
+                + " d",
+                "t0 = "
+                + _format_pm(
+                    _first_value(params["t0"], index),
+                    _first_value(params.get("t0_err_low", 0.0), index),
+                    _first_value(params.get("t0_err_high", 0.0), index),
+                ),
+                "b = "
+                + _format_pm(
+                    _first_value(params["b"], index),
+                    _first_value(params.get("b_err_low", 0.0), index),
+                    _first_value(params.get("b_err_high", 0.0), index),
+                    ".5f",
+                ),
+                "Rp/R* = "
+                + _format_pm(
+                    rors[index],
+                    _first_value(params.get("rors_err_low", 0.0), index),
+                    _first_value(params.get("rors_err_high", 0.0), index),
+                ),
+                "Depth = "
+                + _format_pm(
+                    depth,
+                    1e6 * _first_value(params.get("depths_err_low", 0.0), index),
+                    1e6 * _first_value(params.get("depths_err_high", 0.0), index),
+                    ".1f",
+                )
+                + " ppm",
+            ]
+        )
+        if index != rors.size - 1:
+            lines.append("")
+
+    fig_height = max(3.4, 2.8 * rors.size)
+    fig, ax = plt.subplots(figsize=(7.2, fig_height))
+    ax.axis("off")
+    ax.text(
+        0.02,
+        0.96,
+        "\n".join(lines),
+        ha="left",
+        va="top",
+        transform=ax.transAxes,
+        fontsize=15,
+        linespacing=1.45,
+    )
+    save_figure(fig, filename)
+    return fig
+
+
+def plot_spectrum_precision(
+    wavelengths,
+    depth_ppm,
+    depth_err_ppm,
+    filename,
+    instrument_label=None,
+    wavelength_err=None,
+    asymmetric_depth_err=None,
+):
+    """Write a transmission spectrum with its precision panel underneath."""
+    apply_publication_style()
+    wavelengths = np.asarray(wavelengths, dtype=float)
+    depth_ppm = np.asarray(depth_ppm, dtype=float)
+    precision = np.asarray(depth_err_ppm, dtype=float)
+    if wavelength_err is None:
+        wavelength_err = _infer_half_widths(wavelengths)
+    else:
+        wavelength_err = np.asarray(wavelength_err, dtype=float)
+    yerr = precision if asymmetric_depth_err is None else np.asarray(asymmetric_depth_err, dtype=float)
+    accent = accent_color_for_label(instrument_label or str(filename))
+
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(8.8, 6.2),
+        sharex=True,
+        gridspec_kw={"height_ratios": [3, 1]},
+    )
+    axes[0].errorbar(
+        wavelengths,
+        depth_ppm,
+        xerr=wavelength_err,
+        yerr=yerr,
+        color=accent,
+        ecolor=accent,
+        zorder=2,
+        **DATA_MARKER_STYLE,
+    )
+    axes[0].set_ylabel("Transit Depth [ppm]")
+    add_instrument_stamp(axes[0], instrument_label or str(filename), fontsize=17)
+    axes[1].plot(wavelengths, precision, color=accent, lw=1.9)
+    axes[1].set_xlabel("Wavelength [$\\mu$m]")
+    axes[1].set_ylabel("Precision [ppm]")
+    if wavelengths.size:
+        padding = max(0.02, 0.5 * float(np.nanmedian(wavelength_err)))
+        axes[1].set_xlim(np.nanmin(wavelengths) - padding, np.nanmax(wavelengths) + padding)
+    for ax in axes:
+        style_axis(ax)
+    fig.align_ylabels(axes)
+    save_figure(fig, filename)
+    return fig
+
+
+def plot_noise_binning_from_csv(noise_df, filename, instrument_label=None):
+    """Write the house-style temporal noise-binning diagnostic."""
+    apply_publication_style()
+    bins = np.asarray(noise_df["bin_size_points"], dtype=float)
+    measured = np.asarray(noise_df["measured_rms"], dtype=float)
+    p16 = np.asarray(noise_df["measured_rms_p16"], dtype=float)
+    p84 = np.asarray(noise_df["measured_rms_p84"], dtype=float)
+    expected = np.asarray(noise_df["expected_white_rms"], dtype=float)
+    accent = accent_color_for_label(instrument_label or str(filename))
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+    ax.loglog(bins, expected, color=ZERO_LINE_COLOR, lw=1.7, ls="--")
+    ax.fill_between(bins, p16, p84, color=accent, alpha=0.18)
+    ax.loglog(
+        bins,
+        measured,
+        color=accent,
+        lw=1.8,
+        marker="o",
+        ms=3.4,
+        mfc="white",
+        mec=accent,
+        mew=1.5,
+    )
+    ax.set_xlabel("Bin Size [points]")
+    ax.set_ylabel("RMS [ppm]")
+    add_instrument_stamp(ax, instrument_label or str(filename), fontsize=14)
+    style_axis(ax, x_locator=False, y_locator=False)
+    save_figure(fig, filename)
+    return fig
+
+def _simple_channel_trend(t, map_params, index, detrend_type):
+    """Evaluate the trend families used by the standalone MAP grids."""
+    t = np.asarray(t, dtype=float)
+    shifted = t - np.nanmin(t)
+    if detrend_type == "none":
+        return np.ones_like(t)
+    c = _first_value(map_params.get("c", 1.0), index)
+    v = _first_value(map_params.get("v", 0.0), index)
+    trend = c + v * shifted
+    if detrend_type in {"quadratic", "quadratic_spot", "quadratic+spot"}:
+        trend = trend + _first_value(map_params.get("v2", 0.0), index) * shifted**2
+    if detrend_type in {"explinear", "explinear_spectroscopic"}:
+        amplitude = _first_value(map_params.get("A", 0.0), index)
+        tau = max(abs(_first_value(map_params.get("tau", 1.0), index)), 1e-12)
+        trend = trend + amplitude * np.exp(-shifted / tau)
+    if "spot" in detrend_type:
+        for suffix in ("", "2") if "2spot" in detrend_type else ("",):
+            amplitude = _first_value(map_params.get(f"spot_amp{suffix}", 0.0), index)
+            centre = _first_value(map_params.get(f"spot_mu{suffix}", 0.0), index)
+            width = max(abs(_first_value(map_params.get(f"spot_sigma{suffix}", 1.0), index)), 1e-12)
+            trend = trend + amplitude * np.exp(-0.5 * ((t - centre) / width) ** 2)
+    return trend
+
+
+def _map_full_models(t, map_params, transit_params, count, detrend_type):
+    return np.asarray(
+        [
+            _single_curve_transit_signal(t, map_params, transit_params, index)
+            + _simple_channel_trend(t, map_params, index, detrend_type)
+            for index in range(count)
+        ]
+    )
+
+
+def _channel_error(jitter, index, size):
+    values = np.asarray(jitter)
+    if values.ndim <= 1:
+        return _broadcast_error(values[index] if values.size > 1 else values, size)
+    return _broadcast_error(values[index], size)
+
+
+def plot_map_fits(
+    t,
+    indiv_y,
+    jitter,
+    wavelengths,
+    map_params,
+    transit_params,
+    filename,
+    ncols=3,
+    detrend_type="linear",
+):
+    """Plot the per-channel MAP fits in a clean, shared-axis grid."""
+    apply_publication_style()
+    t = np.asarray(t, dtype=float)
+    data = np.asarray(indiv_y, dtype=float)
+    wavelengths = np.asarray(wavelengths, dtype=float)
+    count = wavelengths.size
+    nrows = int(np.ceil(count / ncols))
+    x = _time_from_midtransit_hours(t, map_params.get("t0"))
+    models = _map_full_models(t, map_params, transit_params, count, detrend_type)
+    accent = accent_color_for_label(str(filename))
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(8.8, max(3.0, 2.55 * nrows)),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+    flat_axes = axes.ravel()
+    for index in range(count):
+        ax = flat_axes[index]
+        ax.errorbar(
+            x,
+            data[index],
+            yerr=_channel_error(jitter, index, t.size),
+            color=accent,
+            ecolor=accent,
+            zorder=2,
+            **DATA_MARKER_STYLE,
+        )
+        ax.plot(x, models[index], color=MODEL_COLOR, lw=1.9, zorder=3)
+        style_axis(ax)
+        ax.label_outer()
+    for ax in flat_axes[count:]:
+        ax.set_visible(False)
+    add_instrument_stamp(flat_axes[0], str(filename), fontsize=13)
+    fig.supxlabel("Time from Mid-Transit [hr]")
+    fig.supylabel("Normalized Flux")
+    save_figure(fig, filename)
+    return fig
+
+
+def plot_map_residuals(
+    t,
+    indiv_y,
+    jitter,
+    wavelengths,
+    map_params,
+    transit_params,
+    filename,
+    ncols=3,
+    detrend_type="linear",
+):
+    """Plot per-channel residuals in ppm with a shared symmetric scale."""
+    apply_publication_style()
+    t = np.asarray(t, dtype=float)
+    data = np.asarray(indiv_y, dtype=float)
+    wavelengths = np.asarray(wavelengths, dtype=float)
+    count = wavelengths.size
+    nrows = int(np.ceil(count / ncols))
+    x = _time_from_midtransit_hours(t, map_params.get("t0"))
+    models = _map_full_models(t, map_params, transit_params, count, detrend_type)
+    residuals = (data - models) * 1e6
+    errors = np.asarray(
+        [_channel_error(jitter, index, t.size) for index in range(count)]
+    ) * 1e6
+    limit, ticks = choose_symmetric_residual_ticks(residuals, errors)
+    accent = accent_color_for_label(str(filename))
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(8.8, max(3.0, 2.35 * nrows)),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+    flat_axes = axes.ravel()
+    for index in range(count):
+        ax = flat_axes[index]
+        ax.errorbar(
+            x,
+            residuals[index],
+            yerr=errors[index],
+            color=accent,
+            ecolor=accent,
+            zorder=2,
+            **DATA_MARKER_STYLE,
+        )
+        ax.axhline(0.0, color=ZERO_LINE_COLOR, lw=1.7, ls="--", zorder=3)
+        ax.set_ylim(-limit, limit)
+        ax.set_yticks(ticks)
+        style_axis(ax)
+        ax.set_yticks(ticks)
+        ax.label_outer()
+    for ax in flat_axes[count:]:
+        ax.set_visible(False)
+    add_instrument_stamp(flat_axes[0], str(filename), fontsize=13)
+    fig.supxlabel("Time from Mid-Transit [hr]")
+    fig.supylabel("Residuals [ppm]")
+    save_figure(fig, filename)
     return fig
 
 
 def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
-    """
-    Plot the transmission spectrum from MCMC results. Handles multi-planet systems.
-    
-    Parameters:
-    -----------
-    wavelengths : array-like
-        The wavelengths at which the spectrum is measured.
-    rors_posterior : array-like
-        The posterior samples for rors (radius ratio). Shape can be (n_samples, n_lcs) for
-        a single planet or (n_samples, n_lcs, n_planets) for multiple planets.
-    """
-    depth_chain = rors_posterior**2
-
-    if depth_chain.ndim == 2:  # single planet case for backward compatibility
+    """Plot every planet's spectrum and precision without changing filenames."""
+    depth_chain = np.asarray(rors_posterior, dtype=float) ** 2
+    if depth_chain.ndim == 2:
         depth_chain = depth_chain[:, :, np.newaxis]
+    if depth_chain.ndim != 3:
+        raise ValueError(
+            "rors_posterior must have (draw, wavelength[, planet]) axes."
+        )
 
-    n_planets = depth_chain.shape[2]
+    figures = []
+    for index in range(depth_chain.shape[2]):
+        samples = depth_chain[:, :, index]
+        median = np.nanpercentile(samples, 50, axis=0)
+        low = np.nanpercentile(samples, 16, axis=0)
+        high = np.nanpercentile(samples, 84, axis=0)
+        asymmetric = np.vstack((median - low, high - median)) * 1e6
+        precision = 0.5 * np.sum(asymmetric, axis=0)
+        figures.append(
+            plot_spectrum_precision(
+                wavelengths,
+                median * 1e6,
+                precision,
+                f"{filename}_0{index}",
+                instrument_label=str(filename),
+                asymmetric_depth_err=asymmetric,
+            )
+        )
+    return figures[0] if len(figures) == 1 else figures
 
-    fig = plt.figure(figsize=(10, 8))
-    colors = plt.cm.viridis(np.linspace(0, 1, n_planets))
+def _summary_channel_trend(
+    t,
+    map_params,
+    index,
+    detrend_type,
+    gp_trend=None,
+    spot_trend=None,
+    spot_trend2=None,
+    jump_trend=None,
+    exp_trend=None,
+):
+    t = np.asarray(t, dtype=float)
+    shifted = t - np.nanmin(t)
+    c = _first_value(map_params.get("c", 1.0), index)
+    if "gp_spectroscopic" in detrend_type:
+        trend = np.full_like(t, c)
+        if "linear" in detrend_type:
+            trend += _first_value(map_params.get("v", 0.0), index) * shifted
+        if "quadratic" in detrend_type:
+            trend += _first_value(map_params.get("v2", 0.0), index) * shifted**2
+        return trend + _first_value(map_params["A_gp"], index) * np.asarray(gp_trend)
+    if detrend_type == "2spot_spectroscopic":
+        return (
+            c
+            + _first_value(map_params["A_spot"], index) * np.asarray(spot_trend)
+            + _first_value(map_params["A_spot2"], index) * np.asarray(spot_trend2)
+        )
+    if "spot_spectroscopic" in detrend_type:
+        trend = c + _first_value(map_params["A_spot"], index) * np.asarray(spot_trend)
+        if "linear" in detrend_type:
+            trend += _first_value(map_params.get("v", 0.0), index) * shifted
+        if "quadratic" in detrend_type:
+            trend += _first_value(map_params.get("v2", 0.0), index) * shifted**2
+        if "explinear" in detrend_type and exp_trend is not None:
+            trend += _first_value(map_params["A"], index) * np.asarray(exp_trend)
+        if "linear_discontinuity" in detrend_type:
+            trend += _first_value(map_params["A_jump"], index) * np.asarray(jump_trend)
+        return trend
+    if detrend_type == "explinear_spectroscopic":
+        return (
+            c
+            + _first_value(map_params.get("v", 0.0), index) * shifted
+            + _first_value(map_params["A"], index) * np.asarray(exp_trend)
+        )
+    if detrend_type == "linear_discontinuity_spectroscopic":
+        return (
+            c
+            + _first_value(map_params.get("v", 0.0), index) * shifted
+            + _first_value(map_params["A_jump"], index) * np.asarray(jump_trend)
+        )
+    if detrend_type == "linear_discontinuity":
+        return (
+            c
+            + _first_value(map_params.get("v", 0.0), index) * shifted
+            + np.where(
+                t > _first_value(map_params["t_jump"], index),
+                _first_value(map_params["jump"], index),
+                0.0,
+            )
+        )
+    return _simple_channel_trend(t, map_params, index, detrend_type)
 
-    for i in range(n_planets):
-        plt.figure()
-        planet_depth_chain = depth_chain[:, :, i]
-        depth_median = np.percentile(planet_depth_chain, 50, axis=0)
-        depth_16 = np.percentile(planet_depth_chain, 16, axis=0)
-        depth_84 = np.percentile(planet_depth_chain, 84, axis=0)
-
-        y_err = [depth_median - depth_16, depth_84 - depth_median]
-
-        plt.errorbar(wavelengths, depth_median * 1e6,
-                     yerr=np.array(y_err) * 1e6,
-                     fmt='o', mfc='k', mec='k', ecolor='k', label=f'Planet {i + 1}')
-
-        plt.xlabel("Wavelength (µm)")
-        plt.ylabel("Depth (ppm)")
-        plt.savefig(filename+f'_0{i}', dpi=200)
-        plt.close()
-    return fig
 
 def plot_wavelength_offset_summary(
-    t, indiv_y, jitter, wavelengths, map_params, transit_params,
-    filename, detrend_type='linear', use_hours=True, residual_scale=2.0,
-    gp_trend=None, spot_trend=None, spot_trend2=None, jump_trend=None,
-    exp_trend=None
+    t,
+    indiv_y,
+    jitter,
+    wavelengths,
+    map_params,
+    transit_params,
+    filename,
+    detrend_type="linear",
+    use_hours=True,
+    residual_scale=2.0,
+    gp_trend=None,
+    spot_trend=None,
+    spot_trend2=None,
+    jump_trend=None,
+    exp_trend=None,
 ):
-    import numpy as np
-    import matplotlib.pyplot as plt
-
-    num_lcs = indiv_y.shape[0]
-
-    # --- choose up to 10 curves across wavelength, sort by wavelength ---
-    if num_lcs > 10:
-        min_wl, max_wl = wavelengths.min(), wavelengths.max()
-        target_wls = np.linspace(min_wl, max_wl, 10)
-        indices = [np.argmin(np.abs(wavelengths - wl)) for wl in target_wls]
-        indices = np.unique(indices)
+    """Write the wavelength-offset light-curve and residual summary."""
+    apply_publication_style()
+    t = np.asarray(t, dtype=float)
+    data = np.asarray(indiv_y, dtype=float)
+    wavelengths = np.asarray(wavelengths, dtype=float)
+    count = data.shape[0]
+    if count > 10:
+        targets = np.linspace(np.nanmin(wavelengths), np.nanmax(wavelengths), 10)
+        indices = np.unique([np.nanargmin(np.abs(wavelengths - value)) for value in targets])
     else:
-        indices = np.arange(num_lcs)
+        indices = np.arange(count)
     indices = indices[np.argsort(wavelengths[indices])]
-    selected_lcs = len(indices)
+    selected = len(indices)
 
-    # --- time relative to t0 (hours like the paper) ---
-    t0_ref = float(np.atleast_1d(map_params["t0"])[0]) # Center on first planet
-    t_centered = (t - t0_ref) * (24.0 if use_hours else 1.0)
-    t_unit = "hours" if use_hours else "days"
+    t0 = _first_value(map_params["t0"])
+    scale = 24.0 if use_hours else 1.0
+    x = (t - t0) * scale
+    unit = "hr" if use_hours else "d"
+    selected_rors = np.asarray(map_params["rors"])[indices]
+    spacing_rors = selected_rors if selected_rors.ndim == 1 else selected_rors[:, 0]
+    depths = np.asarray(spacing_rors, dtype=float) ** 2
+    depth_median = max(float(np.nanmedian(depths)), 1e-5)
+    depth_max = max(float(np.nanmax(depths)), depth_median)
+    step = 0.5 * depth_median
+    offsets = np.arange(selected) * step
+    colors = related_accent_colors(str(filename), selected)
 
-    # --- colors ---
-    norm = plt.Normalize(wavelengths[indices].min(), wavelengths[indices].max())
-    cmap = plt.cm.turbo
-    colors = cmap(norm(wavelengths[indices]))
+    fig, (ax_data, ax_residual) = plt.subplots(
+        1,
+        2,
+        figsize=(10.8, max(5.2, 0.58 * selected + 1.0)),
+        gridspec_kw={"width_ratios": [2, 1], "wspace": 0.08},
+        sharey=True,
+    )
+    marker_style = {
+        "linestyle": "none",
+        "marker": "o",
+        "ms": 2.8,
+        "mfc": "white",
+        "mew": 1.1,
+        "alpha": 0.85,
+        "rasterized": True,
+    }
+    for position, index in enumerate(indices):
+        offset = offsets[position]
+        transit = _single_curve_transit_signal(t, map_params, transit_params, index)
+        trend = _summary_channel_trend(
+            t,
+            map_params,
+            index,
+            detrend_type,
+            gp_trend=gp_trend,
+            spot_trend=spot_trend,
+            spot_trend2=spot_trend2,
+            jump_trend=jump_trend,
+            exp_trend=exp_trend,
+        )
+        model = transit + trend
+        residual = data[index] - model
+        color = colors[position]
+        ax_data.plot(
+            x,
+            data[index] - offset,
+            color=color,
+            mec=color,
+            **marker_style,
+        )
+        ax_data.plot(x, model - offset, color=MODEL_COLOR, lw=1.4, zorder=3)
+        baseline = 1.0 - offset
+        ax_residual.plot(
+            x,
+            baseline + residual_scale * residual,
+            color=color,
+            mec=color,
+            **marker_style,
+        )
+        ax_residual.axhline(
+            baseline, color=ZERO_LINE_COLOR, ls="--", lw=1.0, zorder=0
+        )
 
-    # --- depths & vertical spacing ---
-    all_rors = np.asarray(map_params['rors'])[indices]
-    # Use first planet's depths for spacing if multi-planet
-    rors_for_spacing = all_rors if all_rors.ndim == 1 else all_rors[:, 0]
-    depths = rors_for_spacing**2
-    depth_med = float(np.nanmedian(depths))
-    depth_max = float(np.nanmax(depths))
-    step = 0.5 * depth_med
-    offsets = np.arange(selected_lcs) * step
+    top = 1.0 + 0.15 * depth_max
+    bottom = np.nanmin(1.0 - offsets - depths) - 0.10 * depth_max
+    ax_data.set_ylim(bottom, top)
+    for ax in (ax_data, ax_residual):
+        ax.set_xlim(np.nanmin(x), np.nanmax(x))
+        ax.set_xlabel(f"Time from Mid-Transit [{unit}]")
+        style_axis(ax)
+    ax_data.set_ylabel("Normalized Flux + Offset")
+    ax_residual.tick_params(labelleft=False)
+    add_instrument_stamp(ax_data, str(filename), fontsize=14)
+    fig.align_ylabels((ax_data, ax_residual))
+    save_figure(fig, filename)
+    return fig
 
-    # --- figure: 2/3 model, 1/3 residuals ---
-    fig, (ax1, ax2) = plt.subplots(
-        1, 2,
-        figsize=(12, 0.9 + 0.6 * selected_lcs),
-        gridspec_kw={'width_ratios': [2, 1]},
-        sharey=True
+
+def _plot_limb_panel(ax, wavelength, wavelength_err, median, err_lo, err_hi, color, label=None):
+    ax.plot(wavelength, median, color=color, lw=1.9, zorder=2)
+    ax.errorbar(
+        wavelength,
+        median,
+        xerr=wavelength_err,
+        yerr=np.vstack((err_lo, err_hi)),
+        color=color,
+        ecolor=ERRORBAR_COLOR,
+        label=label,
+        zorder=3,
+        **DATA_MARKER_STYLE,
     )
 
-    for ax in (ax1, ax2):
-       # ax.spines['top'].set_visible(False)
-       # ax.spines['right'].set_visible(False)
-        ax.tick_params(labelsize=9)
 
+def plot_harmonica_limb_spectra(limb_df, filename, instrument_label=None):
+    """Write the three-panel neutral-index Harmonica limb spectrum figure."""
+    apply_publication_style()
+    wavelength = np.asarray(limb_df["wavelength"], dtype=float)
+    wavelength_err = np.asarray(
+        limb_df.get("wavelength_err", _infer_half_widths(wavelength)), dtype=float
+    )
+    color = accent_color_for_label(instrument_label or str(filename))
+    fig = plt.figure(figsize=(8.8, 7.6))
+    grid = fig.add_gridspec(2, 2, height_ratios=[1.35, 1.0], hspace=0.23, wspace=0.10)
+    ax_total = fig.add_subplot(grid[0, :])
+    ax_one = fig.add_subplot(grid[1, 0])
+    ax_two = fig.add_subplot(grid[1, 1], sharey=ax_one)
 
-    # --- per-curve plotting ---
-    for i, idx in enumerate(indices):
-        yoff = offsets[i]
-        rors_i_all_planets = np.atleast_1d(map_params['rors'][idx])
-        u_i = np.asarray(map_params['u'][idx])
-
-        model_transit = _single_curve_transit_signal(t, map_params, transit_params, idx)
-
-        # Detrend model
-        trend = np.ones_like(t)
-        if detrend_type != 'none':
-            c_i = map_params['c'][idx]
-            
-            if 'gp_spectroscopic' in detrend_type:
-                trend_parametric = c_i
-                if 'linear' in detrend_type and 'v' in map_params:
-                    trend_parametric += map_params['v'][idx] * (t - np.min(t))
-                if 'quadratic' in detrend_type and 'v2' in map_params:
-                     trend_parametric += map_params['v2'][idx] * (t - np.min(t))**2
-                
-                trend = trend_parametric + map_params['A_gp'][idx] * gp_trend
-            
-            elif detrend_type == '2spot_spectroscopic':
-                trend = c_i + map_params['A_spot'][idx] * spot_trend + map_params['A_spot2'][idx] * spot_trend2
-            elif 'spot_spectroscopic' in detrend_type:
-                trend = c_i + map_params['A_spot'][idx] * spot_trend
-                t_shift = t - np.min(t)
-                if 'linear' in detrend_type and 'v' in map_params:
-                    trend += map_params['v'][idx] * t_shift
-                if 'quadratic' in detrend_type and 'v2' in map_params:
-                    trend += map_params['v2'][idx] * t_shift**2
-                if 'explinear' in detrend_type and 'A' in map_params and 'tau' in map_params:
-                    trend += map_params['A'][idx] * np.exp(-t_shift / map_params['tau'][idx])
-                if 'linear_discontinuity_spectroscopic' in detrend_type:
-                    trend += map_params['A_jump'][idx] * jump_trend
-            
-            elif detrend_type == 'explinear_spectroscopic':
-                t_shift = t - np.min(t)
-                trend = c_i + map_params['v'][idx] * t_shift + map_params['A'][idx] * exp_trend
-            elif detrend_type == 'linear_discontinuity_spectroscopic':
-                v_i = map_params.get('v', [0.0]*num_lcs)[idx]
-                t_shift = t - np.min(t)
-                trend = c_i + v_i * t_shift + map_params['A_jump'][idx] * jump_trend
-
-            else:
-                v_i = map_params.get('v', [0.0]*num_lcs)[idx]
-                t_shift = t - np.min(t)
-                if detrend_type == 'linear':
-                    trend = c_i + v_i * t_shift
-                elif detrend_type == 'linear_discontinuity':
-                    t_jump_i = map_params['t_jump'][idx]
-                    jump_i = map_params['jump'][idx]
-                    trend = c_i + v_i * t_shift + np.where(t > t_jump_i, jump_i, 0.0)
-                elif detrend_type == 'explinear':
-                    A_i = map_params['A'][idx]; tau_i = map_params['tau'][idx]
-                    trend = c_i + v_i * t_shift + A_i * np.exp(-t_shift / tau_i)
-                elif detrend_type == 'spot':
-                    spot_amp = map_params['spot_amp'][idx]
-                    spot_mu  = map_params['spot_mu'][idx]
-                    spot_sig = map_params['spot_sigma'][idx]
-                    trend = c_i + v_i * t_shift + spot_amp * np.exp(-0.5 * (t - spot_mu)**2 / spot_sig**2)
-                elif detrend_type == '2spot':
-                    spot_amp = map_params['spot_amp'][idx]
-                    spot_mu  = map_params['spot_mu'][idx]
-                    spot_sig = map_params['spot_sigma'][idx]
-                    spot_amp2 = map_params['spot_amp2'][idx]
-                    spot_mu2  = map_params['spot_mu2'][idx]
-                    spot_sig2 = map_params['spot_sigma2'][idx]
-                    spot_term = spot_amp * np.exp(-0.5 * (t - spot_mu)**2 / spot_sig**2)
-                    spot_term2 = spot_amp2 * np.exp(-0.5 * (t - spot_mu2)**2 / spot_sig2**2)
-                    trend = c_i + v_i * t_shift + spot_term + spot_term2
-                elif detrend_type == 'quadratic':
-                    v2_i = map_params['v2'][idx]
-                    trend = c_i + v_i * t_shift + v2_i * t_shift**2
-                elif detrend_type in {'quadratic_spot', 'quadratic+spot'}:
-                    v2_i = map_params['v2'][idx]
-                    spot_amp = map_params['spot_amp'][idx]
-                    spot_mu = map_params['spot_mu'][idx]
-                    spot_sig = map_params['spot_sigma'][idx]
-                    trend = c_i + v_i * t_shift + v2_i * t_shift**2 + spot_amp * np.exp(-0.5 * (t - spot_mu)**2 / spot_sig**2)
-                # Fallback
-                else:
-                    trend = c_i + v_i * t_shift
-
-        full_model = model_transit + trend
-        resid = indiv_y[idx] - full_model
-
-        # --- Left: data + model (same color) ---
-        ax1.scatter(t_centered, indiv_y[idx] - yoff, s=3, alpha=0.45,
-                    color=colors[i], rasterized=True)
-        ax1.plot(t_centered, full_model - yoff, '-', lw=1, color=colors[i])
-
-        ax1.text(
-            t_centered.min(), 1.0 - yoff + 0.001,
-            f"{wavelengths[idx]:.2f} μm",
-            ha='left', va='bottom', color=colors[i], fontsize=12, fontweight='bold'
+    _plot_limb_panel(
+        ax_total,
+        wavelength,
+        wavelength_err,
+        np.asarray(limb_df["depth_total_area_median"], dtype=float),
+        np.asarray(limb_df["depth_total_area_err_lo"], dtype=float),
+        np.asarray(limb_df["depth_total_area_err_hi"], dtype=float),
+        color,
+        label="Limb-averaged spectrum",
+    )
+    _plot_limb_panel(
+        ax_one,
+        wavelength,
+        wavelength_err,
+        np.asarray(limb_df["depth_one_median"], dtype=float),
+        np.asarray(limb_df["depth_one_err_lo"], dtype=float),
+        np.asarray(limb_df["depth_one_err_hi"], dtype=float),
+        color,
+    )
+    _plot_limb_panel(
+        ax_two,
+        wavelength,
+        wavelength_err,
+        np.asarray(limb_df["depth_two_median"], dtype=float),
+        np.asarray(limb_df["depth_two_err_lo"], dtype=float),
+        np.asarray(limb_df["depth_two_err_hi"], dtype=float),
+        color,
+    )
+    ax_total.set_ylabel("Transit Depth [ppm]")
+    ax_one.set_ylabel("Transit Depth [ppm]")
+    ax_one.set_xlabel("Wavelength [$\\mu$m]")
+    ax_two.set_xlabel("Wavelength [$\\mu$m]")
+    ax_one.set_title("Terminator One", fontsize=15, pad=9)
+    ax_two.set_title("Terminator Two", fontsize=15, pad=9)
+    for ax, tag in zip((ax_total, ax_one, ax_two), ("a", "b", "c")):
+        ax.text(
+            0.025,
+            0.95,
+            tag,
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontweight="bold",
+            fontsize=15,
         )
+        style_axis(ax)
+    one_low = np.asarray(limb_df["depth_one_median"], dtype=float) - np.asarray(
+        limb_df["depth_one_err_lo"], dtype=float
+    )
+    one_high = np.asarray(limb_df["depth_one_median"], dtype=float) + np.asarray(
+        limb_df["depth_one_err_hi"], dtype=float
+    )
+    two_low = np.asarray(limb_df["depth_two_median"], dtype=float) - np.asarray(
+        limb_df["depth_two_err_lo"], dtype=float
+    )
+    two_high = np.asarray(limb_df["depth_two_median"], dtype=float) + np.asarray(
+        limb_df["depth_two_err_hi"], dtype=float
+    )
+    low = float(np.nanmin(np.concatenate((one_low, two_low))))
+    high = float(np.nanmax(np.concatenate((one_high, two_high))))
+    padding = 0.08 * (high - low) if high > low else max(1.0, 0.02 * abs(high))
+    ax_one.set_ylim(low - padding, high + padding)
+    ax_two.tick_params(labelleft=False)
+    ax_total.legend(loc="best", frameon=False)
+    fig.align_ylabels((ax_total, ax_one))
+    save_figure(fig, filename)
+    return fig
 
-        # --- Right: residuals ONLY ---
-        baseline = 1.0 - yoff
-        y_res_plot = baseline + residual_scale * resid   # <- no model added
-        ax2.scatter(t_centered, y_res_plot, s=3, alpha=0.45,
-                    color=colors[i], rasterized=True)
-        ax2.axhline(baseline, color=colors[i], linestyle='--', lw=0.8, alpha=0.8)
-        ax2.text(
-            t_centered.min(), baseline + 0.15 * step,
-            f"Error: {jitter[idx]*1e6:.0f} ppm",
-            ha='right', va='bottom', color=colors[i], fontsize=12, fontweight='bold'
+
+def plot_harmonica_transmission_strings(
+    theta,
+    radius_curves,
+    reference_radius,
+    filename,
+    instrument_label=None,
+):
+    """Plot wavelength-channel transmission strings in the house style."""
+    apply_publication_style()
+    theta = np.asarray(theta, dtype=float)
+    curves = np.atleast_2d(np.asarray(radius_curves, dtype=float))
+    color = accent_color_for_label(instrument_label or str(filename))
+    fig, ax = plt.subplots(figsize=(6.8, 6.2))
+    for curve in curves:
+        ax.plot(
+            curve * np.cos(theta),
+            curve * np.sin(theta),
+            color="0.78",
+            lw=0.9,
+            alpha=0.6,
+            zorder=1,
         )
+    median_curve = np.nanmedian(curves, axis=0)
+    ax.plot(
+        median_curve * np.cos(theta),
+        median_curve * np.sin(theta),
+        color=color,
+        lw=1.9,
+        label="Median transmission string",
+        zorder=3,
+    )
+    reference = float(np.nanmedian(np.asarray(reference_radius, dtype=float)))
+    ax.plot(
+        reference * np.cos(theta),
+        reference * np.sin(theta),
+        color=ZERO_LINE_COLOR,
+        ls="--",
+        lw=1.4,
+        label="Reference circle",
+        zorder=2,
+    )
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_xlabel("x / stellar radii")
+    ax.set_ylabel("y / stellar radii")
+    add_instrument_stamp(ax, instrument_label or str(filename), fontsize=14)
+    ax.legend(loc="lower left", frameon=False)
+    style_axis(ax)
+    save_figure(fig, filename)
+    return fig
 
 
-    # --- dynamic y-lims (LEFT): one depth above, one below lowest min ---
-    y_top_left = 1.0 + depth_max * 0.15
-    lowest_min_left = np.min(1.0 - offsets - depths)
-    y_bot_left = lowest_min_left - depth_max * 0.1
-    ax1.set_ylim(y_bot_left, y_top_left)
-    
-
-    # labels & x-lims
-    for ax in (ax1, ax2):
-        ax.set_xlim(t_centered.min(), t_centered.max())
-        ax.set_xlabel(f"time from transit center [{t_unit}]", fontsize=10)
-    ax1.set_ylabel("relative flux (+ offset)", fontsize=10)
-
-    ax1.spines['right'].set_visible(False)
-    ax2.spines['left'].set_visible(False)
-    ax2.tick_params(labelleft=False)  # keep y only on the left
-    plt.subplots_adjust(wspace=0.02)  # almost touching
-    
-    ax1.yaxis.set_major_locator(plt.MaxNLocator(integer=False, prune=None))
-    
-    plt.tight_layout()
-    plt.savefig(filename, dpi=300, bbox_inches='tight')
+def plot_harmonica_transmission_posterior(
+    theta,
+    posterior_radius_curves,
+    median_radius_curve,
+    reference_radius,
+    filename,
+    instrument_label=None,
+):
+    """Plot posterior transmission strings with one coloured median curve."""
+    apply_publication_style()
+    theta = np.asarray(theta, dtype=float)
+    curves = np.atleast_2d(np.asarray(posterior_radius_curves, dtype=float))
+    median_curve = np.asarray(median_radius_curve, dtype=float)
+    color = accent_color_for_label(instrument_label or str(filename))
+    fig, ax = plt.subplots(figsize=(6.8, 6.2))
+    for curve in curves:
+        ax.plot(
+            curve * np.cos(theta),
+            curve * np.sin(theta),
+            color="0.72",
+            lw=0.8,
+            alpha=0.08,
+            zorder=1,
+        )
+    ax.plot(
+        median_curve * np.cos(theta),
+        median_curve * np.sin(theta),
+        color=color,
+        lw=1.9,
+        label="Median transmission string",
+        zorder=3,
+    )
+    reference = float(reference_radius)
+    ax.plot(
+        reference * np.cos(theta),
+        reference * np.sin(theta),
+        color=ZERO_LINE_COLOR,
+        ls="--",
+        lw=1.4,
+        label="Reference circle",
+        zorder=2,
+    )
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_xlabel("x / stellar radii")
+    ax.set_ylabel("y / stellar radii")
+    add_instrument_stamp(ax, instrument_label or str(filename), fontsize=14)
+    ax.legend(loc="lower left", frameon=False)
+    style_axis(ax)
+    save_figure(fig, filename)
     return fig

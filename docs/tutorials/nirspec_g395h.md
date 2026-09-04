@@ -57,18 +57,12 @@ resolution:
 flags:
   vmap_chunk: 40
   detrending_type: quadratic     # c + vt + v2 t^2.
-  interpolate_trend: false
-  interpolate_ld: false
   ld_prior: stellarprior
   need_lowres: true
   ld_profile: power2
   spectro_sampler: independent_nuts
-  spectro_mass_matrix: laplace
-  spectro_jitter_prior: lognormal
-  whitelight_geometry_estimator: posterior_median
   mask_start: cut_phase_to_transit
   mask_end: cut_phase_to_transit
-  mask_integrations_start: null
 outlier_clip:
   whitelight_sigma: 5
   spectroscopic_sigma: 5

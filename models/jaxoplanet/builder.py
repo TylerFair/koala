@@ -344,9 +344,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
         MUS, P = _prepare_power2_poly()
 
     print(f"Building jaxoplanet whitelight model: detrend='{detrend_type}', "
-          f"ld='{ld_mode}', ld_profile='{ld_profile}', "
-          f"param_method='{param_method}', kernel='{selected_kernel}' "
-          f"for {n_planets} planets")
+          f"ld='{ld_mode}', ld_profile='{ld_profile}' for {n_planets} planets")
 
     def _whitelight_model(t, yerr, y=None, prior_params=None,
                           ld_center=None, ld_scale=None, ld_low=None,
@@ -790,10 +788,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         MUS_LD, P_LD = _prepare_power2_poly()
 
     print(f"Building jaxoplanet vectorized model: detrend='{detrend_type}', "
-          f"ld='{ld_mode}', trend='{trend_mode}', "
-          f"param_method='{param_method}', kernel='{selected_kernel}', "
-          f"jitter_prior='{jitter_prior}' "
-          f"for {n_planets} planets")
+          f"ld='{ld_mode}', ld_profile='{ld_profile}' for {n_planets} planets")
 
     def _vectorized_model(t, yerr, y=None, mu_duration=None, mu_t0=None, mu_b=None,
                           mu_depths=None, PERIOD=None, trend_fixed=None,

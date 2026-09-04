@@ -20,22 +20,13 @@ variants:
     overrides:
       input_dir: /scratch/midway3/tfairnington/FITS
       flags: {ld_prior: uniform, ld_profile: quadratic,
-              ld_uniform_basis: uplus_uminus, detrending_type: linear}
-      sampling:
-        whitelight_ld_parameterization: coefficients
-        spectro_ld_parameterization: coefficients
+              detrending_type: linear}
   - name: sing_quadratic_linear
     overrides:
       input_dir: /scratch/midway3/tfairnington/FITS
       stellar: {ld_mu_min: 0.2}
-      flags: {ld_prior: sing, ld_profile: quadratic, detrending_type: linear,
-              ld_sing_offset: fit}
-      sampling:
-        whitelight_ld_parameterization: coefficients
-        spectro_ld_parameterization: coefficients
-        sing_offset_calibration_warmup: 150
-        sing_offset_calibration_samples: 300
-        sing_offset_calibration_min_ess: 100
+      flags: {ld_prior: sing, ld_profile: quadratic,
+              detrending_type: linear}
 ```
 
 Keep the sampling policy identical: independent NUTS, a Laplace metric, lognormal jitter, and a minimum depth ESS of 400. Changing both the scientific assumption and sampler policy would make the comparison difficult to interpret.

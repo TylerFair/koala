@@ -61,7 +61,7 @@ def _sample_harmonica_delta_r(mean_radius, frac_sigma=0.1):
 
 
 def _sample_harmonica_half_area(mean_radius, frac_sigma=0.1):
-    """Sample a bounded physical morning/evening half-area contrast.
+    """Sample a bounded physical contrast between two indexed half-areas.
 
     Locally, ``q ~= (4/pi) * (a1/a0)``. Scaling the truncated-normal prior by
     the same factor therefore preserves the small-asymmetry prior implied by
@@ -94,11 +94,11 @@ def _sample_harmonica_half_area(mean_radius, frac_sigma=0.1):
     a0 = numpyro.deterministic("a0", a0)
     a1 = numpyro.deterministic("a1", a1)
     total = area_radius**2
-    evening = total * (1.0 + q)
-    morning = total * (1.0 - q)
+    depth_one = total * (1.0 - q)
+    depth_two = total * (1.0 + q)
     numpyro.deterministic("depth_total_area", total)
-    numpyro.deterministic("depth_evening", evening)
-    numpyro.deterministic("depth_morning", morning)
+    numpyro.deterministic("depth_one", depth_one)
+    numpyro.deterministic("depth_two", depth_two)
     return {"a0": a0, "a1": a1}
 
 
@@ -211,7 +211,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='free',
 
     print(f"Building harmonica whitelight model: detrend='{detrend_type}', "
           f"ld='{ld_mode}' ({ld_profile}), max_order={max_harmonic_order}, "
-          f"param_method='{param_method}' for {n_planets} planets")
+          f"for {n_planets} planets")
 
     def _whitelight_model(t, yerr, y=None, prior_params=None):
         trend_parameterization = resolve_whitelight_trend_parameterization(

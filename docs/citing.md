@@ -49,7 +49,7 @@ For an explinear fit, add:
 
 For Harmonica, add:
 
-> We modeled the planet boundary as an odd-cosine transmission string and report full-circle-equivalent depths for its evening/leading and morning/trailing half-areas.
+> We modeled the planet boundary as an odd-cosine transmission string and report full-circle-equivalent depths for two indexed angular half-areas. We supplied the physical hemisphere mapping separately from the fit.
 
 ## Software roles
 

@@ -125,7 +125,10 @@ def test_native_power2_builder_skips_polynomial_projection(monkeypatch, capsys):
         param_method="duration",
         jaxoplanet_kernel="native_power2",
     )
-    assert "kernel='native_power2'" in capsys.readouterr().out
+    assert callable(model)
+    builder_log = capsys.readouterr().out
+    assert "kernel=" not in builder_log
+    assert "param_method=" not in builder_log
 
     times = jnp.linspace(-0.09, 0.09, 31, dtype=jnp.float64)
     yerr = jnp.full((2, times.size), 1.5e-4, dtype=jnp.float64)
@@ -155,7 +158,10 @@ def test_native_power2_builder_skips_polynomial_projection(monkeypatch, capsys):
         param_method="duration",
         jaxoplanet_kernel="native_power2",
     )
-    assert "kernel='native_power2'" in capsys.readouterr().out
+    assert callable(white_model)
+    white_builder_log = capsys.readouterr().out
+    assert "kernel=" not in white_builder_log
+    assert "param_method=" not in white_builder_log
     white_trace = numpyro.handlers.trace(
         numpyro.handlers.seed(white_model, rng_seed=123)
     ).get_trace(

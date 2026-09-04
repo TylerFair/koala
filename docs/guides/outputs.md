@@ -131,13 +131,15 @@ The checkpoint filename identifies its global channel range. Do not concatenate 
 
 ## Harmonica limb CSV
 
-The file contains wavelength metadata, `planet_index`, schema version, and a convention string. It reports median, lower error, and upper error for:
+The file contains wavelength metadata, `planet_index`, schema version, and an angular convention string. Schema v3 reports neutral terminator indices because the fit alone cannot identify physical morning/evening hemispheres. The `one`/`two` index is arbitrary; mapping it to physical hemispheres requires external orbital-geometry knowledge. It reports median, lower error, and upper error for:
 
-- `depth_morning` and `depth_evening` in ppm;
+- `rp_one` and `rp_two` in stellar-radius units;
+
+- `depth_one` and `depth_two` in ppm;
 
 - `depth_total_area` in ppm;
 
-- leading and trailing endpoint depths in ppm;
+- terminator-one and terminator-two endpoint radii and depths;
 
 - `asymmetry_coefficient` and `endpoint_delta_r` in stellar-radius units;
 
@@ -145,7 +147,7 @@ The file contains wavelength metadata, `planet_index`, schema version, and a con
 
 - every active `a1`, `a3`, and `a5` coefficient.
 
-Optional `bandpass_min` and `bandpass_max` columns appear when supplied. The NPZ companion contains `sample_axes="draw,wavelength"`, units, wavelengths, `a0`, active coefficients, and draw-level depth products.
+Optional `bandpass_min` and `bandpass_max` columns appear when supplied. The NPZ companion contains `sample_axes="draw,wavelength"`, units, wavelengths, `a0`, active coefficients, and draw-level radius/depth products. When loading a schema-v2 CSV, the compatibility reader maps old morning columns to index one and old evening columns to index two in memory; users must supply any physical hemisphere interpretation.
 
 ## Numbered figures
 

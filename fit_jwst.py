@@ -10,6 +10,9 @@ import re
 import time
 import atexit
 import tempfile
+import difflib
+import warnings
+import logging
 from contextlib import contextmanager
 from functools import partial
 
@@ -18,7 +21,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-from scipy.stats import norm
 import numpy as np
 import numpyro
 import numpyro.distributions as dist
@@ -30,17 +32,27 @@ mpl.rcParams['axes.linewidth'] = 1.7
 from jaxoplanet.light_curves import limb_dark_light_curve
 from jaxoplanet.orbits.transit import TransitOrbit
 from exotic_ld import StellarLimbDarkening
-from plotting import plot_map_fits, plot_map_residuals, plot_transmission_spectrum, plot_wavelength_offset_summary
+from plotting import (
+    plot_harmonica_limb_spectra,
+    plot_harmonica_transmission_posterior,
+    plot_harmonica_transmission_strings,
+    plot_map_fits,
+    plot_map_residuals,
+    plot_noise_binning_from_csv,
+    plot_transmission_spectrum,
+    plot_wavelength_offset_summary,
+    plot_whitelight_curve,
+    plot_whitelight_residuals,
+    plot_whitelight_summary,
+)
 import argparse
 import yaml
 import jaxopt
 import arviz as az
 from createdatacube import SpectroData, process_spectroscopy_data
 from matplotlib.widgets import Slider, Button, TextBox
-import matplotlib.gridspec as gridspec
 from jaxoplanet.experimental import calc_poly_coeffs
 import tinygp
-import matplotlib.cm as cm
 from models.common import _to_f64, _tree_to_f64, get_I_power2, compute_transit_model_auto
 from models.ld_parameterization import Power2LinearTransform, Power2MaxtedTransform
 from models.sing_ld import (
@@ -85,6 +97,221 @@ TREND_PARAMS = [
 ]
 
 LD_PRIOR_MODES = {'fixed', 'widegaussian', 'informed', 'uniform'}
+
+
+# This is the authoritative configuration surface for ``flags``.  Keep every
+# accepted key in exactly one tier: PUBLIC values describe the dataset/science
+# model, ADVANCED values are occasionally useful user controls, and INTERNAL
+# values are compatibility-preserving implementation controls.  The expanded
+# families cover keys assembled dynamically by the stage resolvers below.
+FLAG_TIERS = {
+    'public': frozenset({
+        'detrending_type',
+        'jump_guess',
+        'ld_prior',
+        'ld_profile',
+        'mask_end',
+        'mask_start',
+        'spot_amp',
+        'spot_amp2',
+        'spot_amp_2',
+        'spot_center',
+        'spot_center2',
+        'spot_center_2',
+        'spot_width',
+        'spot_width2',
+        'spot_width_2',
+        't_jump_guess',
+    }),
+    'advanced': frozenset({
+        'analysis_stage',
+        'harmonica_max_order',
+        'harmonica_spectro_fit_jitter',
+        'harmonica_spectro_odd_frac_sigma',
+        'harmonica_spectro_parameterization',
+        'need_lowres',
+        'random_seed',
+        'spectro_chunk_size',
+        'spectro_sampler',
+        'transit_engine',
+        'vmap_chunk',
+    }),
+    'internal': (
+        frozenset({
+            'bin_dt_seconds',
+            'bin_method',
+            'bin_spectroscopic',
+            'bin_time',
+            'bin_whitelight',
+            'chunk_mode',
+            'chunk_parallel_job_count',
+            'chunk_parallel_job_index',
+            'compile_box',
+            'fix_ld',
+            'harmonica_wl_parameterization',
+            'highres_batch_plan',
+            'highres_width_selection',
+            'hr_custom_ld_path',
+            'hr_custom_ld_smooth_window',
+            'interpolate_ld',
+            'interpolate_trend',
+            'jax_compilation_cache_dir',
+            'jax_persistent_cache',
+            'jaxoplanet_kernel',
+            'ld_sing_calibration_min_ess',
+            'ld_sing_calibration_samples',
+            'ld_sing_calibration_warmup',
+            'ld_sing_offset',
+            'ld_sing_offset_path',
+            'ld_uniform_basis',
+            'ld_uniform_coefficient_bounds',
+            'lowres_batch_plan',
+            'lowres_width_selection',
+            'param_method',
+            'phase_timers',
+            'plots',
+            'pre_nuts_gradient_diagnostic',
+            'save_whitelight_trace',
+            'spectro_batch_plan',
+            'spectro_fixed_timescale_trends',
+            'spectro_gradient_diagnostic',
+            'spectro_gradient_diagnostic_strict',
+            'spectro_hmc_num_steps',
+            'spectro_hmc_trajectory_jitter',
+            'spectro_jitter_prior',
+            'spectro_jitter_prior_center',
+            'spectro_jitter_prior_scale',
+            'spectro_laplace_fd_batch_size',
+            'spectro_laplace_fd_relative_step',
+            'spectro_laplace_fuse_program',
+            'spectro_laplace_hessian_method',
+            'spectro_laplace_map_decrement_tolerance',
+            'spectro_laplace_max_tree_depth',
+            'spectro_laplace_start_at_map',
+            'spectro_laplace_target_accept',
+            'spectro_laplace_trust_radius',
+            'spectro_laplace_warmup',
+            'spectro_ld_parameterization',
+            'spectro_mass_matrix',
+            'spectro_max_divergences',
+            'spectro_max_tree_depth',
+            'spectro_min_depth_ess',
+            'spectro_sampling_mode',
+            'spectro_target_accept',
+            'spectro_width_selection',
+            'step_width_days',
+            'step_width_mode',
+            'transit_window_optimization',
+            'trend_inference',
+            'trend_prior_means',
+            'trend_prior_scales',
+            'whitelight_2spot_ordering',
+            'whitelight_complex_trend_adaptive',
+            'whitelight_dense_mass',
+            'whitelight_failfast_ess',
+            'whitelight_geometry_estimator',
+            'whitelight_laplace_hessian_method',
+            'whitelight_laplace_map_iterations',
+            'whitelight_laplace_max_tree_depth',
+            'whitelight_laplace_target_accept',
+            'whitelight_laplace_trust_radius',
+            'whitelight_laplace_warmup',
+            'whitelight_ld_parameterization',
+            'whitelight_log_likelihood_batch_size',
+            'whitelight_mass_matrix',
+            'whitelight_max_divergences',
+            'whitelight_max_extra_blocks',
+            'whitelight_min_ess',
+            'whitelight_trend_parameterization',
+        })
+        | frozenset(
+            f'{stage}_{suffix}'
+            for stage in ('whitelight', 'lowres', 'highres')
+            for suffix in ('num_warmup', 'num_samples')
+        )
+        | frozenset(
+            f'{stage}_{suffix}'
+            for stage in (
+                'lowres', 'highres',
+                'harmonica_wl', 'harmonica_lr', 'harmonica_hr',
+            )
+            for suffix in (
+                'max_tree_depth',
+                'target_accept',
+                'regularize_mass_matrix',
+                'dense_mass',
+                'mass_matrix',
+                'laplace_warmup',
+                'laplace_target_accept',
+                'laplace_max_tree_depth',
+                'laplace_start_at_map',
+                'laplace_hessian_method',
+                'laplace_fd_relative_step',
+                'laplace_fd_batch_size',
+                'laplace_fuse_program',
+                'laplace_trust_radius',
+                'laplace_map_decrement_tolerance',
+                'hmc_num_steps',
+                'hmc_trajectory_jitter',
+            )
+        )
+        | frozenset(
+            f'{prefix}_{suffix}'
+            for prefix in (
+                'laplace_is', 'spectro_laplace_is',
+                'lowres_laplace_is', 'highres_laplace_is',
+            )
+            for suffix in (
+                'output',
+                'num_draws',
+                'rounds',
+                'draw_chunk_size',
+                'student_df',
+                'scale_inflation',
+                'wide_fraction',
+                'wide_scale',
+                'map_maxiter',
+                'map_tol',
+                'trust_radius',
+                'khat_threshold',
+                'min_ess',
+                'min_ess_fraction',
+                'min_imh_acceptance',
+                'imh_thin',
+                'fallback',
+                'force',
+            )
+        )
+    ),
+}
+
+PUBLIC_FLAGS = FLAG_TIERS['public']
+ADVANCED_FLAGS = FLAG_TIERS['advanced']
+INTERNAL_FLAGS = FLAG_TIERS['internal']
+KNOWN_FLAGS = frozenset().union(*FLAG_TIERS.values())
+
+
+class UnknownFlagWarning(UserWarning):
+    """A ``flags`` entry is not consumed by the current configuration API."""
+
+
+def _validate_flag_keys(flags):
+    """Warn for ignored flag names while preserving legacy configuration use."""
+    if not hasattr(flags, 'keys'):
+        return
+    candidates = sorted(KNOWN_FLAGS)
+    for key in flags.keys():
+        if key in KNOWN_FLAGS:
+            continue
+        closest = difflib.get_close_matches(
+            str(key), candidates, n=1, cutoff=0.0
+        )[0]
+        warnings.warn(
+            f"Unknown flags key {key!r}; did you mean {closest!r}? "
+            "The unknown key is not used.",
+            UnknownFlagWarning,
+            stacklevel=2,
+        )
 
 
 # Opt-in observational timing only. This deliberately does not split or
@@ -303,7 +530,8 @@ def _resolve_ld_prior_mode(flags, stellar_cfg, ld_profile):
     resolved = alias_map[mode]
     if legacy_fix_ld and resolved != 'fixed':
         print(
-            f"[LD prior] flags.ld_prior='{resolved}' overrides legacy flags.fix_ld={legacy_fix_ld}.",
+            f"[LD prior] explicit mode {resolved!r} overrides the legacy "
+            "fixed-limb-darkening switch.",
             flush=True,
         )
     if resolved == 'informed':
@@ -847,49 +1075,19 @@ def jax_bin_lightcurve(time, flux, duration, points_per_transit=20):
     return binned_time, binned_flux
     
 def plot_noise_binning_robust(residuals, dt_seconds, outpath, title=None):
-    """Robust RMS binning plot using MAD-based sigma + MC white noise bands."""
-    residuals = np.array(residuals)
-    if residuals.ndim == 1:
-        residuals = residuals[None, :]
-    n_channels, n_times = residuals.shape
-    dt = float(dt_seconds)
-
-    all_measured, all_expected, all_betas = [], [], []
-    ref_bins_min = None
-    for i in range(n_channels):
-        beta, bins_min, meas, exp = calculate_beta_metrics(residuals[i], dt)
-        all_measured.append(meas)
-        all_expected.append(exp)
-        all_betas.append(beta)
-        if ref_bins_min is None:
-            ref_bins_min = bins_min
-
-    median_ch = np.argmin(np.abs(np.array(all_betas) - np.median(all_betas)))
-    _, rms_lo1, rms_hi1, rms_lo2, rms_hi2 = run_beta_monte_carlo(residuals[median_ch], dt, n_sims=500)
-
-    measured_stack = np.array(all_measured)
-    expected_stack = np.array(all_expected)
-    med_measured = np.nanmedian(measured_stack, axis=0) * 1e6
-    p16_measured = np.nanpercentile(measured_stack, 16, axis=0) * 1e6
-    p84_measured = np.nanpercentile(measured_stack, 84, axis=0) * 1e6
-    med_expected = np.nanmedian(expected_stack, axis=0) * 1e6
-    beta_median = np.median(all_betas)
-
-    plt.figure(figsize=(7, 5))
-    plt.loglog(ref_bins_min, med_expected, 'k--', lw=1.5, label=r'Theory $1/\sqrt{N}$')
-    plt.fill_between(ref_bins_min, rms_lo2 * 1e6, rms_hi2 * 1e6, color='gray', alpha=0.2, label=r'White Noise ($2\sigma$)')
-    plt.fill_between(ref_bins_min, rms_lo1 * 1e6, rms_hi1 * 1e6, color='gray', alpha=0.4, label=r'White Noise ($1\sigma$)')
-    plt.loglog(ref_bins_min, med_measured, color='teal', lw=2, marker='o', ms=4, label=f'Median $\\beta$={beta_median:.2f}')
-    plt.fill_between(ref_bins_min, p16_measured, p84_measured, color='teal', alpha=0.2)
-    plt.xlabel('Bin Size (minutes)')
-    plt.ylabel('RMS (ppm)')
-    if title:
-        plt.title(title)
-    plt.legend(fontsize=8)
-    plt.grid(True, which='both', alpha=0.2)
-    plt.tight_layout()
-    plt.savefig(outpath, dpi=200)
-    plt.close()
+    """Write robust RMS-vs-bin-size statistics in the shared house style."""
+    del dt_seconds, title  # Retained in the public signature for compatibility.
+    bins, measured, p16, p84, expected, _ = _noise_binning_stats(residuals)
+    noise_df = pd.DataFrame(
+        {
+            "bin_size_points": bins,
+            "measured_rms": measured * 1e6,
+            "measured_rms_p16": p16 * 1e6,
+            "measured_rms_p84": p84 * 1e6,
+            "expected_white_rms": expected * 1e6,
+        }
+    )
+    plot_noise_binning_from_csv(noise_df, outpath, instrument_label=str(outpath))
     print(f"Saved robust noise-binning plot to {outpath}")
 
 
@@ -3205,7 +3403,7 @@ def get_samples_chunked(
         done = sum(existing)
         print(
             f"Parallel chunk job complete: {done}/{len(all_chunk_ranges)} checkpoint files present. "
-            "Run again with chunk_mode='combine' after all chunks are finished."
+            "Run the compatibility combine step after all chunks are finished."
         )
         return None
 
@@ -3614,8 +3812,8 @@ def get_samples_channel_plan(
 
     if chunk_mode == "parallel":
         print(
-            "Parallel planned-batch job complete. Run with chunk_mode='combine' "
-            "after all batch jobs finish."
+            "Parallel planned-batch job complete. Run the compatibility "
+            "combine step after all batch jobs finish."
         )
         return None
     return restore_sample_mapping(
@@ -4111,10 +4309,6 @@ def _run_sampling_stage(
                 )
         padded_kwargs["likelihood_mask"] = likelihood_mask
         model_kwargs = padded_kwargs
-        print(
-            f"Compile box cadence bucket: {original_cadences} -> {t.shape[0]} "
-            "with an exact likelihood mask."
-        )
     laplace_is_kwargs = dict(laplace_is_kwargs or {})
     laplace_is_force = bool(laplace_is_kwargs.pop('laplace_is_force', False))
     stage_ld_mode = (
@@ -4129,8 +4323,7 @@ def _run_sampling_stage(
         print(
             "Laplace-IS disabled for "
             f"ld_mode={stage_ld_mode!r}: routing the whole chunk through "
-            "finite-difference Laplace-metric independent NUTS. Set "
-            "laplace_is_force: true to override."
+            "finite-difference Laplace-metric independent NUTS."
         )
         sampler_backend = 'independent_nuts'
         nuts_kwargs = dict(nuts_kwargs or {})
@@ -5040,10 +5233,14 @@ def _coerce_wavelength_axis(wavelengths, wavelength_err=None):
     return wl, wl_err
 
 HARMONICA_INIT_ODD_COEFF = 1e-4
-HARMONICA_LIMB_PRODUCT_SCHEMA_VERSION = 2
+HARMONICA_LIMB_PRODUCT_SCHEMA_VERSION = 3
 HARMONICA_LIMB_PRODUCT_CONVENTION = (
-    "theta=0:evening/leading;theta=pi:morning/trailing"
+    "one:theta=[pi/2,3pi/2],endpoint=pi;"
+    "two:theta=[-pi/2,pi/2],endpoint=0;"
+    "indices_require_external_geometry_mapping"
 )
+_HARMONICA_LIMB_LOGGER = logging.getLogger(__name__)
+_LEGACY_LIMB_SCHEMA_WARNING_EMITTED = False
 # Full catalogue of possible odd harmonic names (used by helper functions).
 # The active subset is set per-run via the config's harmonica_max_order.
 from models.harmonica.core import (
@@ -5207,21 +5404,21 @@ def _sum_harmonica_odd_samples(coeff_samples):
 
 
 def _harmonica_limb_product_samples(a0_samples, coeff_samples):
-    """Return Catwoman-comparable limb depths and endpoint diagnostics.
+    """Return neutral-index half-area radii, depths, and endpoint diagnostics.
 
     Harmonica's odd-cosine transmission string is
 
     ``r(theta) = a0 + sum_n a_n cos(n theta)``.
 
-    Harmonica measures ``theta`` from the orbital-velocity direction, so
-    ``evening``/``leading`` denotes the half centred on ``theta=0`` and
-    ``morning``/``trailing`` the opposite half centred on ``theta=pi``.
-    Each representative limb depth is twice that half's area divided by pi,
-    so it is directly comparable to the depth of a circular semicircle.  For
-    N_c=1 this gives
+    Index one is the interval centred on ``theta=pi`` and index two is the
+    interval centred on ``theta=0``.  These indices deliberately make no
+    morning/evening or leading/trailing claim; that assignment requires an
+    external orbital-geometry convention.  Each representative depth is
+    twice that half's area divided by pi, so it is directly comparable to the
+    depth of a circular semicircle.  For N_c=1 this gives
 
-    ``D_evening = a0**2 + a1**2/2 + 4*a0*a1/pi`` and
-    ``D_morning = a0**2 + a1**2/2 - 4*a0*a1/pi``.
+    ``D_two = a0**2 + a1**2/2 + 4*a0*a1/pi`` and
+    ``D_one = a0**2 + a1**2/2 - 4*a0*a1/pi``.
 
     The implementation also handles the supported higher odd cosine terms
     exactly.  Orthogonality makes their squared contributions add in
@@ -5253,17 +5450,23 @@ def _harmonica_limb_product_samples(a0_samples, coeff_samples):
 
     total_area_depth = a0**2 + 0.5 * odd_square_sum
     half_area_contrast = (4.0 / np.pi) * a0 * area_asymmetry_coefficient
-    leading_endpoint_radius = a0 + odd_sum
-    trailing_endpoint_radius = a0 - odd_sum
+    two_endpoint_radius = a0 + odd_sum
+    one_endpoint_radius = a0 - odd_sum
+    depth_one = total_area_depth - half_area_contrast
+    depth_two = total_area_depth + half_area_contrast
 
     return {
-        "depth_morning": total_area_depth - half_area_contrast,
-        "depth_evening": total_area_depth + half_area_contrast,
+        "rp_one": np.sqrt(np.maximum(depth_one, 0.0)),
+        "rp_two": np.sqrt(np.maximum(depth_two, 0.0)),
+        "depth_one": depth_one,
+        "depth_two": depth_two,
         "depth_total_area": total_area_depth,
-        "depth_leading_endpoint": leading_endpoint_radius**2,
-        "depth_trailing_endpoint": trailing_endpoint_radius**2,
+        "rp_one_endpoint": one_endpoint_radius,
+        "rp_two_endpoint": two_endpoint_radius,
+        "depth_one_endpoint": one_endpoint_radius**2,
+        "depth_two_endpoint": two_endpoint_radius**2,
         "asymmetry_coefficient": area_asymmetry_coefficient,
-        "endpoint_delta_r": leading_endpoint_radius - trailing_endpoint_radius,
+        "endpoint_delta_r": two_endpoint_radius - one_endpoint_radius,
     }
 
 
@@ -5459,6 +5662,90 @@ def _harmonica_cosi_from_b(b, a_rs, ecc, omega):
     )
 
 
+def _add_rp_summary_from_depth(frame, depth_name, rp_name):
+    """Derive dimensionless radius summaries from depth summaries in ppm."""
+    depth_median = np.asarray(frame[f"{depth_name}_median"], dtype=float) / 1e6
+    depth_low = np.asarray(frame[f"{depth_name}_err_lo"], dtype=float) / 1e6
+    depth_high = np.asarray(frame[f"{depth_name}_err_hi"], dtype=float) / 1e6
+    rp_median = np.sqrt(np.maximum(depth_median, 0.0))
+    frame[f"{rp_name}_median"] = rp_median
+    frame[f"{rp_name}_err_lo"] = rp_median - np.sqrt(
+        np.maximum(depth_median - depth_low, 0.0)
+    )
+    frame[f"{rp_name}_err_hi"] = np.sqrt(
+        np.maximum(depth_median + depth_high, 0.0)
+    ) - rp_median
+
+
+def load_harmonica_limb_dataframe(source):
+    """Load a schema-v3 limb CSV, or normalize a schema-v2 CSV in memory.
+
+    In schema v3, ``one`` and ``two`` are arbitrary angular indices. Mapping
+    them to morning/evening or leading/trailing requires external knowledge of
+    the system's orbital geometry. For legacy v2, morning maps to index one and
+    evening maps to index two, exactly as documented; the source file is never
+    modified.
+    """
+    global _LEGACY_LIMB_SCHEMA_WARNING_EMITTED
+    if isinstance(source, pd.DataFrame):
+        frame = source.copy()
+    else:
+        frame = pd.read_csv(source)
+    if "limb_product_schema_version" not in frame:
+        raise ValueError("Limb product is missing limb_product_schema_version.")
+    versions = np.unique(
+        np.asarray(frame["limb_product_schema_version"], dtype=int)
+    )
+    if versions.size != 1:
+        raise ValueError(f"Limb product mixes schema versions: {versions.tolist()}.")
+    version = int(versions[0])
+    if version == 2:
+        if not _LEGACY_LIMB_SCHEMA_WARNING_EMITTED:
+            _HARMONICA_LIMB_LOGGER.warning(
+                "Reading legacy Harmonica limb-product schema v2: mapping "
+                "depth_morning_* to depth_one_* and depth_evening_* to "
+                "depth_two_* in memory. The source file is unchanged."
+            )
+            _LEGACY_LIMB_SCHEMA_WARNING_EMITTED = True
+        legacy_mappings = {
+            "depth_morning": "depth_one",
+            "depth_evening": "depth_two",
+            "depth_trailing_endpoint": "depth_one_endpoint",
+            "depth_leading_endpoint": "depth_two_endpoint",
+        }
+        for old_name, new_name in legacy_mappings.items():
+            for suffix in ("median", "err_lo", "err_hi"):
+                old_column = f"{old_name}_{suffix}"
+                if old_column in frame and f"{new_name}_{suffix}" not in frame:
+                    frame[f"{new_name}_{suffix}"] = frame[old_column]
+        for depth_name, rp_name in (
+            ("depth_one", "rp_one"),
+            ("depth_two", "rp_two"),
+            ("depth_one_endpoint", "rp_one_endpoint"),
+            ("depth_two_endpoint", "rp_two_endpoint"),
+        ):
+            if (
+                f"{depth_name}_median" in frame
+                and f"{rp_name}_median" not in frame
+            ):
+                _add_rp_summary_from_depth(frame, depth_name, rp_name)
+        return frame
+    if version != HARMONICA_LIMB_PRODUCT_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported Harmonica limb-product schema v{version}; "
+            f"this reader supports v2 and v{HARMONICA_LIMB_PRODUCT_SCHEMA_VERSION}."
+        )
+    required = {
+        f"{name}_{suffix}"
+        for name in ("rp_one", "rp_two", "depth_one", "depth_two", "depth_total_area")
+        for suffix in ("median", "err_lo", "err_hi")
+    }
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"Schema-v3 limb product is missing columns: {missing}.")
+    return frame
+
+
 def build_harmonica_limb_dataframe(wavelengths, wavelength_err, rors_samples, harmonic_samples,
                                    bandpass_min=None, bandpass_max=None, planet_index=0):
     wl_arr, wl_err_arr = _coerce_wavelength_axis(wavelengths, wavelength_err)
@@ -5482,15 +5769,27 @@ def build_harmonica_limb_dataframe(wavelengths, wavelength_err, rors_samples, ha
         name: _harmonica_percentile_summary(values)
         for name, values in depth_products_ppm.items()
     }
-    morning_med, morning_lo, morning_hi = product_summaries["depth_morning"]
-    evening_med, evening_lo, evening_hi = product_summaries["depth_evening"]
+    one_med, one_lo, one_hi = product_summaries["depth_one"]
+    two_med, two_lo, two_hi = product_summaries["depth_two"]
     total_med, total_lo, total_hi = product_summaries["depth_total_area"]
-    leading_endpoint_med, leading_endpoint_lo, leading_endpoint_hi = (
-        product_summaries["depth_leading_endpoint"]
+    one_endpoint_med, one_endpoint_lo, one_endpoint_hi = (
+        product_summaries["depth_one_endpoint"]
     )
-    trailing_endpoint_med, trailing_endpoint_lo, trailing_endpoint_hi = (
-        product_summaries["depth_trailing_endpoint"]
+    two_endpoint_med, two_endpoint_lo, two_endpoint_hi = (
+        product_summaries["depth_two_endpoint"]
     )
+    rp_summaries = {
+        name: _harmonica_percentile_summary(limb_products[name])
+        for name in ("rp_one", "rp_two", "rp_one_endpoint", "rp_two_endpoint")
+    }
+    rp_one_med, rp_one_lo, rp_one_hi = rp_summaries["rp_one"]
+    rp_two_med, rp_two_lo, rp_two_hi = rp_summaries["rp_two"]
+    rp_one_endpoint_med, rp_one_endpoint_lo, rp_one_endpoint_hi = rp_summaries[
+        "rp_one_endpoint"
+    ]
+    rp_two_endpoint_med, rp_two_endpoint_lo, rp_two_endpoint_hi = rp_summaries[
+        "rp_two_endpoint"
+    ]
     a0_depth_med, a0_depth_lo, a0_depth_hi = _harmonica_percentile_summary(
         a0_depth_samp
     )
@@ -5511,23 +5810,35 @@ def build_harmonica_limb_dataframe(wavelengths, wavelength_err, rors_samples, ha
         "planet_index": int(planet_index),
         "limb_product_schema_version": HARMONICA_LIMB_PRODUCT_SCHEMA_VERSION,
         "limb_product_convention": HARMONICA_LIMB_PRODUCT_CONVENTION,
-        # Catwoman-comparable, full-circle-equivalent depths from each half-area.
-        "depth_morning_median": morning_med,
-        "depth_morning_err_lo": morning_lo,
-        "depth_morning_err_hi": morning_hi,
-        "depth_evening_median": evening_med,
-        "depth_evening_err_lo": evening_lo,
-        "depth_evening_err_hi": evening_hi,
+        # Neutral indices: assigning physical hemisphere names requires external geometry.
+        "rp_one_median": rp_one_med,
+        "rp_one_err_lo": rp_one_lo,
+        "rp_one_err_hi": rp_one_hi,
+        "rp_two_median": rp_two_med,
+        "rp_two_err_lo": rp_two_lo,
+        "rp_two_err_hi": rp_two_hi,
+        "depth_one_median": one_med,
+        "depth_one_err_lo": one_lo,
+        "depth_one_err_hi": one_hi,
+        "depth_two_median": two_med,
+        "depth_two_err_lo": two_lo,
+        "depth_two_err_hi": two_hi,
         "depth_total_area_median": total_med,
         "depth_total_area_err_lo": total_lo,
         "depth_total_area_err_hi": total_hi,
-        # Extrema at theta=0 and theta=pi retained as explicit diagnostics.
-        "depth_leading_endpoint_median": leading_endpoint_med,
-        "depth_leading_endpoint_err_lo": leading_endpoint_lo,
-        "depth_leading_endpoint_err_hi": leading_endpoint_hi,
-        "depth_trailing_endpoint_median": trailing_endpoint_med,
-        "depth_trailing_endpoint_err_lo": trailing_endpoint_lo,
-        "depth_trailing_endpoint_err_hi": trailing_endpoint_hi,
+        # Index-one endpoint is theta=pi; index-two endpoint is theta=0.
+        "rp_one_endpoint_median": rp_one_endpoint_med,
+        "rp_one_endpoint_err_lo": rp_one_endpoint_lo,
+        "rp_one_endpoint_err_hi": rp_one_endpoint_hi,
+        "rp_two_endpoint_median": rp_two_endpoint_med,
+        "rp_two_endpoint_err_lo": rp_two_endpoint_lo,
+        "rp_two_endpoint_err_hi": rp_two_endpoint_hi,
+        "depth_one_endpoint_median": one_endpoint_med,
+        "depth_one_endpoint_err_lo": one_endpoint_lo,
+        "depth_one_endpoint_err_hi": one_endpoint_hi,
+        "depth_two_endpoint_median": two_endpoint_med,
+        "depth_two_endpoint_err_lo": two_endpoint_lo,
+        "depth_two_endpoint_err_hi": two_endpoint_hi,
         "asymmetry_coefficient_median": asymmetry_med,
         "asymmetry_coefficient_err_lo": asymmetry_lo,
         "asymmetry_coefficient_err_hi": asymmetry_hi,
@@ -5638,51 +5949,11 @@ def save_harmonica_limb_products(
         )
 
     wl_arr = limb_df["wavelength"].values
-    wl_spacing = np.nanmedian(np.diff(wl_arr)) if wl_arr.size > 1 else 0.0
-    offset = 0.4 * wl_spacing if wl_arr.size > 1 else max(
-        0.01,
-        0.15 * float(np.nanmax(limb_df["wavelength_err"].values) if limb_df["wavelength_err"].values.size else 0.0),
+    plot_harmonica_limb_spectra(
+        limb_df,
+        limb_spectrum_path,
+        instrument_label=title_prefix,
     )
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.errorbar(
-        wl_arr - offset,
-        limb_df["depth_evening_median"].values,
-        yerr=[limb_df["depth_evening_err_lo"].values, limb_df["depth_evening_err_hi"].values],
-        fmt="o",
-        ms=3,
-        lw=1,
-        mfc="red",
-        mec="k",
-        mew=1.2,
-        ecolor="red",
-        capsize=0,
-        label="Evening limb (leading half-area equivalent)",
-    )
-    ax.errorbar(
-        wl_arr + offset,
-        limb_df["depth_morning_median"].values,
-        yerr=[limb_df["depth_morning_err_lo"].values, limb_df["depth_morning_err_hi"].values],
-        fmt="o",
-        ms=3,
-        lw=1,
-        mfc="blue",
-        mec="k",
-        mew=1.2,
-        ecolor="blue",
-        capsize=0,
-        label="Morning limb (trailing half-area equivalent)",
-    )
-    ax.set_xlabel("Wavelength [$\\mu$m]", fontsize=12)
-    ax.set_ylabel("Transit Depth [ppm]", fontsize=12)
-    ax.set_title(
-        f"{title_prefix} - Representative Evening/Morning Limb Spectra",
-        fontsize=13,
-    )
-    ax.legend(fontsize=10)
-    plt.tight_layout()
-    plt.savefig(limb_spectrum_path, dpi=200)
-    plt.close(fig)
     print(f"Saved limb spectra plot to {limb_spectrum_path}")
 
     theta = np.linspace(-np.pi, np.pi, 1000)
@@ -5696,39 +5967,21 @@ def save_harmonica_limb_products(
     }
 
     if wl_arr.size > 1:
-        colours = plt.cm.RdYlBu(np.linspace(0.15, 0.85, len(wl_arr)))
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.set_aspect("equal", "datalim")
+        radius_curves = []
         for i in range(len(wl_arr)):
             r_i = _harmonica_r_vector_from_values(
                 a0_med[i],
                 {name: values[i] for name, values in coeff_med.items()},
             )
             ht.set_planet_transmission_string(r_i.copy())
-            rp = ht.get_planet_transmission_string(theta)
-            ax.plot(
-                rp * np.cos(theta),
-                rp * np.sin(theta),
-                color=colours[i],
-                lw=1.4,
-                label=f"{wl_arr[i]:.3f} $\\mu$m",
-            )
-        r0_ref = float(np.nanmedian(a0_med))
-        ax.plot(
-            r0_ref * np.cos(theta),
-            r0_ref * np.sin(theta),
-            c="#b9b9b9",
-            ls="--",
-            lw=0.8,
-            label="Reference circle",
+            radius_curves.append(ht.get_planet_transmission_string(theta))
+        plot_harmonica_transmission_strings(
+            theta,
+            radius_curves,
+            a0_med,
+            transmission_strings_path,
+            instrument_label=title_prefix,
         )
-        ax.set_xlabel("x / stellar radii", fontsize=12)
-        ax.set_ylabel("y / stellar radii", fontsize=12)
-        ax.set_title(f"{title_prefix} - Transmission Strings", fontsize=13)
-        ax.legend(fontsize=7, loc="lower left", ncol=2)
-        plt.tight_layout()
-        plt.savefig(transmission_strings_path, dpi=200)
-        plt.close(fig)
         print(f"Saved transmission string plot to {transmission_strings_path}")
     else:
         posterior_strings_path = transmission_strings_path
@@ -5737,8 +5990,7 @@ def save_harmonica_limb_products(
         i_show = len(wl_arr) // 2
         n_draw = min(200, a0_samp.shape[0])
         draw_idx = np.random.choice(a0_samp.shape[0], n_draw, replace=False)
-        fig, ax = plt.subplots(figsize=(10, 7))
-        ax.set_aspect("equal", "datalim")
+        posterior_radius_curves = []
         for j in draw_idx:
             r_sample = _harmonica_r_vector_from_values(
                 a0_samp[j, i_show],
@@ -5748,12 +6000,8 @@ def save_harmonica_limb_products(
                 },
             )
             ht.set_planet_transmission_string(r_sample.copy())
-            rp = ht.get_planet_transmission_string(theta)
-            ax.plot(
-                rp * np.cos(theta),
-                rp * np.sin(theta),
-                c=cm.BuGn(0.8),
-                alpha=0.05,
+            posterior_radius_curves.append(
+                ht.get_planet_transmission_string(theta)
             )
         r_med = _harmonica_r_vector_from_values(
             a0_med[i_show],
@@ -5761,33 +6009,14 @@ def save_harmonica_limb_products(
         )
         ht.set_planet_transmission_string(r_med.copy())
         rp_med = ht.get_planet_transmission_string(theta)
-        ax.plot(
-            rp_med * np.cos(theta),
-            rp_med * np.sin(theta),
-            c=cm.inferno(0.1),
-            lw=2.0,
-            label="Median transmission string",
+        plot_harmonica_transmission_posterior(
+            theta,
+            posterior_radius_curves,
+            rp_med,
+            a0_med[i_show],
+            posterior_strings_path,
+            instrument_label=title_prefix,
         )
-        ax.plot(
-            a0_med[i_show] * np.cos(theta),
-            a0_med[i_show] * np.sin(theta),
-            c="#b9b9b9",
-            ls="--",
-            label="Reference circle",
-        )
-        ax.set_xlabel("x / stellar radii", fontsize=13)
-        ax.set_ylabel("y / stellar radii", fontsize=13)
-        if wl_arr.size > 1:
-            ax.set_title(
-                f"{title_prefix} - Recovered transmission string ({wl_arr[i_show]:.3f} $\\mu$m)",
-                fontsize=13,
-            )
-        else:
-            ax.set_title(f"{title_prefix} - Recovered transmission string", fontsize=13)
-        ax.legend(loc="lower left", fontsize=12)
-        plt.tight_layout()
-        plt.savefig(posterior_strings_path, dpi=200)
-        plt.close(fig)
         print(f"Saved transmission string posterior plot to {posterior_strings_path}")
 
     return limb_df
@@ -6000,6 +6229,8 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    flags = cfg.get('flags', {})
+    _validate_flag_keys(flags)
     instrument = cfg['instrument']
     if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'NIRSPEC/G140H', 'NIRSPEC/G235H']:
         nrs = cfg['nrs']
@@ -6008,7 +6239,6 @@ def main():
     
     planet_cfg = cfg['planet']
     stellar_cfg = cfg['stellar']
-    flags = cfg.get('flags', {})
     # Production defaults validated by the 2026-09 acceleration campaign.
     # setdefault preserves every explicit legacy/user selection.
     is_prism = instrument == 'NIRSPEC/PRISM'
@@ -6065,10 +6295,6 @@ def main():
         else:
             jax.config.update('jax_compilation_cache_dir', compilation_cache_dir)
             jax.config.update('jax_persistent_cache_min_compile_time_secs', 1)
-            print(
-                "Persistent JAX compilation cache enabled at "
-                f"{compilation_cache_dir}."
-            )
     resolution = cfg.get('resolution', None)
     pixels = cfg.get('pixels', None)
     
@@ -6262,8 +6488,8 @@ def main():
     elif spectro_sampling_mode == 'independent':
         vmap_chunk_size = 1
         print(
-            "flags.spectro_sampling_mode='independent' without flags.vmap_chunk; "
-            "defaulting spectroscopic chunk size to 1 channel per job."
+            "Legacy independent spectroscopic routing is using one channel "
+            "per job because no resident width was supplied."
         )
     if vmap_chunk_size is not None and vmap_chunk_size != 'auto' and vmap_chunk_size < 1:
         raise ValueError("flags.vmap_chunk must resolve to an integer >= 1.")
@@ -7626,21 +7852,6 @@ def main():
                     "Sampler-input dump white-light max_tree_depth override: "
                     f"{wl_nuts_kwargs['max_tree_depth']}"
                 )
-            if transit_engine == 'harmonica':
-                print(
-                    "Using harmonica white-light NUTS settings: "
-                    f"dense_mass={wl_nuts_kwargs['dense_mass']}, "
-                    f"regularize_mass_matrix={wl_nuts_kwargs['regularize_mass_matrix']}, "
-                    f"max_tree_depth={wl_nuts_kwargs['max_tree_depth']}, "
-                    f"target_accept_prob={wl_nuts_kwargs['target_accept_prob']}"
-                )
-            else:
-                print(
-                    "NUTS settings: "
-                    f"dense_mass={wl_nuts_kwargs['dense_mass']}, "
-                    f"regularize_mass_matrix={wl_nuts_kwargs['regularize_mass_matrix']}, "
-                    f"target_accept_prob={wl_nuts_kwargs['target_accept_prob']}"
-                )
             print(data.wavelengths_hr)
             mcmc = numpyro.infer.MCMC(
                 numpyro.infer.NUTS(whitelight_model_for_run, **wl_nuts_kwargs),
@@ -8081,19 +8292,25 @@ def main():
             wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
             wl_mad_mask = jnp.abs(wl_residual - jnp.nanmedian(wl_residual)) > whitelight_sigma * wl_sigma
             wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
-            spec_good_mask = (~wl_mad_mask if len(wl_mad_mask) == len(data.time)
-                              else np.ones(len(data.time), dtype=bool))
-
-            plt.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
-            plt.scatter(data.wl_time, data.wl_flux, s=6, c='k', zorder=1, alpha=0.5)
-
-            plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
-            plt.close()
-
-            plt.scatter(data.wl_time, wl_residual, s=6, c='k')
-            plt.title('WL Pre-outlier rejection residual')
-            plt.savefig(f"{output_dir}/12_{instrument_full_str}_whitelightresidual.png")
-            plt.close()
+            plot_whitelight_curve(
+                data.wl_time,
+                data.wl_flux,
+                data.wl_flux_err,
+                wl_transit_model,
+                f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png",
+                instrument_label=instrument_full_str,
+                t0_reference=bestfit_params_wl['t0'][0],
+                outlier_mask=wl_mad_mask,
+            )
+            plot_whitelight_residuals(
+                data.wl_time,
+                wl_residual,
+                data.wl_flux_err,
+                f"{output_dir}/12_{instrument_full_str}_whitelightresidual.png",
+                instrument_label=instrument_full_str,
+                t0_reference=bestfit_params_wl['t0'][0],
+                outlier_mask=wl_mad_mask,
+            )
 
             t_masked = data.wl_time[~wl_mad_mask]
             f_masked = data.wl_flux[~wl_mad_mask]
@@ -8114,8 +8331,6 @@ def main():
                 mu_masked = mu[~wl_mad_mask] 
                 total_trend_at_points = mu_masked - planet_model_masked
                 detrended_flux = f_masked - (total_trend_at_points - 1.0)
-                gp_stochastic_at_masked = gp_stochastic_component[~wl_mad_mask]
-
             else:
                 trend = _trend_from_params_np(
                     detrending_type,
@@ -8124,77 +8339,31 @@ def main():
                 )
                 detrended_flux = f_masked - trend + 1.0
 
-            plt.scatter(t_masked, detrended_flux, c='k', s=6, alpha=0.5)
-            plt.title(f'Detrended WLC: Sigma {round(wl_sigma_post_clip*1e6)} PPM')
-            plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
-            plt.close()
-
             transit_only_model = compute_transit_model_auto(masked_model_eval_params_wl, t_masked) + 1.0
-            residuals_detrended = detrended_flux - transit_only_model 
-
-            
-            fig = plt.figure(figsize=(26, 12))
-            
-            gs = gridspec.GridSpec(3, 4, figure=fig, 
-                                height_ratios=[1, 1, 1.5], 
-                                width_ratios=[1, 1, 1.3, 1.3], 
-                                hspace=0.3, wspace=0.25)
-
-            duration_bin = jnp.max(jnp.atleast_1d(bestfit_params_wl['duration']))
-            b_time, b_flux = jax_bin_lightcurve(jnp.array(data.wl_time), 
-                                                jnp.array(data.wl_flux), 
-                                                duration_bin)
-            
-            b_time_det, b_flux_det = jax_bin_lightcurve(jnp.array(t_masked), 
-                                                        jnp.array(detrended_flux), 
-                                                        duration_bin)
-            b_time_det, b_res_det = jax_bin_lightcurve(jnp.array(t_masked), 
-                                            jnp.array(residuals_detrended), 
-                                            duration_bin)
-            bin_style = dict(c='darkviolet', edgecolors='darkslateblue', s=40,  zorder=10, label='Binned (8/dur)')
-
-            ax1 = fig.add_subplot(gs[0, 0])
-            ax1.scatter(data.wl_time, data.wl_flux, c='k', s=4, alpha=0.2)
-            ax1.scatter(np.array(b_time), np.array(b_flux), **bin_style)
-            ax1.set_title('Raw Light Curve', fontsize=14)
-            ax1.set_ylabel('Flux', fontsize=12)
-            ax1.tick_params(labelbottom=False)
-
-            ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
-            ax2.scatter(data.wl_time, data.wl_flux, c='k', s=4, alpha=0.2)
-            ax2.scatter(np.array(b_time), np.array(b_flux), **bin_style)
-            ax2.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
-            ax2.set_title('Raw Light Curve + Best-fit Model', fontsize=14)
-            ax2.set_ylabel('Flux', fontsize=12)
-            ax2.tick_params(labelbottom=False)
-
-            gs_nested = gridspec.GridSpecFromSubplotSpec(
-                2, 1, subplot_spec=gs[2, 0], 
-                height_ratios=[2, 1],
-                hspace=0.0
+            wl_flux_err_full = np.broadcast_to(
+                np.asarray(data.wl_flux_err, dtype=float),
+                np.asarray(data.wl_time).shape,
             )
-
-            ax3_top = fig.add_subplot(gs_nested[0], sharex=ax1)
-            ax3_top.scatter(t_masked, detrended_flux, c='k', s=4, alpha=0.2, label='Detrended Data')
-            ax3_top.plot(t_masked, transit_only_model, color="mediumorchid", lw=2, zorder=3, label='Transit Model')
-            ax3_top.scatter(np.array(b_time_det), np.array(b_flux_det), **bin_style)
-            ax3_top.set_ylabel('Normalized Flux', fontsize=12)
-            ax3_top.set_title('Detrended Light Curve', fontsize=14)
-            plt.setp(ax3_top.get_xticklabels(), visible=False)
-
-            ax3_bot = fig.add_subplot(gs_nested[1], sharex=ax3_top)
-            ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='k', s=4, alpha=0.2)
-            ax3_bot.axhline(0, color='mediumorchid', lw=4, zorder=3, linestyle='--')
-            ax3_bot.scatter(np.array(b_time_det), np.array(b_res_det) * 1e6 , **bin_style)
-            ax3_bot.set_ylabel('Res. (ppm)', fontsize=10)
-            ax3_bot.set_xlabel('Time (BJD)', fontsize=12)
+            plot_whitelight_curve(
+                t_masked,
+                detrended_flux,
+                wl_flux_err_full[~np.asarray(wl_mad_mask)],
+                transit_only_model,
+                f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png',
+                instrument_label=instrument_full_str,
+                t0_reference=bestfit_params_wl['t0'][0],
+                flux_label="Detrended Flux",
+            )
 
             dt = np.median(np.diff(data.wl_time)) * 86400 
             residuals_arr = np.array(wl_residual[~wl_mad_mask])
-            beta, bin_sizes_min, measured_rms, expected_rms = calculate_beta_metrics(residuals_arr, dt)
-            mc_betas, rms_lo_1, rms_hi_1, rms_lo_2, rms_hi_2 = run_beta_monte_carlo(residuals_arr, dt, n_sims=500)
+            beta, _, _, _ = calculate_beta_metrics(residuals_arr, dt)
+            mc_betas, _, _, _, _ = run_beta_monte_carlo(
+                residuals_arr, dt, n_sims=500
+            )
 
-            mu_sim, std_sim = norm.fit(mc_betas)
+            mu_sim = float(np.mean(mc_betas))
+            std_sim = float(np.std(mc_betas))
             z_score = (beta - mu_sim) / std_sim
 
             print(f"Beta: {beta:.4f}")
@@ -8203,109 +8372,11 @@ def main():
             print(f"MC Std Dev:    {std_sim:.3f}")
             print(f"Significance:  {z_score:.2f} sigma")
 
-            ax_rms = fig.add_subplot(gs[0:2, 1])
-            ax_rms.loglog(bin_sizes_min, expected_rms * 1e6, 'k--', lw=1.5, label='Theory $1/\sqrt{N}$')
-            ax_rms.fill_between(bin_sizes_min, rms_lo_2 * 1e6, rms_hi_2 * 1e6, color='gray', alpha=0.2, label='White Noise ($2\sigma$)')
-            ax_rms.fill_between(bin_sizes_min, rms_lo_1 * 1e6, rms_hi_1 * 1e6, color='gray', alpha=0.4, label='White Noise ($1\sigma$)')
-            ax_rms.loglog(bin_sizes_min, measured_rms * 1e6, color='teal', lw=2, marker='o', markersize=5, label=f'Data (Beta={beta:.2f})')
-            ax_rms.set_xlabel('Bin Size (minutes)', fontsize=12)
-            ax_rms.set_ylabel('RMS (ppm)', fontsize=12)
-            ax_rms.set_title('Time-Correlated Noise', fontsize=14)
-            ax_rms.grid(True, which="both", alpha=0.2)
-
-            ax_beta = fig.add_subplot(gs[2, 1])
-            n, bins, patches = ax_beta.hist(mc_betas, bins=30, color='silver', alpha=0.6, density=True, label='Simulated White Noise')
-            xmin, xmax = ax_beta.get_xlim()
-            x_plot = np.linspace(xmin, xmax, 100)
-            p_plot = norm.pdf(x_plot, mu_sim, std_sim)
-            ax_beta.plot(x_plot, p_plot, 'k--', linewidth=2, label='Gaussian Fit')
-            ax_beta.axvline(beta, color='teal', lw=3, label=f'Measured: {beta:.2f}')
-            sig_color = 'green' if abs(z_score) < 2.0 else ('orange' if abs(z_score) < 3.0 else 'firebrick')
-            ax_beta.text(0.95, 0.85, f"Significance: {z_score:.1f}$\sigma$", 
-                       transform=ax_beta.transAxes, ha='right', fontsize=14, color=sig_color, fontweight='bold')
-            ax_beta.set_xlabel('Beta Factor', fontsize=12)
-            ax_beta.set_ylabel('Probability Density', fontsize=12)
-            ax_beta.set_title("Beta Significance Test", fontsize=14)
-
-            gs_right = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[:, 2:], wspace=0.05)
-            
-            ax_hr_flux = fig.add_subplot(gs_right[0])
-            ax_hr_res = fig.add_subplot(gs_right[1], sharey=ax_hr_flux) 
-
-            n_hr_bins = data.flux_hr.shape[0]
-            hr_indices = np.linspace(0, n_hr_bins-1, 10, dtype=int)
-            colors = cm.turbo(np.linspace(0, 1, 10))
-            
-            est_depth = np.nanmedian(bestfit_params_wl['depths'])
-            if est_depth < 1e-4: offset_step = 0.0025
-            elif est_depth < 1e-3: offset_step = 0.0075
-            else: offset_step = 0.02
-
-            wl_time_vector = np.array(data.time[spec_good_mask])
-            wl_model_vector_params = _select_transit_eval_params(
+            plot_whitelight_summary(
                 bestfit_params_wl,
-                transit_engine=transit_engine,
-                param_method=param_method,
-                t=wl_time_vector,
-                jaxoplanet_kernel=jaxoplanet_kernel,
-                ld_profile=ld_profile,
+                f'{output_dir}/15_{instrument_full_str}_whitelight_summary.png',
+                instrument_label=instrument_full_str,
             )
-            wl_model_vector = np.array(
-                compute_transit_model_auto(
-                    wl_model_vector_params, jnp.array(wl_time_vector)
-                )
-                + 1.0
-            )
-            time_center = float(bestfit_params_wl['t0'][0])
-            res_zoom_factor = 1.0 
-
-            for idx_i, bin_idx in enumerate(hr_indices):
-                raw_flux_hr = data.flux_hr[bin_idx]
-                flux_hr_masked = raw_flux_hr[spec_good_mask]
-                
-                baseline_norm = np.nanmedian(flux_hr_masked[:50])
-                norm_flux_hr = flux_hr_masked / baseline_norm
-                
-                residuals_hr_check = norm_flux_hr - wl_model_vector
-                
-                mad_ppm = 1.4826 * np.nanmedian(np.abs(residuals_hr_check)) * 1e6
-
-                y_offset = idx_i * offset_step
-                
-                ax_hr_flux.scatter(wl_time_vector - time_center, norm_flux_hr + y_offset, 
-                                 color=colors[idx_i], s=5, alpha=0.6, edgecolors='none')
-                
-                ax_hr_flux.plot(wl_time_vector - time_center, wl_model_vector + y_offset, 
-                              color='dimgray', lw=2.0, alpha=0.3, zorder=2)
-                ax_hr_flux.plot(wl_time_vector - time_center, wl_model_vector + y_offset, 
-                              color=colors[idx_i], lw=1.0, alpha=0.9, linestyle='-', zorder=3)
-                
-                wl_val = data.wavelengths_hr[bin_idx]
-                annotation_y = 1.0 + y_offset + (offset_step * 0.33)
-                ax_hr_flux.text(wl_time_vector.min() - time_center, annotation_y, 
-                              f"{wl_val:.2f} $\mu$m", 
-                              fontsize=9, fontweight='bold', color=colors[idx_i])
-
-                res_plotted = (residuals_hr_check * res_zoom_factor) + 1.0 + y_offset
-                
-                ax_hr_res.scatter(wl_time_vector - time_center, res_plotted, 
-                                color=colors[idx_i], s=5, alpha=0.6, edgecolors='none')
-                
-                ax_hr_res.text(wl_time_vector.min() - time_center, annotation_y, 
-                               f"$\sigma$={int(mad_ppm)} ppm", 
-                               fontsize=9, fontweight='bold', color=colors[idx_i])
-                
-                ax_hr_res.axhline(1.0 + y_offset, color='black', linestyle='--', lw=1, alpha=0.3)
-
-            ax_hr_flux.set_xlabel("Time from Mid-Transit (days)", fontsize=12)
-            ax_hr_res.set_xlabel("Time from Mid-Transit (days)", fontsize=12)
-            
-            ax_hr_flux.set_yticks([])
-            ax_hr_res.set_yticks([])
-            
-            plt.tight_layout()
-            plt.savefig(f'{output_dir}/15_{instrument_full_str}_whitelight_summary.png')
-            plt.close(fig)
 
             transit_only_full = np.asarray(
                 compute_transit_model_auto(model_eval_params_wl, data.wl_time) + 1.0,

@@ -45,6 +45,7 @@ tutorials/soss_order1
 tutorials/nirspec_g395h
 tutorials/prism
 tutorials/harmonica
+tutorials/executed_notebooks
 ```
 
 ```{toctree}

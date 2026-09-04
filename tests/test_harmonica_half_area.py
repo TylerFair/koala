@@ -57,15 +57,15 @@ def test_half_area_depths_are_exact_requested_representative_areas():
     area_radius = jnp.asarray([0.08, 0.10, 0.12, 0.14])
     q = jnp.asarray([-0.4, -0.05, 0.0, 0.4])
     a0, a1 = harmonica_half_area_coefficients_from_area_radius(area_radius, q)
-    total, evening, morning = harmonica_half_area_depths(a0, a1)
+    total, depth_two, depth_one = harmonica_half_area_depths(a0, a1)
 
     expected_total = area_radius**2
     np.testing.assert_allclose(total, expected_total, rtol=3e-14, atol=3e-14)
     np.testing.assert_allclose(
-        evening, expected_total * (1.0 + q), rtol=3e-14, atol=3e-14
+        depth_two, expected_total * (1.0 + q), rtol=3e-14, atol=3e-14
     )
     np.testing.assert_allclose(
-        morning, expected_total * (1.0 - q), rtol=3e-14, atol=3e-14
+        depth_one, expected_total * (1.0 - q), rtol=3e-14, atol=3e-14
     )
 
 
@@ -82,8 +82,8 @@ def test_half_area_numpyro_trace_has_bounded_latent_and_physical_outputs():
         "a0",
         "a1",
         "depth_total_area",
-        "depth_evening",
-        "depth_morning",
+        "depth_one",
+        "depth_two",
     ):
         assert trace[name]["type"] == "deterministic"
         assert trace[name]["value"].shape == area_radius.shape
@@ -99,10 +99,10 @@ def test_half_area_numpyro_trace_has_bounded_latent_and_physical_outputs():
     total = np.asarray(trace["depth_total_area"]["value"])
     np.testing.assert_allclose(total, np.asarray(area_radius) ** 2)
     np.testing.assert_allclose(
-        trace["depth_evening"]["value"], total * (1.0 + q)
+        trace["depth_two"]["value"], total * (1.0 + q)
     )
     np.testing.assert_allclose(
-        trace["depth_morning"]["value"], total * (1.0 - q)
+        trace["depth_one"]["value"], total * (1.0 - q)
     )
 
 

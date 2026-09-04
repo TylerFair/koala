@@ -18,26 +18,19 @@ flags: {detrending_type: linear}
 | Step | `detrending_type: linear_discontinuity` | Linear baseline plus `t_jump`, `jump`, and sigmoid `width`; initialize with `t_jump_guess`, `jump_guess` |
 | Exponential + linear | `detrending_type: explinear` | `c + vt + A exp(-t/tau)` |
 
-For fixed spectroscopic ramp timescales use:
+For an exponential-linear ramp use:
 
 ```yaml
 flags:
   detrending_type: explinear
-  spectro_fixed_timescale_trends: true
 ```
 
-The white-light stage fits `A` and `tau`. The spectroscopic stages fix `tau` to the white-light posterior median and fit a channel amplitude `A`. The default channel jitter prior is `spectro_jitter_prior: lognormal`; `log_uniform` remains available. NIRSpec PRISM frequently needs `explinear`; SOSS and G395H examples use linear, quadratic, spot, or explinear based on visit behavior. Select the simplest trend supported by residuals.
-
-Conditionally linear coefficients can be integrated out:
-
-```yaml
-flags:
-  trend_inference: gaussian_marginalized
-  trend_prior_means: {c: 1.0, v: 0.0}
-  trend_prior_scales: {c: 0.1, v: 0.1}
-```
-
-This is available for jaxoplanet spectroscopic fits and changes the coefficient prior from bounded uniform to Gaussian. It is unavailable for `none` and GP trends. GP variants are selected by including `gp` in the detrending type, such as `linear_gp` or `explinear_gp`.
+The white-light stage fits `A` and `tau`. The spectroscopic stages fix `tau` to
+the white-light posterior median and fit a channel amplitude `A`. NIRSpec PRISM
+frequently needs `explinear`; SOSS and G395H examples use linear, quadratic,
+spot, or explinear based on visit behavior. Select the simplest trend supported
+by residuals. GP variants are selected by including `gp` in the detrending
+type, such as `linear_gp` or `explinear_gp`.
 
 ## Equations and sampled priors
 
@@ -95,7 +88,7 @@ The default step template is a smooth sigmoid,
 
 $$H(t;t_j,w)=\left[1+\exp(-(t-t_j)/w)\right]^{-1}.$$
 
-The white-light model is $S(t)=c+vx+jH(t;t_j,w)$. $t_j\sim\mathcal N(t_{j,\mathrm{guess}},0.01)$ day and $j\sim\mathcal N(j_\mathrm{guess},0.01)$. The width has a log-uniform prior from half the median cadence to 30 minutes and is reported in days and minutes. Set `step_width_mode: fixed` and `step_width_days` to reproduce a fixed-width configuration.
+The white-light model is $S(t)=c+vx+jH(t;t_j,w)$. $t_j\sim\mathcal N(t_{j,\mathrm{guess}},0.01)$ day and $j\sim\mathcal N(j_\mathrm{guess},0.01)$. The width has a log-uniform prior from half the median cadence to 30 minutes and is reported in days and minutes.
 
 ```yaml
 flags:
@@ -130,10 +123,6 @@ $$\log s_j\sim\mathcal N[\log(0.5\,\mathrm{median}_i\sigma_{j,i}),2^2].$$
 
 The `log_uniform` alternative spans jitter from $10^{-6}$ to 1. White light uses a log-uniform jitter from $10^{-5}$ to $10^{-2}$. Jitter describes extra uncorrelated scatter, not time-correlated systematics.
 
-## Marginalized priors
-
-Gaussian marginalization defaults to means 1 for `c`, 0 for polynomial coefficients and `A`, and 1 for template scales. Default standard deviations are 0.1 for `c`, polynomial terms, and `A`, and 0.75 for template scales. These differ from sampled uniform priors.
-
 ## Outputs and checks
 
 Active coefficients appear in `*_bestfit_params.csv` with central, standard-deviation, and asymmetric-error columns. Possible fields include `c`, `v`, `v2`, `v3`, `v4`, `A`, `tau`, `t_jump`, `jump`, spot parameters, and template scales. The white-light time-series table includes `trend_model` and `detrended_flux` when available.
@@ -142,36 +131,7 @@ Inspect both before interpreting wavelength-dependent depths. Use the noise-binn
 
 ## White-light trend coordinates
 
-`flags.whitelight_trend_parameterization` is the production interface. It
-accepts `physical` or `cadence`. Spot and sigmoid-step white-light fits default
-to `cadence`; linear, quadratic, exponential-linear, and two-spot fits default
-to `physical`. The first three have no center or width coordinate to rescale,
-so selecting `cadence` would not change their model. Two-spot remains physical
-because neither tested coordinate form met its sampling and calibrated-fidelity
-gates. An explicit flag always overrides the family default:
-
-```yaml
-flags:
-  whitelight_trend_parameterization: physical  # reproduce the old spot/step form
-```
-
-Cadence form samples spot centers and widths, sigmoid-step centers, and
-sigmoid log-widths in units of the observed median cadence. Both the
-jaxoplanet and Harmonica production builders retain the usual physical
-outputs (`spot_mu`, `spot_sigma`, `spot_mu2`, `spot_sigma2`, `t_jump`, and
-`log_width`) as deterministic sites, so downstream tables and plots keep
-their original units. The normalized priors include the required scale or
-Jacobian. The bounded step width uses a smooth Logistic-CDF pullback of the
-original uniform log-width. Consequently the physical prior, likelihood, and
-posterior are unchanged. This exact form made the measured spot and step
-Laplace fits pass their gates. `JWSTJAXFIT_WL_TREND_PARAMETERIZATION` remains
-available as a diagnostic override and takes precedence over YAML.
-
-`flags.whitelight_2spot_ordering: ordered` selects an exact canonical
-left/right representation. It sums the two labeled center-prior densities and
-includes the midpoint/log-separation Jacobian, so it removes only label
-duplication even when the two center-prior means differ. The legacy labeled
-form remains the default: the benchmark reference already had zero ordering
-violations in 4,000 draws, and an ordered trial entered a low-quality
-overlap/depth branch rather than improving the science ESS. See
-`acceleration_reports/whitelight_trends.md` before enabling it.
+The fitter chooses numerically stable white-light coordinates for each trend
+family while continuing to report physical centers, widths, jump times, and
+amplitudes. These coordinate choices preserve the configured physical priors
+and are intentionally internal.

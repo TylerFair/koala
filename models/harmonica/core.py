@@ -20,8 +20,9 @@ except ImportError:
 
 _ALL_ODD_COEFF_SPECS = (("a1", 1), ("a3", 3), ("a5", 5))
 
-# For r(theta) = a0 + a1 cos(theta), the Catwoman-comparable half-area
-# contrast is q = (D_evening - D_morning) / (D_evening + D_morning).
+# For r(theta) = a0 + a1 cos(theta), the half-area contrast is
+# q = (D_two - D_one) / (D_two + D_one). Physical hemisphere names require
+# an external orbital-geometry convention and are deliberately not implied.
 HARMONICA_HALF_AREA_CONTRAST_FACTOR = 4.0 / np.pi
 HARMONICA_HALF_AREA_CONVEX_Q_LIMIT = 16.0 / (9.0 * np.pi)
 HARMONICA_SPECTRO_RORS_MIN = float(np.sqrt(1e-5))
@@ -93,16 +94,18 @@ def harmonica_half_area_coefficients_from_area_radius(area_radius, q):
 
 def harmonica_half_area_area_radius_and_q(a0, a1):
     """Map smooth coefficients to total-area radius and physical contrast."""
-    total, evening, morning = harmonica_half_area_depths(a0, a1)
-    q = (evening - morning) / (evening + morning)
+    total, depth_two, depth_one = harmonica_half_area_depths(a0, a1)
+    q = (depth_two - depth_one) / (depth_two + depth_one)
     return jnp.sqrt(total), q
 
 
 def harmonica_half_area_depths(a0, a1):
-    """Return total, evening, and morning half-area-equivalent depths.
+    """Return total, index-two, and index-one half-area-equivalent depths.
 
     ``depth_total_area`` is the mean of the two representative limb depths,
-    and therefore equals the full silhouette area divided by ``pi``.
+    and therefore equals the full silhouette area divided by ``pi``. Index two
+    is centred on ``theta=0`` and index one on ``theta=pi``; neither index
+    asserts a morning/evening assignment.
     """
     a0 = jnp.asarray(a0, dtype=jnp.float64)
     a1 = jnp.asarray(a1, dtype=jnp.float64)

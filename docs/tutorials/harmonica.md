@@ -1,6 +1,6 @@
 # Harmonica limb asymmetry
 
-This tutorial fits the WASP-94 b NIRISS/SOSS order-1 extraction with a first-order Harmonica transmission string. You will infer the odd boundary coefficient with fixed quadratic limb darkening and Laplace-metric independent NUTS. At the end, you will have the total transmission spectrum, correlated evening/morning limb spectra, and posterior transmission-string shapes.
+This tutorial fits the WASP-94 b NIRISS/SOSS order-1 extraction with a first-order Harmonica transmission string. You will infer the odd boundary coefficient with fixed quadratic limb darkening and Laplace-metric independent NUTS. At the end, you will have the total transmission spectrum, correlated terminator-one/terminator-two spectra, and posterior transmission-string shapes.
 
 ```bash
 cp configs_harmonica/WASP-94_soss_order1_config.yaml wasp94_harmonica.yaml
@@ -16,12 +16,11 @@ flags:
   harmonica_spectro_parameterization: delta_r
   harmonica_spectro_odd_frac_sigma: 0.1
   spectro_sampler: independent_nuts
-  spectro_mass_matrix: laplace
   ld_profile: quadratic
   ld_prior: fixed
 ```
 
-`delta_r` samples the radius contrast represented by the odd transmission-string coefficient. Order 1 fits `a0` and `a1`; orders 3 and 5 can add `a3` and `a5`. After the fit, inspect `*_limb_spectra.csv`, `*_limb_spectra.png`, `*_transmission_strings.png`, and `*_transmission_string_posterior.png`. The CSV reports area-equivalent evening/leading and morning/trailing depths, endpoint depths, `a0`, active odd coefficients, and their percentile errors. The accompanying `*_limb_posterior_samples.npz` preserves their draw-by-draw covariance.
+`delta_r` samples the radius contrast represented by the odd transmission-string coefficient. Order 1 fits `a0` and `a1`; orders 3 and 5 can add `a3` and `a5`. After the fit, inspect `*_limb_spectra.csv`, `*_limb_spectra.png`, `*_transmission_strings.png`, and `*_transmission_string_posterior.png`. The schema-v3 CSV reports neutral, area-equivalent terminator-one and terminator-two radii and depths, endpoint diagnostics, `a0`, active odd coefficients, and their percentile errors. The accompanying `*_limb_posterior_samples.npz` preserves their draw-by-draw covariance.
 
 ## Dataset and complete configuration
 
@@ -61,12 +60,8 @@ flags:
   harmonica_spectro_fit_jitter: false
   harmonica_spectro_odd_frac_sigma: 0.1
   spectro_sampler: independent_nuts
-  spectro_mass_matrix: laplace
   vmap_chunk: 4
   detrending_type: linear
-  interpolate_trend: false
-  interpolate_ld: false
-  fix_ld: true                   # Legacy spelling of fixed LD.
   ld_prior: fixed
   need_lowres: false
   ld_profile: quadratic
@@ -78,7 +73,9 @@ outlier_clip:
 host_device: gpu
 ```
 
-The explicit `ld_prior: fixed` line states the same choice as the older `fix_ld: true` switch. The geometry includes `a_rs`, `ecc`, and `omega` because this engine uses the scaled-semimajor-axis parameterization.
+The explicit `ld_prior: fixed` line selects calculated coefficients without
+sampling them. The geometry includes `a_rs`, `ecc`, and `omega` because this
+engine uses the scaled-semimajor-axis parameterization.
 
 ## Transmission strings
 
@@ -92,7 +89,7 @@ $$
 
 The `delta_r` parameterization samples the endpoint radius difference. For order 1, the endpoints are $a_0+a_1$ and $a_0-a_1$, so `endpoint_delta_r` is $2a_1$. For higher supported orders it is $2(a_1+a_3+a_5)$.
 
-Odd modes are used because they encode leading/trailing asymmetry. The configured `harmonica_spectro_odd_frac_sigma` controls the odd-mode prior scale relative to the radius.
+Odd modes are used because they encode asymmetry between the two angular halves. The configured `harmonica_spectro_odd_frac_sigma` controls the odd-mode prior scale relative to the radius. Assigning those halves to physical morning/evening or leading/trailing hemispheres requires a convention supplied by the user for the system geometry.
 
 ## Run
 
@@ -108,8 +105,7 @@ The following lines are representative of a completed Harmonica fit:
 
 ```text
 Building harmonica whitelight model: detrend='linear', ld='fixed'
-               (quadratic), max_order=1, param_method='a_rs'
-Using harmonica white-light NUTS settings: dense_mass=True
+               (quadratic), max_order=1
 Running chunked MCMC: ... channels in blocks of 4 (mode=serial)
 Checkpoint directory: .../chunks
   chunk 0:4 - gradient diagnostic PASSED
@@ -141,29 +137,29 @@ Ingress and egress carry the asymmetry information. Inspect them separately rath
 :align: center
 ```
 
-The ordinary spectrum retains the fitted model-radius summary. Use the limb products for the representative morning/evening depths.
+The ordinary spectrum retains the fitted model-radius summary. Use the limb products for the two representative half-area depths.
 
 ## Limb spectra
 
-```{image} ../_static/harmonica_wasp94_limb_spectra.png
-:alt: WASP-94 representative evening and morning limb spectra
+```{image} ../_static/harmonica_wasp94_limb_spectra_v3.png
+:alt: WASP-94 representative terminator-one and terminator-two spectra
 :width: 760px
 :align: center
 ```
 
-Harmonica measures $\theta=0$ along the orbital-velocity direction. The output convention maps $\theta=0$ to the evening/leading hemisphere and $\theta=\pi$ to morning/trailing. The representative depths are half-area equivalents, not the limb-darkened decrement at one exposure.
+The output convention fixes terminator two to the half centred at $\theta=0$ and terminator one to the half centred at $\theta=\pi$. It makes no physical morning/evening claim. The representative depths are half-area equivalents, not the limb-darkened decrement at one exposure.
 
 Define $Q=a_1^2+a_3^2+a_5^2$ and $C=a_1-a_3/3+a_5/5$. Then
 
 $$
-D_\mathrm{evening}=a_0^2+Q/2+4a_0C/\pi,
+D_\mathrm{two}=a_0^2+Q/2+4a_0C/\pi,
 $$
 
 $$
-D_\mathrm{morning}=a_0^2+Q/2-4a_0C/\pi,
+D_\mathrm{one}=a_0^2+Q/2-4a_0C/\pi,
 $$
 
-and $D_\mathrm{total}=(D_\mathrm{evening}+D_\mathrm{morning})/2$. Endpoint depths are reported separately and must not be substituted for these area quantities.
+and $D_\mathrm{total}=(D_\mathrm{one}+D_\mathrm{two})/2$. Endpoint depths are reported separately and must not be substituted for these area quantities.
 
 ## Read all three spectra
 
@@ -171,28 +167,25 @@ and $D_\mathrm{total}=(D_\mathrm{evening}+D_\mathrm{morning})/2$. Endpoint depth
 from pathlib import Path
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+from fit_jwst import load_harmonica_limb_dataframe
+from plotting import plot_harmonica_limb_spectra
 
 out = Path("/scratch/midway3/tfairnington/ASYMM_WASP-94_SOSS_ORDER1_FIXEDLD_QUADRATIC_LINEAR")
 total = pd.read_csv(out / "WASP-94_NIRISS_SOSS_order1_R50.csv")
-limbs = pd.read_csv(out / "WASP-94_NIRISS_SOSS_order1_R50_limb_spectra.csv")
+limbs = load_harmonica_limb_dataframe(
+    out / "WASP-94_NIRISS_SOSS_order1_R50_limb_spectra.csv"
+)
 joint = np.load(out / "WASP-94_NIRISS_SOSS_order1_R50_limb_posterior_samples.npz")
-fig, ax = plt.subplots(figsize=(8, 4))
-ax.errorbar(limbs.wavelength, limbs.depth_evening_median,
-            yerr=[limbs.depth_evening_err_lo, limbs.depth_evening_err_hi],
-            fmt="r.", label="evening / leading")
-ax.errorbar(limbs.wavelength, limbs.depth_morning_median,
-            yerr=[limbs.depth_morning_err_lo, limbs.depth_morning_err_hi],
-            fmt="b.", label="morning / trailing")
-ax.plot(total.wavelength, total.depth_ppm00, color="0.4", label="model radius")
-ax.set(xlabel="Wavelength [micron]", ylabel="Depth [ppm]")
-ax.legend()
-fig.tight_layout()
-plt.show()
-print(joint["depth_evening"].shape)  # draw, wavelength
+plot_harmonica_limb_spectra(
+    limbs,
+    out / "limb_spectra_publication.png",
+    instrument_label="NIRISS_SOSS_order1",
+)
+print(total[["wavelength", "depth_ppm00"]].head())
+print(joint["depth_one"].shape)  # draw, wavelength
 ```
 
-Use the NPZ arrays for differences or joint retrievals because the two limb depths are correlated within each draw.
+Use the NPZ arrays for differences or joint retrievals because the two limb depths are correlated within each draw. Schema-v2 CSVs are mapped in memory as documented: old morning columns become index one and old evening columns become index two. That compatibility mapping does not decide their physical interpretation.
 
 ## Output checklist
 

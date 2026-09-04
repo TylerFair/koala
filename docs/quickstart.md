@@ -12,7 +12,7 @@ input_dir: FITS
 output_dir: WASP-39_RESULTS
 fits_file: WASP-39_box_spectra_fullres.fits
 resolution: {high: reference, low: 20, reference_grid: prism_template.csv}
-flags: {detrending_type: linear, ld_profile: power2, ld_prior: informed, need_lowres: true, spectro_sampler: independent_nuts, spectro_mass_matrix: laplace}
+flags: {detrending_type: linear, ld_profile: power2, ld_prior: informed}
 outlier_clip: {whitelight_sigma: 5, spectroscopic_sigma: 5}
 host_device: gpu
 ```
