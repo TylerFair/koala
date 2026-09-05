@@ -407,7 +407,7 @@ def test_independent_nuts_runs_real_windowed_power2_model():
     indices = build_transit_window_indices(t, period, t0, duration)
     model = create_vectorized_model(
         detrend_type="linear",
-        ld_mode="informed",
+        ld_mode="stellarprior",
         trend_mode="free",
         n_planets=1,
         ld_profile="power2",

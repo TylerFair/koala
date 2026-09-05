@@ -58,13 +58,18 @@ def build_marginalized_trend_design(
     spot_trend2=None,
     jump_trend=None,
     exp_trend=None,
+    baseline_template=None,
 ):
     """Build a ``[channel, time, coefficient]`` additive trend design."""
     names = marginalized_trend_coefficient_names(detrend_type)
     t = jnp.asarray(t, dtype=jnp.float64)
     t_norm = t - jnp.min(t)
     shared = {
-        "c": jnp.ones_like(t_norm),
+        "c": (
+            jnp.ones_like(t_norm)
+            if baseline_template is None
+            else jnp.asarray(baseline_template, dtype=jnp.float64)
+        ),
         "v": t_norm,
         "v2": t_norm**2,
         "v3": t_norm**3,
@@ -94,9 +99,14 @@ def build_marginalized_trend_design(
             raise ValueError(
                 f"{detrend_type!r} marginalization requires {name}'s fixed template."
             )
-        if column.ndim != 1 or column.shape[0] != t.shape[0]:
-            raise ValueError(f"Template for {name} must have shape [time].")
-        columns.append(jnp.broadcast_to(column, (num_channels, t.shape[0])))
+        if column.ndim == 1 and column.shape[0] == t.shape[0]:
+            columns.append(jnp.broadcast_to(column, (num_channels, t.shape[0])))
+        elif column.ndim == 2 and column.shape == (num_channels, t.shape[0]):
+            columns.append(column)
+        else:
+            raise ValueError(
+                f"Template for {name} must have shape [time] or [channel, time]."
+            )
     return jnp.stack(columns, axis=-1), names
 
 

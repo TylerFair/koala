@@ -10,6 +10,9 @@ __pycache__/
 
 # --- bulk data and binary products (kept on disk, not in git) ---
 *.fits
+!examples/data/*.fits
+examples/data/generated/
+results/surface_publication/
 *.pkl
 *.npz
 *.h5
@@ -114,3 +117,9 @@ tools/*
 !tools/run_sampler_on_stage_inputs.py
 !tools/reference_noise_floor.py
 !tools/benchmark_independent_nuts_gpu.py
+!tools/benchmark_surface_models.py
+!tools/example_phase_curves.py
+!tools/validate_surface_models.py
+!tools/surface_publication_example.py
+!tools/docs/
+!tools/docs/generate_tutorial_figures.py

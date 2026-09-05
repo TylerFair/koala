@@ -86,6 +86,12 @@ from models.trend_marginal import (
     marginalized_trend_coefficient_names,
     materialize_marginalized_trend_samples,
 )
+from surface_outputs import save_surface_results
+from models.limb_darkening_config import (
+    LD_PRIORS,
+    resolve_ld_prior,
+    validate_ld_profile,
+)
 
 TREND_PARAMS = [
     'c', 'v', 'v2', 'v3', 'v4', 
@@ -95,8 +101,12 @@ TREND_PARAMS = [
     't_jump', 'jump', 
     'A_gp', 'A_spot', 'A_spot2', 'A_jump'
 ]
+SURFACE_PARAMS = (
+    'eclipse_depth', 'dayside_flux', 'nightside_flux',
+    'hotspot_offset', 'stellar_spot_contrast',
+)
 
-LD_PRIOR_MODES = {'fixed', 'widegaussian', 'informed', 'uniform'}
+LD_PRIOR_MODES = set(LD_PRIORS)
 
 
 # This is the authoritative configuration surface for ``flags``.  Keep every
@@ -107,9 +117,11 @@ LD_PRIOR_MODES = {'fixed', 'widegaussian', 'informed', 'uniform'}
 FLAG_TIERS = {
     'public': frozenset({
         'detrending_type',
+        'fit_geometry',
         'jump_guess',
         'ld_prior',
         'ld_profile',
+        'light_curve_model',
         'mask_end',
         'mask_start',
         'spot_amp',
@@ -500,49 +512,22 @@ def _has_stellar_ld_uncertainties(stellar_cfg):
 
 
 def _resolve_ld_prior_mode(flags, stellar_cfg, ld_profile):
-    raw_mode = flags.get('ld_prior', None)
-    legacy_fix_ld = bool(flags.get('fix_ld', False))
-
-    if raw_mode is None:
-        if legacy_fix_ld:
-            return 'fixed'
-        if ld_profile == 'power2' and _has_stellar_ld_uncertainties(stellar_cfg):
-            return 'informed'
-        return 'widegaussian'
-
-    mode = str(raw_mode).strip().lower().replace('-', '').replace('_', '')
-    alias_map = {
-        'fixed': 'fixed',
-        'widegaussian': 'widegaussian',
-        'gaussian': 'widegaussian',
-        'free': 'widegaussian',
-        'informed': 'informed',
-        'stellarprior': 'informed',
-        'stellar': 'informed',
-        'sing': 'sing',
-        'uniform': 'uniform',
-    }
-    if mode not in alias_map:
+    if 'fix_ld' in flags:
         raise ValueError(
-            "flags.ld_prior must be one of {'fixed', 'widegaussian', 'informed', 'sing', 'uniform'}. "
-            f"Received '{raw_mode}'."
+            "flags.fix_ld is no longer accepted; use flags.ld_prior: fixed."
         )
-    resolved = alias_map[mode]
-    if legacy_fix_ld and resolved != 'fixed':
-        print(
-            f"[LD prior] explicit mode {resolved!r} overrides the legacy "
-            "fixed-limb-darkening switch.",
-            flush=True,
-        )
-    if resolved == 'informed':
-        if ld_profile != 'power2':
-            raise ValueError("flags.ld_prior: 'informed' currently supports only flags.ld_profile: 'power2'.")
+    raw_mode = flags.get('ld_prior', None)
+    resolved = resolve_ld_prior(
+        raw_mode,
+        ld_profile=ld_profile,
+        has_stellar_uncertainties=_has_stellar_ld_uncertainties(stellar_cfg),
+    )
+    if resolved == 'stellarprior':
         if not _has_stellar_ld_uncertainties(stellar_cfg):
             raise ValueError(
-                "flags.ld_prior: 'informed' requires stellar.teff_sigma, stellar.logg_sigma, and stellar.feh_sigma."
+                "flags.ld_prior='stellarprior' requires stellar.teff_sigma, "
+                "stellar.logg_sigma, and stellar.feh_sigma."
             )
-    if resolved == 'sing' and ld_profile != 'quadratic':
-        raise ValueError("flags.ld_prior: 'sing' requires flags.ld_profile: 'quadratic'.")
     return resolved
 
 
@@ -554,7 +539,7 @@ def _resolve_ld_parameterization(flags, flag_name, ld_prior_mode, ld_profile='po
         if (
             raw_value is None
             and ld_profile == 'power2'
-            and ld_prior_mode in {'free', 'widegaussian', 'uniform'}
+            and ld_prior_mode in {'gaussian', 'uniform'}
         )
         else ('coefficients' if raw_value is None else str(raw_value).lower())
     )
@@ -1253,13 +1238,21 @@ def _save_mcmc_diagnostics(
 
 
 def _geometry_chain_quality(grouped_samples):
-    """Return exact-MCMC quality metrics for white-light geometry sites."""
+    """Return exact-MCMC quality metrics for white-light science sites."""
     aliases = {
         "t0": ("t0_0", "t0"),
         "b": ("b_0", "b"),
         "duration": ("logD_0", "duration_0", "duration", "logD"),
         "rors": ("rors_0", "rors"),
     }
+    if "_geometry_fixed" in grouped_samples:
+        aliases = {}
+    for name in grouped_samples:
+        if re.fullmatch(
+            r"_(?:eclipse_depth|dayside_flux|nightside_flux|hotspot_offset|stellar_spot_contrast)_\d+",
+            name,
+        ):
+            aliases[name.removeprefix("_")] = (name,)
     ess = {}
     rhat = {}
     for label, names in aliases.items():
@@ -1270,10 +1263,18 @@ def _geometry_chain_quality(grouped_samples):
         if values.ndim < 2:
             values = values.reshape((1, values.shape[0]))
         site_ess = numpyro.diagnostics.effective_sample_size(values)
-        ess[label] = float(np.nanmin(np.asarray(jax.device_get(site_ess))))
+        ess_values = np.asarray(jax.device_get(site_ess), dtype=float)
+        ess[label] = (
+            float(np.min(ess_values))
+            if np.all(np.isfinite(ess_values)) else np.nan
+        )
         if values.shape[0] > 1:
             site_rhat = numpyro.diagnostics.split_gelman_rubin(values)
-            rhat[label] = float(np.nanmax(np.asarray(jax.device_get(site_rhat))))
+            rhat_values = np.asarray(jax.device_get(site_rhat), dtype=float)
+            rhat[label] = (
+                float(np.max(rhat_values))
+                if np.all(np.isfinite(rhat_values)) else np.nan
+            )
     return ess, rhat
 
 
@@ -1303,7 +1304,8 @@ def _continue_mcmc_until_geometry_gate(
         }
         ess, rhat = _geometry_chain_quality(grouped)
         divergences = int(np.sum(np.asarray(grouped_extra.get("diverging", []))))
-        passes = bool(ess) and min(ess.values()) >= float(min_ess)
+        finite_ess = bool(ess) and bool(np.all(np.isfinite(list(ess.values()))))
+        passes = finite_ess and min(ess.values()) >= float(min_ess)
         passes = passes and divergences <= int(max_divergences)
         print(
             "White-light quality gate: "
@@ -1440,6 +1442,14 @@ def get_samples(model, key, t, yerr, indiv_y, init_params, nuts_kwargs=None,
 def _slice_by_channel(value, sl, num_lcs):
     if value is None:
         return None
+    if hasattr(value, "baseline") and (
+        hasattr(value, "differences") or hasattr(value, "uniform")
+    ):
+        if np.ndim(value.baseline) <= 1:
+            return value
+        return type(value)(*(
+            None if field is None else field[sl] for field in value
+        ))
     if isinstance(value, (np.ndarray, jnp.ndarray)) and value.ndim > 0 and value.shape[0] == num_lcs:
         return value[sl]
     return value
@@ -1449,6 +1459,15 @@ def _take_by_channel(value, channel_indices, num_lcs):
     """Take arbitrary wavelength channels from a channel-varying value."""
     if value is None:
         return None
+    if hasattr(value, "baseline") and (
+        hasattr(value, "differences") or hasattr(value, "uniform")
+    ):
+        if np.ndim(value.baseline) <= 1:
+            return value
+        indices = jnp.asarray(channel_indices, dtype=jnp.int32)
+        return type(value)(*(
+            None if field is None else field[indices] for field in value
+        ))
     if (
         isinstance(value, (np.ndarray, jnp.ndarray))
         and value.ndim > 0
@@ -1468,6 +1487,7 @@ JAXOPLANET_CHANNEL_VARYING_MODEL_KWARGS = (
     "precomputed_yerr_per_lc",
     "trend_prior_mean",
     "trend_prior_scale",
+    "surface_basis_data",
 )
 
 HARMONICA_CHANNEL_VARYING_MODEL_KWARGS = (
@@ -1479,7 +1499,7 @@ HARMONICA_CHANNEL_VARYING_MODEL_KWARGS = (
 )
 
 CHUNK_CHECKPOINT_SCHEMA_VERSION = 4
-CHUNK_CHECKPOINT_TARGET_REVISION = "whitelight-trend-routing-v6"
+CHUNK_CHECKPOINT_TARGET_REVISION = "phase-flux-quantile-v7"
 SAMPLING_WORKLOAD_SCHEMA_VERSION = 1
 SPECTRO_GRADIENT_DIAGNOSTIC_SCHEMA_VERSION = 1
 SCIENCE_ARTIFACT_SCHEMA_VERSION = 1
@@ -1951,6 +1971,30 @@ def _write_or_validate_checkpoint_manifest(
         "fingerprint_sha256": fingerprint,
         "checkpoint_signature": checkpoint_signature,
     }
+    # Signatures intentionally include the complete surface-model contract.
+    # Parsed geometry and emission values can be NumPy/JAX arrays, while the
+    # manifest is portable JSON rather than a pickle.
+    def _json_compatible(value):
+        if isinstance(value, dict):
+            return {
+                str(key): _json_compatible(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [_json_compatible(item) for item in value]
+        if isinstance(value, np.ndarray):
+            return _json_compatible(value.tolist())
+        if isinstance(value, np.generic):
+            return value.item()
+        try:
+            array = np.asarray(jax.device_get(value))
+        except Exception:
+            return value
+        if array.ndim:
+            return _json_compatible(array.tolist())
+        return array.item()
+
+    payload = _json_compatible(payload)
     if os.path.exists(manifest_path):
         with open(manifest_path, "r", encoding="utf-8") as stream:
             existing = json.load(stream)
@@ -2609,11 +2653,30 @@ def _spectro_failed_lanes(samples, diagnostics_path, min_depth_ess, max_divergen
         return np.asarray([], dtype=int), {"depth_ess_per_channel": None,
                                            "num_divergences_per_channel": None}
     depth_values = np.asarray(jax.device_get(depth_values))
-    lane_ess = []
-    for lane in range(depth_values.shape[1]):
-        value = jnp.asarray(depth_values[:, lane])
-        ess = numpyro.diagnostics.effective_sample_size(value[None, ...])
-        lane_ess.append(float(np.nanmin(np.asarray(jax.device_get(ess)))))
+    geometry_fixed = "_geometry_fixed" in samples
+    science_values = {} if geometry_fixed else {"depths": depth_values}
+    for name, value in samples.items():
+        if re.fullmatch(
+            r"_(?:eclipse_depth|dayside_flux|nightside_flux|hotspot_offset|stellar_spot_contrast)_\d+",
+            name,
+        ):
+            science_values[name.removeprefix("_")] = np.asarray(
+                jax.device_get(value)
+            )
+    science_ess = {}
+    lane_ess = np.full(depth_values.shape[1], np.inf, dtype=float)
+    for name, values in science_values.items():
+        per_lane = []
+        for lane in range(depth_values.shape[1]):
+            value = jnp.asarray(values[:, lane])
+            ess = numpyro.diagnostics.effective_sample_size(value[None, ...])
+            ess_values = np.asarray(jax.device_get(ess), dtype=float)
+            per_lane.append(
+                float(np.min(ess_values))
+                if np.all(np.isfinite(ess_values)) else np.nan
+            )
+        science_ess[name] = per_lane
+        lane_ess = np.minimum(lane_ess, np.asarray(per_lane))
     divergences = np.zeros(depth_values.shape[1], dtype=int)
     if diagnostics_path is not None and os.path.isfile(diagnostics_path):
         with open(diagnostics_path, "r", encoding="utf-8") as stream:
@@ -2626,11 +2689,13 @@ def _spectro_failed_lanes(samples, diagnostics_path, min_depth_ess, max_divergen
             # reject every lane in that selective attempt.
             divergences[:] = int(payload["num_divergences"])
     failed = np.flatnonzero(
-        (np.asarray(lane_ess) < float(min_depth_ess))
+        (~np.isfinite(lane_ess))
+        | (lane_ess < float(min_depth_ess))
         | (divergences > int(max_divergences))
     )
     return failed, {
-        "depth_ess_per_channel": lane_ess,
+        "depth_ess_per_channel": science_ess.get("depths"),
+        "science_ess_per_channel": science_ess,
         "num_divergences_per_channel": divergences.tolist(),
     }
 
@@ -3085,6 +3150,12 @@ def get_samples_chunked(
                 )
 
                 def _select_lanes(value):
+                    if hasattr(value, "baseline") and (
+                        hasattr(value, "differences") or hasattr(value, "uniform")
+                    ):
+                        return _take_by_channel(
+                            value, selected, end - start
+                        )
                     try:
                         array = jnp.asarray(value)
                     except (TypeError, ValueError):
@@ -3247,6 +3318,25 @@ def get_samples_chunked(
                         batch_size = batch_stop - batch_start
 
                         def _batch_adaptive(value):
+                            if hasattr(value, "baseline") and (
+                                hasattr(value, "differences") or hasattr(value, "uniform")
+                            ):
+                                batched = _take_by_channel(
+                                    value, batch_positions, int(selected.size)
+                                )
+                                if (
+                                    np.ndim(batched.baseline) > 1
+                                    and adaptive_width > batch_size
+                                ):
+                                    pad = adaptive_width - batch_size
+                                    batched = type(batched)(*(
+                                        None if field is None else jnp.concatenate((
+                                            field,
+                                            jnp.repeat(field[-1:], pad, axis=0),
+                                        ))
+                                        for field in batched
+                                    ))
+                                return batched
                             try:
                                 array = jnp.asarray(value)
                             except (TypeError, ValueError):
@@ -4296,6 +4386,19 @@ def _run_sampling_stage(
         )
         padded_kwargs = dict(model_kwargs)
         for name, value in model_kwargs.items():
+            if hasattr(value, "baseline") and (
+                hasattr(value, "differences") or hasattr(value, "uniform")
+            ):
+                pad = int(t.shape[0]) - original_cadences
+                padded_kwargs[name] = type(value)(*(
+                    None if field is None else jnp.pad(
+                        field,
+                        [(0, 0)] * (field.ndim - 1) + [(0, pad)],
+                        constant_values=0.0,
+                    )
+                    for field in value
+                ))
+                continue
             try:
                 array = jnp.asarray(value)
             except (TypeError, ValueError):
@@ -4317,7 +4420,7 @@ def _run_sampling_stage(
     )
     if (
         sampler_backend == 'laplace_is'
-        and str(stage_ld_mode).lower() in {'widegaussian', 'uniform'}
+        and str(stage_ld_mode).lower() in {'gaussian', 'uniform'}
         and not laplace_is_force
     ):
         print(
@@ -5527,6 +5630,9 @@ def _augment_harmonica_params(params, a_rs, ecc, omega, a1=None, a3=None, a5=Non
 _JAXOPLANET_STATIC_EVAL_KEYS = frozenset(
     {"_jaxoplanet_kernel", "_ld_profile"}
 )
+_SURFACE_STATIC_EVAL_KEYS = frozenset(
+    {"_surface_model", "_stellar_spots"}
+)
 _JAXOPLANET_DYNAMIC_EVAL_KEYS = (
     "_transit_phase_offsets",
     "_transit_phase_mask",
@@ -5617,6 +5723,213 @@ def _attach_jaxoplanet_eval_metadata(
     return out
 
 
+def _attach_surface_eval_metadata(params, surface_config):
+    """Attach static map geometry and fixed/default surface values for plotting."""
+    out = dict(params)
+    if not surface_config or (
+        surface_config.get("model", "transit") == "transit"
+        and not surface_config.get("spots")
+    ):
+        return out
+    out["_surface_model"] = surface_config["model"]
+    out["_stellar_spots"] = surface_config.get("spots", ())
+    for name in (
+        "eclipse_depth", "dayside_flux", "nightside_flux", "hotspot_offset"
+    ):
+        indexed = sorted(
+            (
+                (int(key.rsplit("_", 1)[1]), value)
+                for key, value in out.items()
+                if re.fullmatch(rf"_{name}_\d+", key)
+            ),
+            key=lambda item: item[0],
+        )
+        if name not in out and indexed:
+            out[name] = jnp.stack([value for _, value in indexed])
+        if name in surface_config and name not in out:
+            out[name] = jnp.asarray(surface_config[name], dtype=jnp.float64)
+    if surface_config.get("spots"):
+        out["stellar_rotation_period"] = jnp.asarray(
+            surface_config["stellar_rotation_period"], dtype=jnp.float64
+        )
+        if "stellar_spot_contrast" not in out:
+            indexed = sorted(
+                (
+                    (int(key.rsplit("_", 1)[1]), value)
+                    for key, value in out.items()
+                    if re.fullmatch(r"_stellar_spot_contrast_\d+", key)
+                ),
+                key=lambda item: item[0],
+            )
+            out["stellar_spot_contrast"] = (
+                jnp.stack([value for _, value in indexed])
+                if indexed else jnp.asarray(
+                    [spot["contrast"] for spot in surface_config["spots"]],
+                    dtype=jnp.float64,
+                )
+            )
+    return out
+
+
+def _seed_surface_spectroscopic_init(init_params, surface_config, num_lcs):
+    """Seed every free surface latent at its physical user prior center."""
+    if not surface_config:
+        return init_params
+    phase_flux_names = (
+        {"dayside_flux", "nightside_flux"}
+        if surface_config.get("model") == "phase_curve" else set()
+    )
+    for name in (
+        "eclipse_depth", "dayside_flux", "nightside_flux", "hotspot_offset"
+    ):
+        if name in phase_flux_names:
+            continue
+        width_name = f"{name}_prior_width"
+        if name not in surface_config or width_name not in surface_config:
+            continue
+        for planet, (center, width) in enumerate(zip(
+            np.atleast_1d(surface_config[name]),
+            np.atleast_1d(surface_config[width_name]),
+        )):
+            if float(width) > 0.0:
+                init_params[f"_{name}_{planet}"] = jnp.full(
+                    int(num_lcs), float(center), dtype=jnp.float64
+                )
+    if phase_flux_names:
+        init_params.update(
+            _phase_curve_flux_init_sites(
+                surface_config, shape=(int(num_lcs),)
+            )
+        )
+    for spot, spec in enumerate(surface_config.get("spots", ())):
+        if float(spec.get("contrast_prior_width", 0.0)) > 0.0:
+            init_params[f"_stellar_spot_contrast_{spot}"] = jnp.full(
+                int(num_lcs), float(spec["contrast"]), dtype=jnp.float64
+            )
+    return init_params
+
+
+def _phase_curve_flux_init_sites(surface_config, shape=()):
+    """Return prior-center values for the smooth physical phase-flux sites."""
+    if not surface_config or surface_config.get("model") != "phase_curve":
+        return {}
+    from models.jaxoplanet.builder import phase_flux_to_conditional_quantile
+
+    day_centers = np.atleast_1d(surface_config["dayside_flux"])
+    day_widths = np.atleast_1d(surface_config["dayside_flux_prior_width"])
+    night_centers = np.atleast_1d(surface_config["nightside_flux"])
+    night_widths = np.atleast_1d(surface_config["nightside_flux_prior_width"])
+    result = {}
+
+    def store(name, planet, value):
+        value = float(np.asarray(jax.device_get(value)))
+        result[f"_{name}_{planet}"] = (
+            jnp.full(shape, value, dtype=jnp.float64)
+            if shape else jnp.asarray(value, dtype=jnp.float64)
+        )
+
+    for planet, (day, day_width, night, night_width) in enumerate(zip(
+        day_centers, day_widths, night_centers, night_widths
+    )):
+        day_free = float(day_width) > 0.0
+        night_free = float(night_width) > 0.0
+        if day_free and night_free:
+            store("dayside_flux", planet, day)
+            quantile = phase_flux_to_conditional_quantile(
+                night, day, night, night_width
+            )
+            store("nightside_flux_quantile", planet, quantile)
+        elif day_free:
+            quantile = phase_flux_to_conditional_quantile(
+                day, night, day, day_width
+            )
+            store("dayside_flux_quantile", planet, quantile)
+        elif night_free:
+            quantile = phase_flux_to_conditional_quantile(
+                night, day, night, night_width
+            )
+            store("nightside_flux_quantile", planet, quantile)
+    return result
+
+
+def _prepare_fixed_surface_basis(
+    surface_config, t, u, *, period, t0, a_rs, b, rors, ecc, omega
+):
+    """Precompute an exact native linear basis for a fixed surface model."""
+    if surface_config.get("fit_geometry", True):
+        return None
+    from models.jaxoplanet.surface_basis import (
+        EmissionLightCurveBasis,
+        SpotLightCurveBasis,
+        prepare_emission_light_curve_basis,
+        prepare_spot_light_curve_basis,
+    )
+
+    model = surface_config.get("model", "transit")
+    spots = surface_config.get("spots", ())
+    if not ((model == "transit" and spots) or (model in {"eclipse", "phase_curve"} and not spots)):
+        return None
+    base = {
+        "_surface_model": model,
+        "period": period,
+        "t0": t0,
+        "a_rs": a_rs,
+        "b": b,
+        "rors": rors,
+        "ecc": ecc,
+        "omega": omega,
+    }
+    if spots:
+        base["stellar_rotation_period"] = surface_config["stellar_rotation_period"]
+
+    def prepare_one(coefficients):
+        fixed = {**base, "u": coefficients}
+        if spots:
+            return prepare_spot_light_curve_basis(
+                fixed, t, spots=spots
+            )
+        return prepare_emission_light_curve_basis(
+            fixed, t, model=model
+        )
+
+    def stack_bases(bases):
+        return type(bases[0])(*(
+            None if field is None else jnp.stack([
+                basis[index] for basis in bases
+            ])
+            for index, field in enumerate(bases[0])
+        ))
+
+    u_grid = np.asarray(u, dtype=float)
+    if u_grid.ndim == 1:
+        return prepare_one(u_grid)
+    if u_grid.ndim != 2:
+        raise ValueError("Fixed surface-basis limb darkening must have one row per channel.")
+    # A shared explicit LD law is the common fast path.  For a wavelength
+    # dependent fixed grid, prepare each exact native basis once and stack it;
+    # the sampler still sees only the small linear contrast model.
+    if np.allclose(u_grid, u_grid[0], rtol=0.0, atol=0.0):
+        shared = prepare_one(u_grid[0])
+        return type(shared)(*(
+            None if field is None else jnp.broadcast_to(
+                field, (u_grid.shape[0],) + field.shape
+            )
+            for field in shared
+        ))
+    return stack_bases([prepare_one(row) for row in u_grid])
+
+
+def _surface_basis_on_time_mask(basis, mask):
+    """Select cadence leaves while preserving the exact surface-basis type."""
+    if basis is None:
+        return None
+    mask = jnp.asarray(mask, dtype=bool)
+    return type(basis)(*(
+        None if field is None else field[..., mask]
+        for field in basis
+    ))
+
+
 def _select_transit_eval_params(
     params,
     transit_engine,
@@ -5626,6 +5939,7 @@ def _select_transit_eval_params(
     jaxoplanet_kernel=None,
     ld_profile=None,
     transit_window_optimization="off",
+    surface_config=None,
 ):
     out = dict(params)
     if transit_engine != 'jaxoplanet':
@@ -5646,6 +5960,7 @@ def _select_transit_eval_params(
             ld_profile=ld_profile,
             transit_window_optimization=transit_window_optimization,
         )
+    out = _attach_surface_eval_metadata(out, surface_config)
     return out
 
 
@@ -6239,6 +6554,11 @@ def main():
     
     planet_cfg = cfg['planet']
     stellar_cfg = cfg['stellar']
+    from models.jaxoplanet.config import parse_surface_config
+    surface_config = parse_surface_config(
+        flags, planet_cfg, stellar_cfg,
+        len(np.atleast_1d(planet_cfg['period'])),
+    )
     # Production defaults validated by the 2026-09 acceleration campaign.
     # setdefault preserves every explicit legacy/user selection.
     is_prism = instrument == 'NIRSPEC/PRISM'
@@ -6561,7 +6881,7 @@ def main():
     highres_laplace_is_kwargs = _resolve_laplace_is_stage_kwargs(
         flags, 'highres'
     )
-    ld_profile = flags.get('ld_profile', 'quadratic')
+    ld_profile = validate_ld_profile(flags.get('ld_profile', 'quadratic'))
     ld_prior_mode = _resolve_ld_prior_mode(flags, stellar_cfg, ld_profile)
     spectro_ld_parameterization = _resolve_ld_parameterization(
         flags, 'spectro_ld_parameterization', ld_prior_mode, ld_profile
@@ -6660,6 +6980,31 @@ def main():
             param_method = 'a_rs'
     else:
         param_method = explicit_param_method if explicit_param_method is not None else 'duration'
+    uses_surface_model = bool(
+        surface_config['model'] != 'transit' or surface_config['spots']
+    )
+    if uses_surface_model:
+        if transit_engine != 'jaxoplanet':
+            raise ValueError(
+                "flags.light_curve_model and stellar.spots are supported only "
+                "with flags.transit_engine='jaxoplanet'."
+            )
+        if explicit_param_method not in {None, 'a_rs'}:
+            raise ValueError(
+                "Eclipses, phase curves, and stellar spots require "
+                "flags.param_method='a_rs'."
+            )
+        param_method = 'a_rs'
+        transit_window_optimization = 'off'
+        if any(
+            isinstance(flags.get(name), str)
+            and flags[name].strip().lower() == 'cut_phase_to_transit'
+            for name in ('mask_start', 'mask_end')
+        ):
+            raise ValueError(
+                "cut_phase_to_transit cannot be used for eclipse, phase-curve, "
+                "or rotating stellar-spot fits because it removes the signal."
+            )
     if jaxoplanet_kernel == 'native_power2':
         if transit_engine != 'jaxoplanet':
             raise ValueError(
@@ -6715,6 +7060,7 @@ def main():
             'ld_uniform_coefficient_bounds': tuple(ld_uniform_coefficient_bounds),
             'trend_parameterization': flags['whitelight_trend_parameterization'],
             'two_spot_ordering': flags['whitelight_2spot_ordering'],
+            'surface_config': surface_config,
         }
         _engine_spectro_kw = {
             'jitter_prior': spectro_jitter_prior,
@@ -6727,6 +7073,7 @@ def main():
             'ld_parameterization': spectro_ld_parameterization,
             'ld_uniform_basis': ld_uniform_basis,
             'ld_uniform_coefficient_bounds': tuple(ld_uniform_coefficient_bounds),
+            'surface_config': surface_config,
         }
         if trend_inference == 'gaussian_marginalized' and 'gp' in detrending_type:
             raise ValueError(
@@ -6813,6 +7160,9 @@ def main():
             periods, _a_rs_tmp, _b_tmp, _rors_tmp, ecc=_ecc_tmp, omega=_omega_tmp,
         )
         print(f"Computed duration prior from a_rs geometry: {durations}")
+        # The data preparation stage uses duration only to identify an
+        # out-of-transit normalization window.
+        planet_cfg['duration'] = np.asarray(durations, dtype=float).tolist()
     else:
         raise KeyError(
             "'planet.duration' is required unless 'planet.a_rs' is provided."
@@ -6838,6 +7188,8 @@ def main():
                 f"`planet.{key}` must be scalar or length {n_planets}, got shape {arr.shape}."
             )
         return jnp.asarray(arr, dtype=jnp.float64)
+
+    T0_PRIOR_WIDTH = _planet_cfg_array('t0_prior_width_days', PRIOR_DUR)
 
     # Shared orbital geometry inputs used by harmonica and jaxoplanet a_rs parameterizations.
     HARMONICA_ECC = _planet_cfg_array('ecc', 0.0)
@@ -6866,17 +7218,37 @@ def main():
     if jnp.any((HARMONICA_ECC < 0.0) | (HARMONICA_ECC >= 1.0)):
         raise ValueError("`planet.ecc` must satisfy 0 <= ecc < 1.")
 
-    stellar_feh = stellar_cfg['feh']
-    stellar_teff = stellar_cfg['teff']
-    stellar_logg = stellar_cfg['logg']
-    ld_model = stellar_cfg.get('ld_model', 'mps1')
-    ld_data_path = stellar_cfg.get('ld_data_path', '../exotic_ld_data')
-    ld_interpolate_type = stellar_cfg.get('ld_interpolate_type', 'trilinear')
-    sld = StellarLimbDarkening(
-        M_H=stellar_feh, Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
-        ld_data_path=ld_data_path,
-        interpolate_type=ld_interpolate_type,
-    )
+    explicit_ld = stellar_cfg.get('ld_coefficients')
+    if explicit_ld is not None:
+        explicit_ld = np.asarray(explicit_ld, dtype=float)
+        if explicit_ld.shape != (2,) or not np.all(np.isfinite(explicit_ld)):
+            raise ValueError("stellar.ld_coefficients must contain two finite values.")
+        if ld_prior_mode != 'fixed':
+            raise ValueError(
+                "stellar.ld_coefficients is an explicit fixed profile and requires "
+                "flags.ld_prior='fixed'."
+            )
+        sld = None
+    else:
+        stellar_feh = stellar_cfg['feh']
+        stellar_teff = stellar_cfg['teff']
+        stellar_logg = stellar_cfg['logg']
+        ld_model = stellar_cfg.get('ld_model', 'mps1')
+        ld_data_path = stellar_cfg.get('ld_data_path', '../exotic_ld_data')
+        ld_interpolate_type = stellar_cfg.get('ld_interpolate_type', 'trilinear')
+        sld = StellarLimbDarkening(
+            M_H=stellar_feh, Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
+            ld_data_path=ld_data_path,
+            interpolate_type=ld_interpolate_type,
+        )
+
+    def _explicit_ld_grid(wavelengths=None):
+        if wavelengths is None:
+            return jnp.asarray(explicit_ld, dtype=jnp.float64)
+        return jnp.broadcast_to(
+            jnp.asarray(explicit_ld, dtype=jnp.float64),
+            (len(np.atleast_1d(wavelengths)), 2),
+        )
 
     if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'NIRSPEC/G140H', 'NIRSPEC/G235H']:
         mini_instrument = f'nrs{nrs}'
@@ -6996,7 +7368,9 @@ def main():
 
 
 
-    if ld_prior_mode == 'informed':
+    if explicit_ld is not None:
+        U_mu_wl, U_sigma_wl = _explicit_ld_grid(), None
+    elif ld_prior_mode == 'stellarprior':
         U_mu_wl, U_sigma_wl = get_or_build_power2_ld_prior(
             stellar_cfg, data.wavelengths_unbinned, 0.0, instrument,
             order=order if instrument == 'NIRISS/SOSS' else None,
@@ -7087,6 +7461,8 @@ def main():
                 "duration": PRIOR_DUR,
                 "t0": PRIOR_T0,
                 'period': PERIOD_FIXED,
+                'b': PRIOR_B,
+                'rprs': PRIOR_RPRS,
                 'u': U_mu_wl,
                 'a_rs': HARMONICA_A_RS,
                 'a_rs_prior_min': HARMONICA_A_RS_PRIOR_MIN,
@@ -7095,6 +7471,7 @@ def main():
                 'inc_prior_max': HARMONICA_INC_PRIOR_MAX,
                 'ecc': HARMONICA_ECC,
                 'omega': HARMONICA_OMEGA,
+                't0_prior_width': T0_PRIOR_WIDTH,
             }
             if '2spot' in detrending_type:
                 hyper_params_wl['spot_guess'] = spot_mu
@@ -7107,7 +7484,7 @@ def main():
                 hyper_params_wl['step_width_days'] = step_width_days
 
             hyper_params_wl['u'] = U_mu_wl
-            if ld_profile == 'power2' and ld_prior_mode == 'informed' and U_sigma_wl is not None:
+            if ld_profile == 'power2' and ld_prior_mode == 'stellarprior' and U_sigma_wl is not None:
                 hyper_params_wl['u_sigma'] = U_sigma_wl
 
             init_params_wl = {
@@ -7148,6 +7525,41 @@ def main():
                 init_params_wl[f't0_{i}'] = PRIOR_T0[i]
                 init_params_wl[f'rors_{i}'] = PRIOR_RPRS[i]
 
+            for surface_name in (
+                'eclipse_depth', 'dayside_flux', 'nightside_flux',
+                'hotspot_offset',
+            ):
+                if (
+                    surface_config.get('model') == 'phase_curve'
+                    and surface_name in {'dayside_flux', 'nightside_flux'}
+                ):
+                    continue
+                width_name = f'{surface_name}_prior_width'
+                if width_name in surface_config:
+                    for i, (center, width) in enumerate(zip(
+                        np.atleast_1d(surface_config[surface_name]),
+                        np.atleast_1d(surface_config[width_name]),
+                    )):
+                        if width > 0.0:
+                            init_params_wl[f'_{surface_name}_{i}'] = center
+            init_params_wl.update(
+                _phase_curve_flux_init_sites(surface_config)
+            )
+            for i, spot in enumerate(surface_config.get('spots', ())):
+                if spot.get('contrast_prior_width', 0.0) > 0.0:
+                    init_params_wl[f'_stellar_spot_contrast_{i}'] = spot['contrast']
+            if uses_surface_model and not surface_config.get('fit_geometry', True):
+                for i in range(n_planets):
+                    init_params_wl.pop(f'log_a_rs_{i}', None)
+                    init_params_wl.pop(f'_b_{i}', None)
+                    init_params_wl.pop(f't0_{i}', None)
+                    init_params_wl.pop(f'rors_{i}', None)
+                    init_params_wl[f't0_{i}'] = PRIOR_T0[i]
+                    init_params_wl[f'b_{i}'] = PRIOR_B[i]
+                    init_params_wl[f'rors_{i}'] = PRIOR_RPRS[i]
+                    init_params_wl[f'a_rs_{i}'] = HARMONICA_A_RS[i]
+                    init_params_wl[f'duration_{i}'] = PRIOR_DUR[i]
+
             if 'quadratic' in detrending_type:
                 init_params_wl['v2'] = 0.0
             if 'cubic' in detrending_type:
@@ -7159,7 +7571,10 @@ def main():
                 # ``tau`` is deterministic; ``log_tau`` is the actual latent
                 # site and its prior spans 1e-3--1e-1 days.
                 init_params_wl['log_tau'] = jnp.log(1e-2)
-            if 'gp' in detrending_type:
+            if uses_surface_model:
+                soln = dict(init_params_wl)
+                print("Using the physical surface prior center for initialization.")
+            elif 'gp' in detrending_type:
                 init_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
                 init_params_wl['GP_log_rho'] = jnp.log(0.1)
             if 'linear_discontinuity' in detrending_type:
@@ -7209,6 +7624,25 @@ def main():
             # Step 1 of the Sing recipe measures LD freely.  The resulting
             # artifact is deliberately consumed only by the spectroscopic fit.
             wl_ld_mode = 'uniform' if ld_prior_mode == 'sing' else ld_prior_mode
+            if wl_ld_mode == 'fixed':
+                spot_basis_wl = _prepare_fixed_surface_basis(
+                    surface_config,
+                    data.wl_time,
+                    U_mu_wl,
+                    period=PERIOD_FIXED,
+                    t0=PRIOR_T0,
+                    a_rs=HARMONICA_A_RS,
+                    b=PRIOR_B,
+                    rors=PRIOR_RPRS,
+                    ecc=HARMONICA_ECC,
+                    omega=HARMONICA_OMEGA,
+                )
+                if spot_basis_wl is not None:
+                    _engine_wl_kw['surface_basis'] = spot_basis_wl
+                    print(
+                        "Prepared exact fixed-geometry surface basis "
+                        "for white-light inference."
+                    )
             whitelight_model_for_run = create_whitelight_model(
                 detrend_type=detrending_type,
                 n_planets=n_planets,
@@ -7314,7 +7748,7 @@ def main():
                         params_eval["_jaxoplanet_kernel"] = "native_power2"
                         params_eval["_ld_profile"] = "power2"
 
-                return params_eval
+                return _attach_surface_eval_metadata(params_eval, surface_config)
 
             try:
                 params_preopt = _build_preopt_physical_params(init_params_wl, n_planets)
@@ -7507,7 +7941,7 @@ def main():
                         p["u1_ld"] = U_mu_wl[0]
                         p["u2_ld"] = U_mu_wl[1]
 
-                return p
+                return _attach_surface_eval_metadata(p, surface_config)
 
             try:
 
@@ -7612,12 +8046,15 @@ def main():
                         _opt_sites = ["logD_0", "t0_0", "_b_0"]
                 else:
                     _opt_sites = None
-                stage1 = optimx.optimize(
-                    whitelight_model_for_run,
-                    sites=_opt_sites,
-                    start=init_params_wl,
-                )
-                soln = stage1(keys[0], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+                if uses_surface_model:
+                    soln = dict(init_params_wl)
+                else:
+                    stage1 = optimx.optimize(
+                        whitelight_model_for_run,
+                        sites=_opt_sites,
+                        start=init_params_wl,
+                    )
+                    soln = stage1(keys[0], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
 
                 stage2_sites = ["rors_0"]
                 if wl_ld_mode != "fixed":
@@ -7637,18 +8074,19 @@ def main():
                 if n_planets_sanity != 1:
                     stage2_sites = None
 
-                stage2 = optimx.optimize(
-                    whitelight_model_for_run,
-                    sites=stage2_sites,
-                    start=soln,
-                )
-                soln = stage2(keys[1], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+                if not uses_surface_model:
+                    stage2 = optimx.optimize(
+                        whitelight_model_for_run,
+                        sites=stage2_sites,
+                        start=soln,
+                    )
+                    soln = stage2(keys[1], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
 
-                stage3 = optimx.optimize(
-                    whitelight_model_for_run,
-                    start=soln,
-                )
-                soln = stage3(keys[2], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+                    stage3 = optimx.optimize(
+                        whitelight_model_for_run,
+                        start=soln,
+                    )
+                    soln = stage3(keys[2], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
 
                 # Constrained optimizers may return a Uniform latent exactly
                 # on its support edge.  That point has an infinite
@@ -7812,6 +8250,11 @@ def main():
                     # wider curvature range than per-channel spectroscopy;
                     # the 1e-8 lane floor would truncate real geometry modes.
                     eigenvalue_floor=1.0e-12,
+                    # Starry surface objectives are substantially larger than
+                    # transit-only objectives.  Evaluating finite-difference
+                    # and line-search points sequentially keeps peak compiler
+                    # memory bounded without changing the target or metric.
+                    sequential_evaluations=uses_surface_model,
                 )
                 laplace_preparation.inverse_mass_matrix.block_until_ready()
                 preparation_wall = time.perf_counter() - preparation_start
@@ -8047,6 +8490,12 @@ def main():
                     bestfit_params_wl['u2_ld'] = bestfit_params_wl['u2']
             set_fixed_param_stats('ecc', HARMONICA_ECC)
             set_fixed_param_stats('omega', HARMONICA_OMEGA)
+            for surface_name in (
+                'eclipse_depth', 'dayside_flux', 'nightside_flux',
+                'hotspot_offset', 'stellar_spot_contrast',
+            ):
+                if surface_name in wl_samples:
+                    set_param_stats(surface_name, wl_samples[surface_name])
             if transit_engine == 'harmonica':
                 for harmonic_name in HARMONICA_ODD_HARMONICS:
                     if harmonic_name in wl_samples:
@@ -8245,6 +8694,7 @@ def main():
                 t=data.wl_time,
                 jaxoplanet_kernel=jaxoplanet_kernel,
                 ld_profile=ld_profile,
+                surface_config=surface_config,
             )
 
             if 'gp' in detrending_type:
@@ -8324,6 +8774,7 @@ def main():
                 t=t_masked,
                 jaxoplanet_kernel=jaxoplanet_kernel,
                 ld_profile=ld_profile,
+                surface_config=surface_config,
             )
 
             if 'gp' in detrending_type:
@@ -8511,11 +8962,52 @@ def main():
                 add_scalar_param('log_width')
                 add_scalar_param('GP_log_sigma')
                 add_scalar_param('GP_log_rho')
+                for name in (
+                    'eclipse_depth', 'dayside_flux', 'nightside_flux',
+                    'hotspot_offset',
+                ):
+                    if name in bestfit_params_wl:
+                        values = np.atleast_1d(bestfit_params_wl[name])
+                        row[name] = values[i]
+                        row[f'{name}_err_low'] = np.atleast_1d(
+                            bestfit_params_wl[f'{name}_err_low']
+                        )[i]
+                        row[f'{name}_err_high'] = np.atleast_1d(
+                            bestfit_params_wl[f'{name}_err_high']
+                        )[i]
+                if 'stellar_spot_contrast' in bestfit_params_wl:
+                    for spot_index, value in enumerate(np.atleast_1d(
+                        bestfit_params_wl['stellar_spot_contrast']
+                    )):
+                        row[f'stellar_spot_contrast_{spot_index}'] = value
+                        row[f'stellar_spot_contrast_{spot_index}_err_low'] = np.atleast_1d(
+                            bestfit_params_wl['stellar_spot_contrast_err_low']
+                        )[spot_index]
+                        row[f'stellar_spot_contrast_{spot_index}_err_high'] = np.atleast_1d(
+                            bestfit_params_wl['stellar_spot_contrast_err_high']
+                        )[spot_index]
                 
                 rows.append(row)
         
             df = pd.DataFrame(rows)
             _atomic_dataframe_csv(df, wl_params_path, index=False)
+            if uses_surface_model:
+                white_surface_samples = {
+                    name: np.asarray(wl_samples[name])[:, None, ...]
+                    for name in (
+                        *SURFACE_PARAMS,
+                        'eclipse_depth_ppm', 'dayside_flux_ppm',
+                        'nightside_flux_ppm', 'hotspot_offset_deg',
+                    )
+                    if name in wl_samples
+                }
+                band = np.asarray(data.wavelengths_unbinned, dtype=float)
+                save_surface_results(
+                    np.asarray([np.nanmean(band)]),
+                    np.asarray([0.5 * (np.nanmax(band) - np.nanmin(band))]),
+                    white_surface_samples,
+                    wl_params_path,
+                )
             bestfit_params_wl_df = pd.read_csv(wl_params_path)
             if transit_engine == 'harmonica' and _has_harmonica_odd_samples(wl_samples):
                 band_wl_raw = np.asarray(data.wavelengths_hr)
@@ -8642,7 +9134,9 @@ def main():
         # Compute the exact LD inputs before deciding whether a previous LR fit
         # is reusable. This binds cache validity to the coefficients actually
         # consumed by the likelihood, including changes to external LD grids.
-        if ld_prior_mode == 'informed':
+        if explicit_ld is not None:
+            U_mu_lr, U_sigma_lr = _explicit_ld_grid(data.wavelengths_lr), None
+        elif ld_prior_mode == 'stellarprior':
             U_mu_lr, U_sigma_lr = get_or_build_power2_ld_prior(
                 stellar_cfg,
                 data.wavelengths_lr,
@@ -8782,6 +9276,9 @@ def main():
             )
 
     if need_lowres_analysis and valid is None:
+        if uses_surface_model:
+            jax.clear_caches()
+            print("Released white-light JAX executables before surface spectroscopy.")
         print(f"\n--- Running Low-Resolution Analysis (Binned to {lr_bin_str}) ---")
         time_lr = jnp.array(data.time[spec_good_mask])
         flux_lr = jnp.array(data.flux_lr[:, spec_good_mask])
@@ -8807,6 +9304,9 @@ def main():
             "u": U_mu_lr,
             "rors": jnp.tile(RORS_BASE, (num_lcs_lr, 1))
         }
+        _seed_surface_spectroscopic_init(
+            init_params_lr, surface_config, num_lcs_lr
+        )
         if ld_profile == 'quadratic' and ld_prior_mode == 'uniform':
             init_params_lr.pop('u', None)
             init_params_lr.update(_quadratic_uniform_initial_sites(
@@ -8863,9 +9363,15 @@ def main():
                         (num_lcs_lr, 1),
                     )
         if detrend_type_multiwave != 'none':
-            init_params_lr['c'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['c'].values[0])
+            init_params_lr['c'] = jnp.clip(
+                jnp.full(num_lcs_lr, bestfit_params_wl_df['c'].values[0]),
+                0.900001, 1.099999,
+            )
             if 'v' in bestfit_params_wl_df.columns:
-                 init_params_lr['v'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['v'].values[0])
+                 init_params_lr['v'] = jnp.clip(
+                     jnp.full(num_lcs_lr, bestfit_params_wl_df['v'].values[0]),
+                     -0.099999, 0.099999,
+                 )
 
         if 'explinear' in detrend_type_multiwave:
             init_params_lr['A'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['A'].values[0])
@@ -8910,6 +9416,25 @@ def main():
             ),
             **_engine_spectro_kw,
         }
+        spot_basis_lr = None
+        if lr_ld_mode == 'fixed':
+            spot_basis_lr = _prepare_fixed_surface_basis(
+                surface_config,
+                time_lr,
+                U_mu_lr,
+                period=PERIOD_FIXED,
+                t0=T0_BASE,
+                a_rs=A_RS_BASE,
+                b=B_BASE,
+                rors=RORS_BASE,
+                ecc=HARMONICA_ECC,
+                omega=HARMONICA_OMEGA,
+            )
+            if spot_basis_lr is not None:
+                print(
+                    "Prepared exact fixed-geometry surface basis for "
+                    "low-resolution inference."
+                )
         lr_model_for_run = _build_spectroscopic_model(
             create_vectorized_model,
             **lr_model_builder_kwargs,
@@ -8945,6 +9470,8 @@ def main():
             model_run_args_lr['precomputed_yerr_per_lc'] = jnp.nanmedian(
                 flux_err_lr, axis=1
             )
+            if spot_basis_lr is not None:
+                model_run_args_lr['surface_basis_data'] = spot_basis_lr
         if transit_engine == 'harmonica':
             model_run_args_lr['mu_cos_i'] = COSI_BASE
             model_run_args_lr['harmonica_a_rs'] = A_RS_BASE
@@ -8957,9 +9484,9 @@ def main():
 
         if lr_ld_mode == 'fixed':
             model_run_args_lr['ld_fixed'] = U_mu_lr
-        elif lr_ld_mode in {'widegaussian', 'informed', 'sing'}:
+        elif lr_ld_mode in {'gaussian', 'stellarprior', 'sing'}:
             model_run_args_lr['mu_u_ld'] = U_mu_lr
-            if ((ld_profile == 'power2' and lr_ld_mode == 'informed') or lr_ld_mode == 'sing') and U_sigma_lr is not None:
+            if ((ld_profile == 'power2' and lr_ld_mode == 'stellarprior') or lr_ld_mode == 'sing') and U_sigma_lr is not None:
                 model_run_args_lr['sigma_u_ld'] = U_sigma_lr
         elif lr_ld_mode == 'uniform':
             pass
@@ -9059,7 +9586,7 @@ def main():
             if fitted_offsets is None:
                 print("[Sing LD] running broad independent (u_plus, u_minus) coarse calibration pass", flush=True)
                 gray_builder_kwargs = dict(lr_model_builder_kwargs)
-                gray_builder_kwargs['ld_mode'] = 'sing_free'
+                gray_builder_kwargs['ld_mode'] = 'uniform'
                 gray_model = _build_spectroscopic_model(
                     create_vectorized_model, **gray_builder_kwargs
                 )
@@ -9075,8 +9602,10 @@ def main():
                 )
                 gray_u_plus_init = 1.0 - np.asarray(gray_l_init)
                 gray_u_minus_init = gray_u_plus_init - 8.0 * np.asarray(gray_delta_init)
-                gray_init['limb_u_plus'] = jnp.asarray(gray_u_plus_init)
-                gray_init['limb_u_minus'] = jnp.asarray(gray_u_minus_init)
+                gray_init['ld_uplus_uminus'] = jnp.column_stack((
+                    jnp.asarray(gray_u_plus_init),
+                    jnp.asarray(gray_u_minus_init),
+                ))
                 gray_args = dict(model_run_args_lr)
                 gray_args.pop('mu_u_ld', None)
                 gray_args.pop('sigma_u_ld', None)
@@ -9121,7 +9650,7 @@ def main():
                         checkpoint_signature={
                             'stage': 'sing_gray_offset_calibration',
                             'ld_profile': 'quadratic',
-                            'ld_mode': 'sing_free',
+                            'ld_mode': 'uniform',
                             'fingerprint': gray_digest,
                         },
                         **gray_args,
@@ -9284,6 +9813,7 @@ def main():
                 ),
                 'jaxoplanet_kernel': jaxoplanet_kernel,
                 'transit_window_optimization': transit_window_optimization,
+                'surface_config': surface_config,
                 'harmonica_max_order': max_harmonic_order,
                 'harmonica_spectro_parameterization': harmonica_spectro_parameterization,
                 'harmonica_spectro_fit_jitter': harmonica_spectro_fit_jitter,
@@ -9410,7 +9940,14 @@ def main():
             })
 
         map_params_lr.update({k: jnp.nanmedian(samples_lr[k], axis=0) for k in TREND_PARAMS if k in samples_lr})
+        map_params_lr.update({
+            k: jnp.nanmedian(samples_lr[k], axis=0)
+            for k in SURFACE_PARAMS if k in samples_lr
+        })
         if transit_engine == 'jaxoplanet':
+            map_params_lr = _attach_surface_eval_metadata(
+                map_params_lr, surface_config
+            )
             map_params_lr = _attach_jaxoplanet_eval_metadata(
                 map_params_lr,
                 time_lr,
@@ -9431,6 +9968,7 @@ def main():
                 in_axes_map.update({'u1_ld': 0, 'u2_ld': 0})
             in_axes_map.update({name: 0 for name in HARMONICA_ODD_HARMONICS if name in map_params_lr})
         in_axes_map.update({k: 0 for k in TREND_PARAMS if k in map_params_lr})
+        in_axes_map.update({k: 0 for k in SURFACE_PARAMS if k in map_params_lr})
         
         final_in_axes = {k: in_axes_map.get(k, None) for k in map_params_lr.keys()}
 
@@ -9438,6 +9976,9 @@ def main():
         @jax.jit
         def eval_channel_lr(channel_params, t_val, *extra_args):
             if transit_engine == 'jaxoplanet':
+                channel_params = _attach_surface_eval_metadata(
+                    channel_params, surface_config
+                )
                 channel_params = {
                     **channel_params,
                     "_jaxoplanet_kernel": jaxoplanet_kernel,
@@ -9450,7 +9991,7 @@ def main():
         for i in range(num_lcs_lr):
             channel_params = {}
             for k, v in map_params_lr.items():
-                if k in _JAXOPLANET_STATIC_EVAL_KEYS:
+                if k in _JAXOPLANET_STATIC_EVAL_KEYS or k in _SURFACE_STATIC_EVAL_KEYS:
                     continue
                 if final_in_axes[k] == 0:
                     channel_params[k] = v[i]
@@ -9518,11 +10059,17 @@ def main():
                 ld_profile=ld_profile,
                 transit_window_optimization=transit_window_optimization,
             )
+        plot_params_lr = dict(map_params_lr)
+        if spot_basis_lr is not None:
+            plot_params_lr['_surface_basis'] = _surface_basis_on_time_mask(
+                spot_basis_lr, valid
+            )
+            plot_params_lr['_surface_basis_time'] = jnp.asarray(time_lr)
         
         print("Plotting low-resolution fits and residuals...")
         median_total_error_lr = np.nanmedian(samples_lr['total_error'], axis=0)
         plot_wavelength_offset_summary(time_lr, flux_lr, median_total_error_lr, data.wavelengths_lr,
-                                     map_params_lr, {
+                                     plot_params_lr, {
                                          "period": PERIOD_FIXED,
                                          "transit_engine": transit_engine,
                                          "param_method": param_method,
@@ -9567,8 +10114,19 @@ def main():
         if poly_save:
             _atomic_savez(poly_coeffs_path, **poly_save)
 
-        plot_transmission_spectrum(wl_lr, samples_lr["rors"], f"{output_dir}/24_{lr_artifact_stem}_spectrum")
-        save_results(wl_lr, data.wavelengths_err_lr, samples_lr, f"{output_dir}/{lr_artifact_stem}.csv")
+        if surface_config['model'] != 'eclipse':
+            plot_transmission_spectrum(
+                wl_lr, samples_lr["rors"],
+                f"{output_dir}/24_{lr_artifact_stem}_spectrum",
+            )
+            save_results(
+                wl_lr, data.wavelengths_err_lr, samples_lr,
+                f"{output_dir}/{lr_artifact_stem}.csv",
+            )
+        save_surface_results(
+            wl_lr, data.wavelengths_err_lr, samples_lr,
+            f"{output_dir}/{lr_artifact_stem}.csv",
+        )
         save_detailed_fit_results(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, data.wavelengths_err_lr, samples_lr, map_params_lr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{lr_artifact_stem}", median_total_error_lr, gp_trend=gp_trend_lr, spot_trend=spot_trend_lr, jump_trend=jump_trend_lr)
         if transit_engine == 'harmonica' and _has_harmonica_odd_samples(samples_lr):
             save_harmonica_limb_products(
@@ -9593,6 +10151,9 @@ def main():
         print("\nPrep stage complete. Skipping high-resolution analysis.")
         return
 
+    if uses_surface_model:
+        jax.clear_caches()
+        print("Released low-resolution JAX executables before high-resolution surface inference.")
     print(f"\n--- Running High-Resolution Analysis (Binned to {hr_bin_str}) ---")
     time_hr = jnp.array(data.time[spec_good_mask])
     flux_hr = jnp.array(data.flux_hr[:, spec_good_mask])
@@ -9660,8 +10221,11 @@ def main():
             ld_interpolated_hr = jnp.array(np.column_stack((u1_interp_hr, u2_interp_hr)))
             
         model_run_args_hr['ld_interpolated'] = ld_interpolated_hr
-    elif hr_ld_mode in {'fixed', 'widegaussian', 'informed', 'sing', 'uniform'}:
-        if hr_custom_ld_path:
+    elif hr_ld_mode in {'fixed', 'gaussian', 'stellarprior', 'sing', 'uniform'}:
+        if explicit_ld is not None:
+            U_mu_hr_init = _explicit_ld_grid(wl_hr)
+            U_sigma_hr_init = None
+        elif hr_custom_ld_path:
             print(f"Using custom high-resolution LD curve from {hr_custom_ld_path} with smoothing window={hr_custom_ld_smooth_window}")
             U_mu_hr_init = _load_custom_power2_ld_curve(
                 hr_custom_ld_path,
@@ -9675,7 +10239,7 @@ def main():
                 'c2': np.asarray(U_mu_hr_init[:, 1], dtype=float),
             })
             applied_ld_df.to_csv(f"{output_dir}/{instrument_full_str}_{hr_bin_str}_applied_custom_ld.csv", index=False)
-        elif ld_prior_mode == 'informed':
+        elif ld_prior_mode == 'stellarprior':
             U_mu_hr_init, U_sigma_hr_init = get_or_build_power2_ld_prior(
                 stellar_cfg, wl_hr, data.wavelengths_err_hr, instrument,
                 order=order if instrument == 'NIRISS/SOSS' else None,
@@ -9692,9 +10256,9 @@ def main():
                 U_mu_hr_init, U_sigma_hr_init = build_sing_ld_prior(U_mu_hr_init, flags, stellar_cfg)
         if hr_ld_mode == 'fixed':
             model_run_args_hr['ld_fixed'] = U_mu_hr_init
-        elif hr_ld_mode in {'widegaussian', 'informed', 'sing'}:
+        elif hr_ld_mode in {'gaussian', 'stellarprior', 'sing'}:
             model_run_args_hr['mu_u_ld'] = U_mu_hr_init
-            if ((ld_profile == 'power2' and hr_ld_mode == 'informed') or hr_ld_mode == 'sing') and U_sigma_hr_init is not None:
+            if ((ld_profile == 'power2' and hr_ld_mode == 'stellarprior') or hr_ld_mode == 'sing') and U_sigma_hr_init is not None:
                 model_run_args_hr['sigma_u_ld'] = U_sigma_hr_init
         elif hr_ld_mode == 'uniform':
             pass
@@ -9727,6 +10291,9 @@ def main():
         model_run_args_hr['mu_omega'] = HARMONICA_OMEGA
 
     init_params_hr = { "rors": jnp.tile(RORS_BASE, (num_lcs_hr, 1)), "u": U_mu_hr_init if hr_ld_mode!='interpolated' else ld_interpolated_hr }
+    _seed_surface_spectroscopic_init(
+        init_params_hr, surface_config, num_lcs_hr
+    )
     if ld_profile == 'quadratic' and hr_ld_mode == 'uniform':
         init_params_hr.pop('u', None)
         init_params_hr.update(_quadratic_uniform_initial_sites(
@@ -9787,14 +10354,25 @@ def main():
     if hr_trend_mode in {'free', 'gaussian_marginalized'}:
         if detrend_type_multiwave != 'none':
             if best_poly_coeffs_c is not None and np.ndim(best_poly_coeffs_c) > 0:
-                init_params_hr["c"] = np.polyval(best_poly_coeffs_c, wl_hr)
+                init_params_hr["c"] = jnp.clip(
+                    np.polyval(best_poly_coeffs_c, wl_hr), 0.900001, 1.099999
+                )
             else:
-                init_params_hr["c"] = jnp.full(num_lcs_hr, bestfit_params_wl_df['c'].values[0])
+                init_params_hr["c"] = jnp.clip(
+                    jnp.full(num_lcs_hr, bestfit_params_wl_df['c'].values[0]),
+                    0.900001, 1.099999,
+                )
             if 'v' in bestfit_params_wl_df.columns:
                  if best_poly_coeffs_v is not None and np.ndim(best_poly_coeffs_v) > 0:
-                     init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
+                     init_params_hr["v"] = jnp.clip(
+                         np.polyval(best_poly_coeffs_v, wl_hr),
+                         -0.099999, 0.099999,
+                     )
                  else:
-                     init_params_hr["v"] = jnp.full(num_lcs_hr, bestfit_params_wl_df['v'].values[0])
+                     init_params_hr["v"] = jnp.clip(
+                         jnp.full(num_lcs_hr, bestfit_params_wl_df['v'].values[0]),
+                         -0.099999, 0.099999,
+                     )
         if 'explinear' in detrend_type_multiwave:
             init_params_hr['A'] = jnp.full(
                 num_lcs_hr, bestfit_params_wl_df['A'].values[0]
@@ -9833,6 +10411,26 @@ def main():
         ),
         **_engine_spectro_kw,
     }
+    spot_basis_hr = None
+    if hr_ld_mode == 'fixed':
+        spot_basis_hr = _prepare_fixed_surface_basis(
+            surface_config,
+            time_hr,
+            U_mu_hr_init,
+            period=PERIOD_FIXED,
+            t0=T0_BASE,
+            a_rs=A_RS_BASE,
+            b=B_BASE,
+            rors=RORS_BASE,
+            ecc=HARMONICA_ECC,
+            omega=HARMONICA_OMEGA,
+        )
+        if spot_basis_hr is not None:
+            model_run_args_hr['surface_basis_data'] = spot_basis_hr
+            print(
+                "Prepared exact fixed-geometry surface basis for "
+                "high-resolution inference."
+            )
     hr_model_for_run = _build_spectroscopic_model(
         create_vectorized_model,
         **hr_model_builder_kwargs,
@@ -10010,6 +10608,7 @@ def main():
             ),
             'jaxoplanet_kernel': jaxoplanet_kernel,
             'transit_window_optimization': transit_window_optimization,
+            'surface_config': surface_config,
             'harmonica_max_order': max_harmonic_order,
             'harmonica_spectro_parameterization': harmonica_spectro_parameterization,
             'harmonica_spectro_fit_jitter': harmonica_spectro_fit_jitter,
@@ -10121,7 +10720,14 @@ def main():
             "omega": HARMONICA_OMEGA,
         })
     map_params_hr.update({k: jnp.nanmedian(samples_hr[k], axis=0) for k in TREND_PARAMS if k in samples_hr})
+    map_params_hr.update({
+        k: jnp.nanmedian(samples_hr[k], axis=0)
+        for k in SURFACE_PARAMS if k in samples_hr
+    })
     if transit_engine == 'jaxoplanet':
+        map_params_hr = _attach_surface_eval_metadata(
+            map_params_hr, surface_config
+        )
         map_params_hr = _attach_jaxoplanet_eval_metadata(
             map_params_hr,
             time_hr,
@@ -10141,6 +10747,7 @@ def main():
             in_axes_map_hr.update({'u1_ld': 0, 'u2_ld': 0})
         in_axes_map_hr.update({name: 0 for name in HARMONICA_ODD_HARMONICS if name in map_params_hr})
     in_axes_map_hr.update({k: 0 for k in TREND_PARAMS if k in map_params_hr})
+    in_axes_map_hr.update({k: 0 for k in SURFACE_PARAMS if k in map_params_hr})
     
     final_in_axes_hr = {k: in_axes_map_hr.get(k, None) for k in map_params_hr.keys()}
     selected_kernel_hr = resolve_detrend_kernel(detrend_type_multiwave)
@@ -10150,6 +10757,9 @@ def main():
     @jax.jit
     def eval_channel_hr(channel_params, t_val, *extra_args):
         if transit_engine == 'jaxoplanet':
+            channel_params = _attach_surface_eval_metadata(
+                channel_params, surface_config
+            )
             channel_params = {
                 **channel_params,
                 "_jaxoplanet_kernel": jaxoplanet_kernel,
@@ -10162,7 +10772,7 @@ def main():
     for i in range(num_lcs_hr):
         channel_params = {}
         for k, v in map_params_hr.items():
-            if k in _JAXOPLANET_STATIC_EVAL_KEYS:
+            if k in _JAXOPLANET_STATIC_EVAL_KEYS or k in _SURFACE_STATIC_EVAL_KEYS:
                 continue
             if final_in_axes_hr[k] == 0:
                 channel_params[k] = v[i]
@@ -10202,8 +10812,12 @@ def main():
     )
 
     median_total_error_hr = np.nanmedian(samples_hr['total_error'], axis=0)
+    plot_params_hr = dict(map_params_hr)
+    if spot_basis_hr is not None:
+        plot_params_hr['_surface_basis'] = spot_basis_hr
+        plot_params_hr['_surface_basis_time'] = jnp.asarray(time_hr)
     plot_wavelength_offset_summary(time_hr, flux_hr, median_total_error_hr, data.wavelengths_hr,
-                                    map_params_hr, {
+                                    plot_params_hr, {
                                         "period": PERIOD_FIXED,
                                         "transit_engine": transit_engine,
                                         "param_method": param_method,
@@ -10211,8 +10825,19 @@ def main():
                                     f"{output_dir}/34_{hr_artifact_stem}_summary.png",
                                   detrend_type=detrend_type_multiwave, gp_trend=gp_trend, spot_trend=spot_trend, spot_trend2=spot_trend2, jump_trend=jump_trend, exp_trend=(exp_trend_hr if 'explinear_spectroscopic' in detrend_type_multiwave else None))
 
-    plot_transmission_spectrum(wl_hr, samples_hr["rors"], f"{output_dir}/31_{hr_artifact_stem}_spectrum")
-    save_results(wl_hr, data.wavelengths_err_hr, samples_hr,  f"{output_dir}/{hr_artifact_stem}.csv")
+    if surface_config['model'] != 'eclipse':
+        plot_transmission_spectrum(
+            wl_hr, samples_hr["rors"],
+            f"{output_dir}/31_{hr_artifact_stem}_spectrum",
+        )
+        save_results(
+            wl_hr, data.wavelengths_err_hr, samples_hr,
+            f"{output_dir}/{hr_artifact_stem}.csv",
+        )
+    save_surface_results(
+        wl_hr, data.wavelengths_err_hr, samples_hr,
+        f"{output_dir}/{hr_artifact_stem}.csv",
+    )
     save_detailed_fit_results(time_hr, flux_hr, flux_err_hr, data.wavelengths_hr, data.wavelengths_err_hr, samples_hr, map_params_hr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{hr_artifact_stem}", median_total_error_hr, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
 
     if transit_engine == 'harmonica' and _has_harmonica_odd_samples(samples_hr):

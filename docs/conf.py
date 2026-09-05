@@ -5,8 +5,8 @@ sys.path.insert(0, os.path.abspath(".."))
 
 project = "penumbra"
 author = f"{project} contributors"
-extensions = ["myst_parser", "sphinx.ext.autodoc", "sphinx.ext.napoleon", "sphinx_copybutton", "sphinx_design"]
-myst_enable_extensions = ["colon_fence", "deflist", "substitution"]
+extensions = ["myst_parser", "sphinx.ext.mathjax", "sphinx.ext.autodoc", "sphinx.ext.napoleon", "sphinx_copybutton", "sphinx_design"]
+myst_enable_extensions = ["colon_fence", "dollarmath", "deflist", "substitution"]
 myst_substitutions = {"project": project}
 html_theme = "furo"
 exclude_patterns = ["_build"]

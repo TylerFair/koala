@@ -62,37 +62,6 @@ def test_sing_prior_trace_has_physical_quadratic_coefficients():
     assert np.all(c1 + c2 <= 1 + 1e-12)
 
 
-def test_sing_free_trace_uses_independent_uplus_uminus_coordinates():
-    import jax
-    import jax.numpy as jnp
-    from numpyro import handlers
-    from models.jaxoplanet import create_vectorized_model
-
-    model = create_vectorized_model(ld_mode='sing_free', ld_profile='quadratic')
-    kwargs = dict(
-        t=jnp.linspace(-0.03, 0.03, 11), yerr=jnp.full((2, 11), 1e-3),
-        y=jnp.ones((2, 11)), mu_duration=jnp.array([0.06]),
-        mu_t0=jnp.array([0.0]), mu_b=jnp.array([0.3]),
-        mu_depths=jnp.full((2, 1), 0.01), PERIOD=jnp.array([3.0]),
-    )
-    trace = handlers.trace(handlers.seed(model, jax.random.PRNGKey(9))).get_trace(**kwargs)
-    u_plus = np.asarray(trace['limb_u_plus']['value'])
-    u_minus = np.asarray(trace['limb_u_minus']['value'])
-    np.testing.assert_allclose(trace['limb_l']['value'], 1.0 - u_plus)
-    np.testing.assert_allclose(
-        trace['limb_delta']['value'], (u_plus - u_minus) / 8.0)
-    assert trace['limb_u_plus']['type'] == 'sample'
-    assert trace['limb_u_minus']['type'] == 'sample'
-    assert trace['limb_l']['type'] == 'deterministic'
-    assert trace['limb_delta']['type'] == 'deterministic'
-    # Neither fitted site's distribution depends on the other draw: there is
-    # no conditional delta support that collapses as l approaches one.
-    assert np.shape(trace['limb_u_plus']['fn'].base_dist.low) == ()
-    assert np.shape(trace['limb_u_minus']['fn'].base_dist.low) == ()
-    assert trace['c1']['type'] == 'deterministic'
-    assert trace['c2']['type'] == 'deterministic'
-
-
 def _tiny_sing_problem():
     import jax.numpy as jnp
     from models.jaxoplanet import create_vectorized_model

@@ -22,6 +22,11 @@ from plotting_style import (
 # Use the full catalogue here so plotting can handle any saved results.
 HARMONICA_ODD_HARMONICS = tuple(name for name, _ in _ALL_ODD_COEFF_SPECS)
 _JAXOPLANET_EVAL_METADATA = (
+    "_surface_model",
+    "_stellar_spots",
+    "stellar_rotation_period",
+    "stellar_inclination",
+    "stellar_phase",
     "_jaxoplanet_kernel",
     "_ld_profile",
     "_transit_phase_offsets",
@@ -110,6 +115,29 @@ def _single_curve_transit_signal(t, map_params, transit_params, idx):
         for name in _JAXOPLANET_EVAL_METADATA:
             if name in map_params:
                 params[name] = map_params[name]
+            elif name in transit_params:
+                params[name] = transit_params[name]
+        for name in (
+            "eclipse_depth", "dayside_flux", "nightside_flux",
+            "hotspot_offset", "stellar_spot_contrast",
+        ):
+            if name in map_params:
+                params[name] = jnp.asarray(map_params[name][idx])
+        if params.get("_surface_model", "transit") != "transit" or params.get("_stellar_spots", ()):
+            params["c"] = jnp.asarray(_first_value(map_params.get("c", 1.0), idx))
+        basis = map_params.get("_surface_basis")
+        if basis is not None:
+            basis_time = map_params.get("_surface_basis_time")
+            if basis_time is None or not np.array_equal(np.asarray(basis_time), np.asarray(t)):
+                raise ValueError("The plotting surface basis must match the plotted time grid.")
+            if basis.baseline.shape[-1] != len(t):
+                raise ValueError("The plotting surface basis has the wrong number of cadences.")
+            params["_surface_basis"] = type(basis)(*(
+                None if field is None else (
+                    field[idx] if basis.baseline.ndim > 1 else field
+                )
+                for field in basis
+            ))
 
     return np.asarray(compute_transit_model_auto(params, jnp.asarray(t)))
 

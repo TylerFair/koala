@@ -1,5 +1,7 @@
 # jwst-lightcurves
 
+The [executed surface tutorial](docs/tutorials/synthetic_surfaces.md) adds synthetic eclipse and phase-curve spectra, a thermal map with uncertainty, stellar-spot recovery, corner plots, and residual diagnostics. Run `python tools/surface_publication_example.py all` in the fitter environment.
+
 Transit light-curve fitting for JWST time-series spectroscopy. Fits the
 white-light curve first, passes the orbital geometry to the wavelength
 channels, and writes a transmission spectrum with per-channel posteriors.

@@ -1,0 +1,49 @@
+# Transit across a rotating spotted star. The spot locations and sizes are
+# fixed; contrast_prior_width makes each spot contrast an inferred quantity.
+# Generate the input with: python tools/example_phase_curves.py stellar_spots
+planet:
+  name: Synthetic-Stellar-Spots
+  period: 2.0
+  t0: 60000.0
+  b: 0.25
+  rprs: 0.10
+  a_rs: 6.0
+  ecc: 0.0
+  omega: 0.0
+
+stellar:
+  ld_coefficients: [0.3, 0.2]
+  rotation_period: 2.0
+  spots:
+    - latitude_deg: 15.0
+      longitude_deg: 0.0
+      radius_deg: 20.0
+      contrast: 0.40
+      contrast_prior_width: 0.15
+
+instrument: NIRSPEC/G395M
+nrs: 1
+path: .
+input_dir: examples/data/generated
+fits_file: synthetic_stellar_spots.fits
+output_dir: results/synthetic_stellar_spots
+
+resolution:
+  low: 20
+  high: native
+
+flags:
+  light_curve_model: transit
+  fit_geometry: false
+  transit_engine: jaxoplanet
+  detrending_type: linear
+  ld_profile: quadratic
+  ld_prior: fixed
+  random_seed: 20260904
+  spectro_chunk_size: 4
+
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: cpu

@@ -119,8 +119,13 @@ def prepare_laplace_metric(
     eigenvalue_floor=1.0e-8,
     fd_relative_step=2.0e-4,
     line_search_steps=8,
+    sequential_evaluations=False,
 ):
     """Prepare a dense Laplace metric for one arbitrary NumPyro posterior.
+
+    ``sequential_evaluations`` bounds temporary memory for expensive surface
+    models by evaluating finite-difference and line-search points one at a
+    time. It uses the same objective, derivatives, and candidate points.
 
     This is the scalar-posterior counterpart of the per-lane preparation used
     by :class:`IndependentNUTSRunner`.  It deliberately returns NumPyro's
@@ -146,10 +151,15 @@ def prepare_laplace_metric(
     value_and_grad = jax.value_and_grad(potential)
     gradient_fn = jax.grad(potential)
 
+    def evaluate_points(function, points):
+        if sequential_evaluations:
+            return jax.lax.map(function, points)
+        return jax.vmap(function)(points)
+
     def central_gradient_hessian(flat, steps):
         offsets = jnp.eye(flat.shape[0], dtype=flat.dtype) * steps[:, None]
-        plus = jax.vmap(lambda offset: gradient_fn(flat + offset))(offsets)
-        minus = jax.vmap(lambda offset: gradient_fn(flat - offset))(offsets)
+        plus = evaluate_points(lambda offset: gradient_fn(flat + offset), offsets)
+        minus = evaluate_points(lambda offset: gradient_fn(flat - offset), offsets)
         estimate = (plus - minus) / (2.0 * steps[:, None])
         return 0.5 * (estimate + estimate.T)
 
@@ -203,7 +213,7 @@ def prepare_laplace_metric(
             (scales[:, None] * direction, scales[:, None] * gradient_direction), axis=0
         )
         candidates = flat[None, :] + directions
-        candidate_values = jax.vmap(potential)(candidates)
+        candidate_values = evaluate_points(potential, candidates)
         candidate_values = jnp.where(jnp.isfinite(candidate_values), candidate_values, jnp.inf)
         best = jnp.argmin(candidate_values)
         accept = candidate_values[best] < value
@@ -241,6 +251,11 @@ def _pad_first_axis(value, size):
     return jnp.concatenate((value, padding), axis=0)
 
 
+def _first_tree_lane(value):
+    """Take lane zero from every array leaf while preserving PyTree types."""
+    return jax.tree_util.tree_map(lambda leaf: leaf[0], value)
+
+
 def _partition_model_kwargs(
     model_kwargs,
     channel_varying_kwargs,
@@ -267,6 +282,23 @@ def _partition_model_kwargs(
     for name, value in model_kwargs.items():
         if value is None:
             shared[name] = None
+            continue
+        if hasattr(value, "baseline") and (
+            hasattr(value, "differences") or hasattr(value, "uniform")
+        ):
+            if name not in channel_varying_kwargs:
+                shared[name] = value
+                continue
+            if value.baseline.ndim <= 1 or value.baseline.shape[0] != num_channels:
+                raise ValueError(
+                    f"Channel-varying spot basis {name!r} must have leading "
+                    f"dimension {num_channels}."
+                )
+            varying[name] = type(value)(*(
+                None if field is None else
+                _pad_first_axis(field, lane_width)[:, None, ...]
+                for field in value
+            ))
             continue
         array = _asarray_f64(value)
         if name in channel_varying_kwargs:
@@ -1413,7 +1445,8 @@ class _IndependentSamplerRunner:
         enriched_init = _enrich_initial_values(init_params)
         first_init = _first_lane_initial_values(enriched_init, num_channels)
         first_varying = {
-            name: value[0] for name, value in varying_kwargs.items()
+            name: _first_tree_lane(value)
+            for name, value in varying_kwargs.items()
         }
         first_kwargs = self._merge_lane_kwargs(
             static_shared, dynamic_shared, first_varying
@@ -1720,7 +1753,8 @@ def _get_samples_independent_uncached(
     # different observations and priors in each vmap lane.
     key_model, key_chains = jax.random.split(key)
     first_kwargs = {
-        name: value[0] for name, value in varying_kwargs.items()
+        name: _first_tree_lane(value)
+        for name, value in varying_kwargs.items()
     }
     model_info = initialize_model(
         key_model,

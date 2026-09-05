@@ -44,7 +44,7 @@ def test_whitelight_optimizer_rejects_observed_nonphysical_maxted_solution():
     }
     valid, reasons = _validate_whitelight_optimized_start(
         invalid, ld_profile="power2", ld_parameterization="decorrelated",
-        ld_prior_mode="widegaussian", n_planets=1,
+        ld_prior_mode="gaussian", n_planets=1,
     )
     assert not valid
     assert any("non-finite" in reason for reason in reasons)
@@ -61,7 +61,7 @@ def test_whitelight_optimizer_accepts_transformed_physical_prior_start():
             "rors_0": jnp.array(0.1457),
         },
         ld_profile="power2", ld_parameterization="decorrelated",
-        ld_prior_mode="widegaussian", n_planets=1,
+        ld_prior_mode="gaussian", n_planets=1,
     )
     assert valid
     assert reasons == []

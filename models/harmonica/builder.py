@@ -20,6 +20,7 @@ from .core import (
     harmonica_half_area_coefficients_from_area_radius,
 )
 from ..detrend import _split_components
+from ..limb_darkening_config import GAUSSIAN_LD_WIDTH
 from ..trends import (
     _soft_step,
     resolve_whitelight_trend_parameterization,
@@ -182,7 +183,7 @@ def derive_geometry(wl_samples, period, ecc=0.0, omega=0.0):
     return result
 
 
-def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='free',
+def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussian',
                             max_harmonic_order=1, param_method='duration',
                             ld_profile='power2', step_width_mode='free',
                             trend_parameterization='physical',
@@ -200,7 +201,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='free',
     if ld_profile == 'quadratic' and ld_mode != 'fixed':
         raise ValueError(
             "Harmonica quadratic limb darkening uses fixed direct u1/u2 "
-            "coefficients; set ld_prior='fixed' or fix_ld: true."
+            "coefficients; set ld_prior='fixed'."
         )
     odd_specs = harmonica_odd_coeff_specs(max_harmonic_order)
     detrend_components = _split_components(detrend_type)
@@ -305,13 +306,13 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='free',
             u1 = numpyro.deterministic('u1', u_prior[0])
             u2 = numpyro.deterministic('u2', u_prior[1])
         else:
-            if ld_mode in {'free', 'widegaussian', 'informed'}:
-                if ld_mode == 'informed':
+            if ld_mode in {'gaussian', 'stellarprior'}:
+                if ld_mode == 'stellarprior':
                     if 'u_sigma' not in prior_params:
-                        raise ValueError("ld_mode='informed' requires prior_params['u_sigma'].")
+                        raise ValueError("ld_mode='stellarprior' requires prior_params['u_sigma'].")
                     u_sigma = jnp.asarray(prior_params['u_sigma'], dtype=jnp.float64)
                 else:
-                    u_sigma = jnp.asarray(prior_params.get('u_sigma', jnp.array([0.2, 0.2])), dtype=jnp.float64)
+                    u_sigma = jnp.full_like(u_prior, GAUSSIAN_LD_WIDTH)
                 u_sigma = jnp.broadcast_to(u_sigma, u_prior.shape)
                 u_sigma = jnp.clip(u_sigma, 1e-6, None)
                 c1 = numpyro.sample('c1', dist.TruncatedNormal(u_prior[0], u_sigma[0], low=0.0, high=1.0))
@@ -508,7 +509,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='free',
     return _whitelight_model
 
 
-def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free',
+def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mode='free',
                             n_planets=1, max_harmonic_order=1,
                             odd_parameterization='fractional', fit_jitter=True,
                             odd_frac_sigma=0.1, ld_profile='power2'):
@@ -519,7 +520,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
     if ld_profile not in {'power2', 'quadratic'}:
         raise ValueError(f"Unsupported Harmonica ld_profile: {ld_profile}")
     if ld_profile == 'quadratic' and ld_mode not in {
-        'fixed', 'interpolated', 'sing', 'sing_free'
+        'fixed', 'interpolated', 'sing'
     }:
         raise ValueError(
             "Harmonica quadratic limb darkening uses fixed direct u1/u2 "
@@ -598,38 +599,25 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             total_error = numpyro.deterministic('total_error', yerr_per_lc)
             error_broadcast = yerr_matrix
 
-        if ld_profile == 'quadratic' and ld_mode in {'sing', 'sing_free'}:
-            if ld_mode == 'sing' and sigma_u_ld is None:
+        if ld_profile == 'quadratic' and ld_mode == 'sing':
+            if sigma_u_ld is None:
                 raise ValueError("ld_mode='sing' requires (l, delta) sigma_u_ld.")
-            if ld_mode == 'sing_free':
-                limb_u_plus = numpyro.sample(
-                    'limb_u_plus', dist.Uniform(-1.0, 2.0).expand([num_lcs])
-                )
-                limb_u_minus = numpyro.sample(
-                    'limb_u_minus', dist.Uniform(-2.0, 2.0).expand([num_lcs])
-                )
-                limb_l = numpyro.deterministic('limb_l', 1.0 - limb_u_plus)
-                limb_delta = numpyro.deterministic(
-                    'limb_delta', (limb_u_plus - limb_u_minus) / 8.0
-                )
-            else:
-                sing_mu = jnp.asarray(mu_u_ld, dtype=jnp.float64)
-                sing_sigma = jnp.asarray(sigma_u_ld, dtype=jnp.float64)
-                limb_l = numpyro.sample(
-                    'limb_l',
-                    dist.TruncatedNormal(
-                        sing_mu[:, 0], sing_sigma[:, 0], low=0.0, high=1.0
-                    ),
-                )
+            sing_mu = jnp.asarray(mu_u_ld, dtype=jnp.float64)
+            sing_sigma = jnp.asarray(sigma_u_ld, dtype=jnp.float64)
+            limb_l = numpyro.sample(
+                'limb_l',
+                dist.TruncatedNormal(
+                    sing_mu[:, 0], sing_sigma[:, 0], low=0.0, high=1.0
+                ),
+            )
             u_plus = 1.0 - limb_l
-            if ld_mode != 'sing_free':
-                limb_delta = numpyro.sample(
-                    'limb_delta',
-                    dist.TruncatedNormal(
-                        sing_mu[:, 1], sing_sigma[:, 1],
-                        low=-u_plus / 4.0, high=u_plus / 4.0,
-                    ),
-                )
+            limb_delta = numpyro.sample(
+                'limb_delta',
+                dist.TruncatedNormal(
+                    sing_mu[:, 1], sing_sigma[:, 1],
+                    low=-u_plus / 4.0, high=u_plus / 4.0,
+                ),
+            )
             u1 = numpyro.deterministic('c1', u_plus - 4.0 * limb_delta)
             u2 = numpyro.deterministic('c2', 4.0 * limb_delta)
             numpyro.deterministic('u', jnp.stack((u1, u2), axis=1))
@@ -642,11 +630,11 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             fixed_values = jnp.asarray(fixed_values, dtype=jnp.float64)
             u1 = numpyro.deterministic('u1', fixed_values[:, 0])
             u2 = numpyro.deterministic('u2', fixed_values[:, 1])
-        elif ld_mode in {'free', 'widegaussian', 'informed'}:
-            if ld_mode == 'informed' and sigma_u_ld is None:
-                raise ValueError("ld_mode='informed' requires sigma_u_ld.")
-            if sigma_u_ld is None:
-                sigma_u_ld = jnp.full_like(mu_u_ld, 0.2)
+        elif ld_mode in {'gaussian', 'stellarprior'}:
+            if ld_mode == 'stellarprior' and sigma_u_ld is None:
+                raise ValueError("ld_mode='stellarprior' requires sigma_u_ld.")
+            if ld_mode == 'gaussian':
+                sigma_u_ld = jnp.full_like(mu_u_ld, GAUSSIAN_LD_WIDTH)
             sigma_u_ld = jnp.asarray(sigma_u_ld, dtype=jnp.float64)
             sigma_u_ld = jnp.broadcast_to(sigma_u_ld, mu_u_ld.shape)
             sigma_u_ld = jnp.clip(sigma_u_ld, 1e-6, None)

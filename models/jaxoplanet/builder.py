@@ -2,6 +2,7 @@ import os
 
 import jax
 import jax.numpy as jnp
+from jax.scipy.special import log_ndtr, ndtr
 import numpyro
 import numpyro.distributions as dist
 import numpy as np
@@ -66,12 +67,260 @@ from .core import (
     compute_transit_model,
     resolve_jaxoplanet_kernel,
 )
+from models.limb_darkening_config import GAUSSIAN_LD_WIDTH
 
 NUTS_KWARGS = {
     "dense_mass": False,
     "regularize_mass_matrix": True,
     "target_accept_prob": 0.8,
 }
+
+
+def _phase_flux_interval(conditioning_flux):
+    conditioning_flux = jnp.asarray(conditioning_flux, dtype=jnp.float64)
+    finfo = jnp.finfo(conditioning_flux.dtype)
+    conditioning_flux = jnp.nan_to_num(
+        conditioning_flux,
+        nan=finfo.tiny,
+        posinf=0.1 * finfo.max,
+        neginf=finfo.tiny,
+    )
+    conditioning_flux = jnp.maximum(conditioning_flux, finfo.tiny)
+    return conditioning_flux / 5.0, 5.0 * conditioning_flux
+
+
+def _conditional_phase_flux_from_quantile(
+    quantile, conditioning_flux, center, width
+):
+    """Map a unit quantile to the original positive normal within ratio bounds."""
+    quantile = jnp.asarray(quantile, dtype=jnp.float64)
+    center = jnp.asarray(center, dtype=jnp.float64)
+    width = jnp.asarray(width, dtype=jnp.float64)
+    low, high = _phase_flux_interval(conditioning_flux)
+    value = dist.TruncatedNormal(
+        center, width, low=low, high=high
+    ).icdf(quantile)
+    # NumPyro's two-sided truncated-normal inverse CDF switches to survival
+    # probabilities in the upper tail. Clipping only guards final floating
+    # point roundoff; mathematically the inverse is already inside the bounds.
+    return jnp.clip(value, low, high)
+
+
+def phase_flux_to_conditional_quantile(value, conditioning_flux, center, width):
+    """Return the unit quantile used to initialize a conditional phase flux."""
+    value = jnp.asarray(value, dtype=jnp.float64)
+    center = jnp.asarray(center, dtype=jnp.float64)
+    width = jnp.asarray(width, dtype=jnp.float64)
+    low, high = _phase_flux_interval(conditioning_flux)
+    cdf_low = ndtr((low - center) / width)
+    cdf_high = ndtr((high - center) / width)
+    value_cdf = ndtr((value - center) / width)
+    cdf_denominator = jnp.maximum(
+        cdf_high - cdf_low, jnp.finfo(value_cdf.dtype).tiny
+    )
+    cdf_quantile = (value_cdf - cdf_low) / cdf_denominator
+
+    survival_low = ndtr((center - low) / width)
+    survival_high = ndtr((center - high) / width)
+    survival_value = ndtr((center - value) / width)
+    survival_denominator = jnp.maximum(
+        survival_low - survival_high, jnp.finfo(value_cdf.dtype).tiny
+    )
+    survival_quantile = (
+        survival_low - survival_value
+    ) / survival_denominator
+    quantile = jnp.where(low < center, cdf_quantile, survival_quantile)
+    eps = jnp.finfo(value_cdf.dtype).eps
+    return jnp.clip(quantile, eps, 1.0 - eps)
+
+
+def _positive_normal_interval_log_mass(conditioning_flux, center, width):
+    """Log probability of the physical ratio interval under TN(low=0)."""
+    center = jnp.asarray(center, dtype=jnp.float64)
+    width = jnp.asarray(width, dtype=jnp.float64)
+    low, high = _phase_flux_interval(conditioning_flux)
+    log_cdf_high = log_ndtr((high - center) / width)
+    log_cdf_low = log_ndtr((low - center) / width)
+    log_survival_low = log_ndtr((center - low) / width)
+    log_survival_high = log_ndtr((center - high) / width)
+
+    use_cdf = low < center
+    log_larger = jnp.where(use_cdf, log_cdf_high, log_survival_low)
+    log_smaller = jnp.where(use_cdf, log_cdf_low, log_survival_high)
+    ratio = jnp.exp(jnp.minimum(log_smaller - log_larger, 0.0))
+    log_interval = log_larger + jnp.log1p(-ratio)
+    return log_interval - log_ndtr(center / width)
+
+
+def _sample_surface_parameters(surface_config, n_planets, num_lcs=None):
+    """Sample the compact surface-model priors and expose output-friendly units."""
+    config = surface_config or {"model": "transit", "spots": ()}
+    model = config.get("model", "transit")
+    if model == "transit" and not config.get("spots"):
+        return {}
+    result = {"_surface_model": model, "_stellar_spots": config.get("spots", ())}
+    shape = () if num_lcs is None else (int(num_lcs),)
+
+    def sample_flux(name):
+        values = []
+        centers = np.asarray(config[name], dtype=float)
+        widths = np.asarray(config[f"{name}_prior_width"], dtype=float)
+        for index in range(n_planets):
+            if widths[index] > 0.0:
+                value = numpyro.sample(
+                    f"_{name}_{index}",
+                    dist.TruncatedNormal(
+                        centers[index], widths[index], low=0.0
+                    ).expand(shape),
+                )
+            else:
+                value = jnp.full(shape, centers[index], dtype=jnp.float64)
+            values.append(value)
+        axis = 0 if num_lcs is None else 1
+        value = numpyro.deterministic(name, jnp.stack(values, axis=axis))
+        numpyro.deterministic(f"{name}_ppm", value * 1e6)
+        result[name] = value
+
+    if model == "eclipse":
+        sample_flux("eclipse_depth")
+    elif model == "phase_curve":
+        day_centers = np.asarray(config["dayside_flux"], dtype=float)
+        day_widths = np.asarray(
+            config["dayside_flux_prior_width"], dtype=float
+        )
+        night_centers = np.asarray(config["nightside_flux"], dtype=float)
+        night_widths = np.asarray(
+            config["nightside_flux_prior_width"], dtype=float
+        )
+        day_values = []
+        night_values = []
+
+        def conditional_flux(name, index, conditioning, center, width):
+            quantile = numpyro.sample(
+                f"_{name}_quantile_{index}",
+                dist.Uniform(0.0, 1.0).expand(shape),
+            )
+            value = _conditional_phase_flux_from_quantile(
+                quantile, conditioning, center, width
+            )
+            value = numpyro.deterministic(f"_{name}_{index}", value)
+            numpyro.factor(
+                f"_{name}_physical_interval_mass_{index}",
+                jnp.sum(
+                    _positive_normal_interval_log_mass(
+                        conditioning, center, width
+                    )
+                ),
+            )
+            return value
+
+        for index in range(n_planets):
+            day_free = day_widths[index] > 0.0
+            night_free = night_widths[index] > 0.0
+            if day_free and night_free:
+                day = numpyro.sample(
+                    f"_dayside_flux_{index}",
+                    dist.TruncatedNormal(
+                        day_centers[index], day_widths[index], low=0.0
+                    ).expand(shape),
+                )
+                night = conditional_flux(
+                    "nightside_flux",
+                    index,
+                    day,
+                    night_centers[index],
+                    night_widths[index],
+                )
+            elif day_free:
+                night = jnp.full(
+                    shape, night_centers[index], dtype=jnp.float64
+                )
+                if night_centers[index] == 0.0:
+                    raise ValueError(
+                        "a free dayside flux cannot be paired with a fixed zero "
+                        "nightside flux under the physical phase-map constraint."
+                    )
+                day = conditional_flux(
+                    "dayside_flux",
+                    index,
+                    night,
+                    day_centers[index],
+                    day_widths[index],
+                )
+            elif night_free:
+                day = jnp.full(shape, day_centers[index], dtype=jnp.float64)
+                if day_centers[index] == 0.0:
+                    raise ValueError(
+                        "a free nightside flux cannot be paired with a fixed zero "
+                        "dayside flux under the physical phase-map constraint."
+                    )
+                night = conditional_flux(
+                    "nightside_flux",
+                    index,
+                    day,
+                    night_centers[index],
+                    night_widths[index],
+                )
+            else:
+                day = jnp.full(shape, day_centers[index], dtype=jnp.float64)
+                night = jnp.full(
+                    shape, night_centers[index], dtype=jnp.float64
+                )
+            day_values.append(day)
+            night_values.append(night)
+
+        axis = 0 if num_lcs is None else 1
+        dayside = numpyro.deterministic(
+            "dayside_flux", jnp.stack(day_values, axis=axis)
+        )
+        nightside = numpyro.deterministic(
+            "nightside_flux", jnp.stack(night_values, axis=axis)
+        )
+        numpyro.deterministic("dayside_flux_ppm", dayside * 1e6)
+        numpyro.deterministic("nightside_flux_ppm", nightside * 1e6)
+        result["dayside_flux"] = dayside
+        result["nightside_flux"] = nightside
+        values = []
+        centers = np.asarray(config["hotspot_offset"], dtype=float)
+        widths = np.asarray(config["hotspot_offset_prior_width"], dtype=float)
+        for index in range(n_planets):
+            if widths[index] > 0.0:
+                value = numpyro.sample(
+                    f"_hotspot_offset_{index}",
+                    dist.Normal(centers[index], widths[index]).expand(shape),
+                )
+            else:
+                value = jnp.full(shape, centers[index], dtype=jnp.float64)
+            values.append(value)
+        axis = 0 if num_lcs is None else 1
+        value = numpyro.deterministic(
+            "hotspot_offset", jnp.stack(values, axis=axis)
+        )
+        numpyro.deterministic("hotspot_offset_deg", jnp.rad2deg(value))
+        result["hotspot_offset"] = value
+
+    spots = config.get("spots", ())
+    if spots:
+        contrasts = []
+        for index, spot in enumerate(spots):
+            center = float(spot["contrast"])
+            width = float(spot.get("contrast_prior_width", 0.0))
+            if width > 0.0:
+                contrast = numpyro.sample(
+                    f"_stellar_spot_contrast_{index}",
+                    dist.TruncatedNormal(center, width, low=0.0, high=1.0).expand(shape),
+                )
+            else:
+                contrast = jnp.full(shape, center, dtype=jnp.float64)
+            contrasts.append(contrast)
+        axis = 0 if num_lcs is None else 1
+        result["stellar_spot_contrast"] = numpyro.deterministic(
+            "stellar_spot_contrast", jnp.stack(contrasts, axis=axis)
+        )
+        result["stellar_rotation_period"] = jnp.asarray(
+            config["stellar_rotation_period"], dtype=jnp.float64
+        )
+    return result
 
 
 LD_MAP_COEFFICIENTS = 0
@@ -306,8 +555,10 @@ def derive_geometry(wl_samples, period, ecc=0.0, omega=0.0):
 
 
 def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic',
-                            ld_mode='free', param_method='duration',
+                            ld_mode='gaussian', param_method='duration',
                             jaxoplanet_kernel='auto',
+                            surface_config=None,
+                            surface_basis=None,
                             ld_parameterization='coefficients',
                             ld_uniform_basis='uplus_uminus',
                             ld_uniform_coefficient_bounds=(0.0, 1.0),
@@ -318,6 +569,25 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
     """Jaxoplanet white-light model with duration- or a_rs-based geometry."""
     if param_method not in ('duration', 'a_rs'):
         raise ValueError(f"Unknown param_method: {param_method}")
+    surface_config = surface_config or {"model": "transit", "spots": ()}
+    if (surface_config.get("model") != "transit" or surface_config.get("spots")) and param_method != "a_rs":
+        raise ValueError("Eclipses, phase curves, and stellar spots require param_method='a_rs'.")
+    basis_surface_valid = (
+        (surface_config.get("model") == "transit" and surface_config.get("spots"))
+        or (
+            surface_config.get("model") in {"eclipse", "phase_curve"}
+            and not surface_config.get("spots")
+        )
+    )
+    if surface_basis is not None and not (
+        basis_surface_valid
+        and not surface_config.get("fit_geometry", True)
+        and ld_mode == "fixed"
+    ):
+        raise ValueError(
+            "surface_basis requires a supported stellar-spot or emission model "
+            "with fixed geometry and fixed limb darkening."
+        )
     if ld_parameterization not in {'coefficients', 'decorrelated', 'decorrelated_linear', 'latent_gaussian'}:
         raise ValueError("Unknown ld_parameterization.")
     if ld_uniform_basis not in {'uplus_uminus', 'coefficients'}:
@@ -367,15 +637,36 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
         a_rs_prior_max = _prior_array("a_rs_prior_max", 100.0)
 
         durations, t0s, bs, rorss, a_rss, cos_is, incs = [], [], [], [], [], [], []
+        fit_geometry = bool(surface_config.get("fit_geometry", True))
+        if not fit_geometry:
+            numpyro.deterministic("_geometry_fixed", jnp.asarray(True))
 
         for i in range(n_planets):
-            t0s.append(numpyro.sample(f"t0_{i}", dist.Uniform(jnp.min(t), jnp.max(t))))
-            rors_i = numpyro.sample(f"rors_{i}", dist.Uniform(jnp.sqrt(1e-6), jnp.sqrt(0.5)))
+            if not fit_geometry:
+                t0_i = numpyro.deterministic(f"t0_{i}", _prior_array("t0", 0.0)[i])
+            elif surface_config.get("model") != "transit" or surface_config.get("spots"):
+                t0_width = _prior_array(
+                    "t0_prior_width", jnp.maximum(_prior_array("duration", 0.1), 1e-4)
+                )[i]
+                t0_i = numpyro.sample(
+                    f"t0_{i}",
+                    dist.Normal(_prior_array("t0", 0.5 * (jnp.min(t) + jnp.max(t)))[i], t0_width),
+                )
+            else:
+                t0_i = numpyro.sample(f"t0_{i}", dist.Uniform(jnp.min(t), jnp.max(t)))
+            t0s.append(t0_i)
+            if fit_geometry:
+                rors_i = numpyro.sample(f"rors_{i}", dist.Uniform(jnp.sqrt(1e-6), jnp.sqrt(0.5)))
+            else:
+                rors_i = numpyro.deterministic(f"rors_{i}", _prior_array("rprs", 0.1)[i])
             numpyro.deterministic(f"depths_{i}", rors_i ** 2)
             rorss.append(rors_i)
 
-            _b = numpyro.sample(f"_b_{i}", dist.Uniform(-2.0, 2.0))
-            b_i = numpyro.deterministic(f'b_{i}', jnp.abs(_b))
+            if fit_geometry:
+                _b = numpyro.sample(f"_b_{i}", dist.Uniform(-2.0, 2.0))
+                b_i = numpyro.deterministic(f'b_{i}', jnp.abs(_b))
+            else:
+                b_i = numpyro.deterministic(f'b_{i}', _prior_array("b", 0.0)[i])
             bs.append(b_i)
 
             if param_method == 'duration':
@@ -389,14 +680,19 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     ),
                 )
             else:
-                log_a_rs = numpyro.sample(
-                    f"log_a_rs_{i}",
-                    dist.Uniform(
-                        jnp.log(jnp.maximum(a_rs_prior_min[i], 1e-6)),
-                        jnp.log(jnp.maximum(a_rs_prior_max[i], a_rs_prior_min[i] + 1e-6)),
-                    ),
-                )
-                a_rs_i = numpyro.deterministic(f"a_rs_{i}", jnp.exp(log_a_rs))
+                if fit_geometry:
+                    log_a_rs = numpyro.sample(
+                        f"log_a_rs_{i}",
+                        dist.Uniform(
+                            jnp.log(jnp.maximum(a_rs_prior_min[i], 1e-6)),
+                            jnp.log(jnp.maximum(a_rs_prior_max[i], a_rs_prior_min[i] + 1e-6)),
+                        ),
+                    )
+                    a_rs_i = numpyro.deterministic(f"a_rs_{i}", jnp.exp(log_a_rs))
+                else:
+                    a_rs_i = numpyro.deterministic(
+                        f"a_rs_{i}", _prior_array("a_rs", 10.0)[i]
+                    )
                 duration_i = numpyro.deterministic(
                     f"duration_{i}",
                     harmonica_duration_from_geometry(
@@ -440,20 +736,20 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     prof = get_I_power2(c1, c2, MUS)
                     u = P @ (1.0 - prof)
         elif ld_profile == 'quadratic':
-            if ld_mode in {'free', 'widegaussian', 'informed'}:
+            if ld_mode in {'gaussian', 'stellarprior'}:
                 u_prior = jnp.asarray(prior_params['u'], dtype=jnp.float64)
-                if ld_mode == 'informed':
+                if ld_mode == 'stellarprior':
                     if 'u_sigma' not in prior_params:
-                        raise ValueError("ld_mode='informed' requires prior_params['u_sigma'].")
+                        raise ValueError("ld_mode='stellarprior' requires prior_params['u_sigma'].")
                     u_sigma = jnp.asarray(prior_params['u_sigma'], dtype=jnp.float64)
                 else:
-                    u_sigma = jnp.asarray(prior_params.get('u_sigma', jnp.array([0.2, 0.2])), dtype=jnp.float64)
+                    u_sigma = jnp.full_like(u_prior, GAUSSIAN_LD_WIDTH)
                 u_sigma = jnp.broadcast_to(u_sigma, u_prior.shape)
                 u_sigma = jnp.clip(u_sigma, 1e-6, None)
                 coefficient_prior = dist.TruncatedNormal(
                     loc=u_prior, scale=u_sigma, low=0.0, high=1.0
                 ).to_event(1)
-                if ld_parameterization == 'latent_gaussian' and ld_mode in {'free', 'widegaussian'}:
+                if ld_parameterization == 'latent_gaussian' and ld_mode in {'gaussian'}:
                     z = numpyro.sample('ld_latent', dist.Normal(0.0, 1.0).expand([2]).to_event(1))
                     u = numpyro.deterministic(
                         'u', gaussian_to_truncated_normal(z, u_prior, u_sigma, 0.0, 1.0)
@@ -486,26 +782,26 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                 raise ValueError(f"Unknown ld_mode: {ld_mode}")
         elif ld_profile == 'power2':
             u_prior = jnp.asarray(prior_params['u'], dtype=jnp.float64)
-            if ld_mode in {'free', 'widegaussian', 'informed'}:
-                if ld_mode == 'informed':
+            if ld_mode in {'gaussian', 'stellarprior'}:
+                if ld_mode == 'stellarprior':
                     if 'u_sigma' not in prior_params:
-                        raise ValueError("ld_mode='informed' requires prior_params['u_sigma'].")
+                        raise ValueError("ld_mode='stellarprior' requires prior_params['u_sigma'].")
                     u_sigma = jnp.asarray(prior_params['u_sigma'], dtype=jnp.float64)
                 else:
-                    u_sigma = jnp.asarray(prior_params.get('u_sigma', jnp.array([0.2, 0.2])), dtype=jnp.float64)
+                    u_sigma = jnp.full_like(u_prior, GAUSSIAN_LD_WIDTH)
                 u_sigma = jnp.broadcast_to(u_sigma, u_prior.shape)
                 u_sigma = jnp.clip(u_sigma, 1e-6, None)
                 coefficient_prior = dist.TruncatedNormal(
                     u_prior, u_sigma, low=jnp.asarray([0.0, 0.001]), high=1.0
                 ).to_event(1)
-                if ld_parameterization == 'latent_gaussian' and ld_mode in {'free', 'widegaussian'}:
+                if ld_parameterization == 'latent_gaussian' and ld_mode in {'gaussian'}:
                     z = numpyro.sample('ld_latent', dist.Normal(0.0, 1.0).expand([2]).to_event(1))
                     coefficients = gaussian_to_truncated_normal(
                         z, u_prior, u_sigma, jnp.asarray([0.0, 0.001]), 1.0
                     )
                     c1 = numpyro.deterministic('c1', coefficients[0])
                     c2 = numpyro.deterministic('c2', coefficients[1])
-                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'} and ld_mode in {'free', 'widegaussian'}:
+                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'} and ld_mode in {'gaussian'}:
                     h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, power2_transform))
                     coefficients = _enforce_decorrelated_coefficient_support(
@@ -569,6 +865,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             params["a_rs"] = jnp.array(a_rss)
             params["ecc"] = eccs
             params["omega"] = omegas
+        params.update(_sample_surface_parameters(surface_config, n_planets))
+        if surface_basis is not None:
+            params["_surface_basis"] = surface_basis
 
         has_offset_term = not detrend_components.isdisjoint(
             {'linear', 'quadratic', 'cubic', 'quartic', 'linear_discontinuity', 'explinear', 'spot', '2spot', 'gp'}
@@ -709,11 +1008,13 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
     return _whitelight_model
 
 
-def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free',
+def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mode='free',
                             n_planets=1, ld_profile='quadratic',
                             param_method='duration', transit_window='off',
                             transit_window_indices=None,
                             jaxoplanet_kernel='auto',
+                            surface_config=None,
+                            surface_basis=None,
                             jitter_prior='log_uniform',
                             jitter_prior_scale=2.0,
                             jitter_prior_center=0.5,
@@ -737,6 +1038,25 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
     """
     if param_method not in {'duration', 'a_rs'}:
         raise ValueError(f"Unknown param_method: {param_method}")
+    surface_config = surface_config or {"model": "transit", "spots": ()}
+    if (surface_config.get("model") != "transit" or surface_config.get("spots")) and param_method != "a_rs":
+        raise ValueError("Eclipses, phase curves, and stellar spots require param_method='a_rs'.")
+    basis_surface_valid = (
+        (surface_config.get("model") == "transit" and surface_config.get("spots"))
+        or (
+            surface_config.get("model") in {"eclipse", "phase_curve"}
+            and not surface_config.get("spots")
+        )
+    )
+    if surface_basis is not None and not (
+        basis_surface_valid
+        and not surface_config.get("fit_geometry", True)
+        and ld_mode == "fixed"
+    ):
+        raise ValueError(
+            "surface_basis requires a supported stellar-spot or emission model "
+            "with fixed geometry and fixed limb darkening."
+        )
     if ld_parameterization not in {'coefficients', 'decorrelated', 'decorrelated_linear', 'latent_gaussian'}:
         raise ValueError("Unknown ld_parameterization.")
     if ld_uniform_basis not in {'uplus_uminus', 'coefficients'}:
@@ -801,7 +1121,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                           trend_prior_mean=None, trend_prior_scale=None,
                           likelihood_mask=None, ld_center=None, ld_scale=None,
                           ld_low=None, ld_high=None, ld_map_code=0,
-                          ld_latent_low=None, ld_latent_high=None):
+                          ld_latent_low=None, ld_latent_high=None,
+                          surface_basis_data=None):
 
         num_lcs = jnp.atleast_2d(yerr).shape[0]
         t0s = mu_t0
@@ -818,10 +1139,24 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 "omega": jnp.asarray(mu_omega, dtype=jnp.float64),
             }
 
-        rors = numpyro.sample(
-            "rors",
-            dist.Uniform(jnp.sqrt(1e-5), jnp.sqrt(0.5)).expand([num_lcs, n_planets]),
-        )
+        if surface_config.get("fit_geometry", True):
+            rors = numpyro.sample(
+                "rors",
+                dist.Uniform(jnp.sqrt(1e-5), jnp.sqrt(0.5)).expand([num_lcs, n_planets]),
+            )
+        else:
+            if mu_depths is None:
+                raise ValueError("mu_depths is required when fit_geometry is false.")
+            # Preserve the channel axis on every vector-model output.  This is
+            # required when selective failed lanes move through the joint-NUTS
+            # fallback and are merged back into a chunk.
+            numpyro.deterministic(
+                "_geometry_fixed", jnp.ones((num_lcs,), dtype=jnp.bool_)
+            )
+            fixed_rors = jnp.sqrt(jnp.asarray(mu_depths, dtype=jnp.float64))
+            if fixed_rors.ndim == 1:
+                fixed_rors = jnp.broadcast_to(fixed_rors, (num_lcs, n_planets))
+            rors = numpyro.deterministic("rors", fixed_rors)
         depths = numpyro.deterministic("depths", rors ** 2)
 
         yerr_matrix = jnp.atleast_2d(
@@ -877,55 +1212,40 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 if selected_kernel != "native_power2":
                     profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
                     u = (P_LD @ (1.0 - profs).T).T
-        elif ld_mode in {'free', 'widegaussian', 'informed', 'sing', 'sing_free'}:
+        elif ld_mode in {'gaussian', 'stellarprior', 'sing'}:
             if ld_profile == 'quadratic':
-                if ld_mode in {'sing', 'sing_free'}:
-                    if ld_mode == 'sing' and sigma_u_ld is None:
+                if ld_mode == 'sing':
+                    if sigma_u_ld is None:
                         raise ValueError("ld_mode='sing' requires (l, delta) sigma_u_ld.")
-                    if ld_mode == 'sing_free':
-                        # Sing et al. (2026), Sec. 3.3 recommend fitting the
-                        # quadratic coefficients (or u+/u-) rather than the
-                        # derived (l, delta) coordinates.  Independent broad
-                        # boxes avoid delta's collapsing conditional support
-                        # as l approaches one in weak-LD infrared channels.
-                        limb_u_plus = numpyro.sample(
-                            'limb_u_plus', dist.Uniform(-1.0, 2.0).expand([num_lcs])
-                        )
-                        limb_u_minus = numpyro.sample(
-                            'limb_u_minus', dist.Uniform(-2.0, 2.0).expand([num_lcs])
-                        )
-                        limb_l = numpyro.deterministic('limb_l', 1.0 - limb_u_plus)
-                        limb_delta = numpyro.deterministic(
-                            'limb_delta', (limb_u_plus - limb_u_minus) / 8.0
-                        )
-                    else:
-                        sing_mu = jnp.asarray(mu_u_ld, dtype=jnp.float64)
-                        sing_sigma = jnp.asarray(sigma_u_ld, dtype=jnp.float64)
-                        limb_l = numpyro.sample(
-                            'limb_l',
-                            dist.TruncatedNormal(sing_mu[:, 0], sing_sigma[:, 0], low=0.0, high=1.0),
-                        )
+                    sing_mu = jnp.asarray(mu_u_ld, dtype=jnp.float64)
+                    sing_sigma = jnp.asarray(sigma_u_ld, dtype=jnp.float64)
+                    limb_l = numpyro.sample(
+                        'limb_l',
+                        dist.TruncatedNormal(sing_mu[:, 0], sing_sigma[:, 0], low=0.0, high=1.0),
+                    )
                     u_plus = 1.0 - limb_l
                     # c1 >= 0, c1 + 2*c2 >= 0, and c1+c2 <= 1.
-                    if ld_mode != 'sing_free':
-                        limb_delta = numpyro.sample(
-                            'limb_delta',
-                            dist.TruncatedNormal(
-                                sing_mu[:, 1], sing_sigma[:, 1],
-                                low=-u_plus / 4.0, high=u_plus / 4.0,
-                            ),
-                        )
+                    limb_delta = numpyro.sample(
+                        'limb_delta',
+                        dist.TruncatedNormal(
+                            sing_mu[:, 1], sing_sigma[:, 1],
+                            low=-u_plus / 4.0, high=u_plus / 4.0,
+                        ),
+                    )
                     c1 = numpyro.deterministic('c1', u_plus - 4.0 * limb_delta)
                     c2 = numpyro.deterministic('c2', 4.0 * limb_delta)
                     u = numpyro.deterministic('u', jnp.stack((c1, c2), axis=1))
                 else:
-                    if ld_mode == 'informed' and sigma_u_ld is None:
-                        raise ValueError("ld_mode='informed' requires sigma_u_ld.")
-                    u_scale = sigma_u_ld if sigma_u_ld is not None else 0.2
+                    if ld_mode == 'stellarprior' and sigma_u_ld is None:
+                        raise ValueError("ld_mode='stellarprior' requires sigma_u_ld.")
+                    u_scale = (
+                        jnp.full_like(mu_u_ld, GAUSSIAN_LD_WIDTH)
+                        if ld_mode == 'gaussian' else sigma_u_ld
+                    )
                     u_prior_dist = dist.TruncatedNormal(
                         loc=mu_u_ld, scale=u_scale, low=0.0, high=1.0
                     ).to_event(1)
-                    if ld_parameterization == 'latent_gaussian' and ld_mode in {'free', 'widegaussian'}:
+                    if ld_parameterization == 'latent_gaussian' and ld_mode in {'gaussian'}:
                         z = numpyro.sample(
                             'ld_latent',
                             dist.Normal(0.0, 1.0).expand([num_lcs, 2]).to_event(1),
@@ -939,10 +1259,10 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     else:
                         u = numpyro.sample('u', u_prior_dist)
             elif ld_profile == 'power2':
-                if ld_mode == 'informed' and sigma_u_ld is None:
-                    raise ValueError("ld_mode='informed' requires sigma_u_ld.")
-                if sigma_u_ld is None:
-                    sigma_u_ld = jnp.full_like(mu_u_ld, 0.2)
+                if ld_mode == 'stellarprior' and sigma_u_ld is None:
+                    raise ValueError("ld_mode='stellarprior' requires sigma_u_ld.")
+                if ld_mode == 'gaussian':
+                    sigma_u_ld = jnp.full_like(mu_u_ld, GAUSSIAN_LD_WIDTH)
                 sigma_u_ld = jnp.asarray(sigma_u_ld, dtype=jnp.float64)
                 sigma_u_ld = jnp.broadcast_to(sigma_u_ld, mu_u_ld.shape)
                 sigma_u_ld = jnp.clip(sigma_u_ld, 1e-6, None)
@@ -950,7 +1270,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     mu_u_ld, sigma_u_ld,
                     low=jnp.asarray([0.0, 0.001]), high=1.0,
                 ).to_event(1)
-                if ld_parameterization == 'latent_gaussian' and ld_mode in {'free', 'widegaussian'}:
+                if ld_parameterization == 'latent_gaussian' and ld_mode in {'gaussian'}:
                     z = numpyro.sample(
                         'ld_latent',
                         dist.Normal(0.0, 1.0).expand([num_lcs, 2]).to_event(1),
@@ -964,7 +1284,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     )
                     c1 = numpyro.deterministic('c1', coefficients[:, 0])
                     c2 = numpyro.deterministic('c2', coefficients[:, 1])
-                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'} and ld_mode in {'free', 'widegaussian'}:
+                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'} and ld_mode in {'gaussian'}:
                     h = numpyro.sample(
                         'ld_decorrelated',
                         dist.TransformedDistribution(
@@ -1093,6 +1413,40 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             params["_transit_window_indices"] = transit_window_indices
             in_axes["_transit_window_indices"] = None
 
+        surface_params = _sample_surface_parameters(
+            surface_config, n_planets, num_lcs=num_lcs
+        )
+        params.update(surface_params)
+        active_surface_basis = (
+            surface_basis_data
+            if surface_basis_data is not None else surface_basis
+        )
+        if active_surface_basis is not None:
+            if not (
+                basis_surface_valid
+                and not surface_config.get("fit_geometry", True)
+                and ld_mode == "fixed"
+            ):
+                raise ValueError(
+                    "surface_basis_data requires a supported stellar-spot or "
+                    "emission model with fixed geometry and fixed limb darkening."
+                )
+            params["_surface_basis"] = active_surface_basis
+            in_axes["_surface_basis"] = (
+                0 if jnp.ndim(active_surface_basis.baseline) > 1 else None
+            )
+        if "_surface_model" in surface_params:
+            in_axes["_surface_model"] = None
+            in_axes["_stellar_spots"] = None
+        for name in (
+            "eclipse_depth", "dayside_flux", "nightside_flux",
+            "hotspot_offset", "stellar_spot_contrast",
+        ):
+            if name in surface_params:
+                in_axes[name] = 0
+        if "stellar_rotation_period" in surface_params:
+            in_axes["stellar_rotation_period"] = None
+
         if trend_mode == 'gaussian_marginalized':
             if y is None:
                 raise ValueError(
@@ -1115,6 +1469,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 compute_transit_model,
                 in_axes=(in_axes, None),
             )(params, t)
+            surface_active = bool(surface_params)
             design, coefficient_names = build_marginalized_trend_design(
                 detrend_type,
                 t,
@@ -1124,6 +1479,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 spot_trend2=spot_trend2,
                 jump_trend=jump_trend,
                 exp_trend=exp_trend,
+                baseline_template=(1.0 + transit_model) if surface_active else None,
             )
             num_coefficients = len(coefficient_names)
             if trend_prior_mean is None:
@@ -1146,7 +1502,9 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 )
             log_likelihood, conditional = (
                 marginalized_log_likelihood_and_conditional(
-                    jnp.asarray(y, dtype=jnp.float64) - transit_model,
+                    (jnp.asarray(y, dtype=jnp.float64)
+                     if surface_active
+                     else jnp.asarray(y, dtype=jnp.float64) - transit_model),
                     design,
                     error_broadcast,
                     trend_prior_mean,

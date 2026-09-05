@@ -7,6 +7,7 @@ import numpyro.distributions as dist
 import numpy as np
 
 from .core import get_I_power2
+from .limb_darkening_config import GAUSSIAN_LD_WIDTH
 from .trends import (
     compute_lc_linear, compute_lc_quadratic, compute_lc_cubic, compute_lc_quartic,
     compute_lc_linear_discontinuity, compute_lc_explinear, compute_lc_spot, compute_lc_2spot,
@@ -81,7 +82,7 @@ def _prepare_power2_poly(degree=12, n_mu=300):
     p = jnp.asarray(np.linalg.pinv(np.asarray(x)))
     return mus, p
     
-def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic', ld_mode='free', step_width_mode='free'):
+def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic', ld_mode='gaussian', step_width_mode='free'):
     print(f"Building whitelight model with: detrend_type='{detrend_type}', ld='{ld_mode}', ld_profile='{ld_profile}' for {n_planets} planets")
 
     detrend_components = _split_components(detrend_type)
@@ -109,7 +110,14 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             rorss.append(numpyro.deterministic(f"rors_{i}", jnp.sqrt(depths)))
 
         if ld_profile == 'quadratic':
-            if ld_mode == 'free':
+            if ld_mode == 'gaussian':
+                center = jnp.asarray(prior_params['u'], dtype=jnp.float64)
+                u = numpyro.sample(
+                    "u", dist.TruncatedNormal(
+                        center, GAUSSIAN_LD_WIDTH, low=-1.0, high=1.0
+                    ).to_event(1)
+                )
+            elif ld_mode == 'uniform':
                 u = numpyro.sample("u", dist.Uniform(0.0, 1.0).expand([2]).to_event(1))
             elif ld_mode == 'fixed':
                 u = numpyro.deterministic('u', jnp.asarray(prior_params['u'], dtype=jnp.float64))
@@ -117,12 +125,20 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                 raise ValueError(f"Unknown ld_mode: {ld_mode}")
         elif ld_profile == 'power2':
             u_prior = jnp.asarray(prior_params['u'], dtype=jnp.float64)
-            u_sigma = jnp.asarray(prior_params.get('u_sigma', jnp.array([0.2, 0.2])), dtype=jnp.float64)
-            u_sigma = jnp.broadcast_to(u_sigma, u_prior.shape)
-            u_sigma = jnp.clip(u_sigma, 1e-6, None)
-            if ld_mode == 'free':
+            if ld_mode in {'gaussian', 'stellarprior'}:
+                if ld_mode == 'stellarprior' and 'u_sigma' not in prior_params:
+                    raise ValueError("ld_mode='stellarprior' requires prior_params['u_sigma'].")
+                width = prior_params.get(
+                    'u_sigma', jnp.full_like(u_prior, GAUSSIAN_LD_WIDTH)
+                )
+                u_sigma = jnp.asarray(width, dtype=jnp.float64)
+                u_sigma = jnp.broadcast_to(u_sigma, u_prior.shape)
+                u_sigma = jnp.clip(u_sigma, 1e-6, None)
                 c1 = numpyro.sample('c1', dist.TruncatedNormal(u_prior[0], u_sigma[0], low=0.0, high=1.0))
                 c2 = numpyro.sample('c2', dist.TruncatedNormal(u_prior[1], u_sigma[1], low=0.001, high=1.0))
+            elif ld_mode == 'uniform':
+                c1 = numpyro.sample('c1', dist.Uniform(0.0, 1.0))
+                c2 = numpyro.sample('c2', dist.Uniform(0.0, 1.0))
             elif ld_mode == 'fixed':
                 c1 = numpyro.deterministic('c1', u_prior[0])
                 c2 = numpyro.deterministic('c2', u_prior[1])
@@ -250,7 +266,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
 
     return _whitelight_model_static
 
-def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free', n_planets=1, ld_profile='quadratic'):
+def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mode='free', n_planets=1, ld_profile='quadratic'):
     print(
         f"Building vectorized model with: detrend='{detrend_type}', "
         f"ld='{ld_mode}', ld_profile='{ld_profile}' for {n_planets} planets"
@@ -286,17 +302,34 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         total_error = numpyro.deterministic('total_error', jnp.sqrt(jitter**2 + yerr_per_lc**2))
         error_broadcast = total_error[:, None] * jnp.ones_like(t)
 
-        if ld_mode == 'free':
+        if ld_mode in {'gaussian', 'stellarprior'}:
             if ld_profile == 'quadratic':
-                u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=0.2, low=-1.0, high=1.0).to_event(1))
+                scale = sigma_u_ld if ld_mode == 'stellarprior' else GAUSSIAN_LD_WIDTH
+                if scale is None:
+                    raise ValueError("ld_mode='stellarprior' requires sigma_u_ld.")
+                u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=scale, low=-1.0, high=1.0).to_event(1))
             elif ld_profile == 'power2':
-                if sigma_u_ld is None:
-                    sigma_u_ld = jnp.full_like(mu_u_ld, 0.2)
+                if ld_mode == 'gaussian':
+                    sigma_u_ld = jnp.full_like(mu_u_ld, GAUSSIAN_LD_WIDTH)
+                elif sigma_u_ld is None:
+                    raise ValueError("ld_mode='stellarprior' requires sigma_u_ld.")
                 sigma_u_ld = jnp.asarray(sigma_u_ld, dtype=jnp.float64)
                 sigma_u_ld = jnp.broadcast_to(sigma_u_ld, mu_u_ld.shape)
                 sigma_u_ld = jnp.clip(sigma_u_ld, 1e-6, None)
                 c1 = numpyro.sample('c1', dist.TruncatedNormal(mu_u_ld[:,0], sigma_u_ld[:,0], low=0.0, high=1.0))
                 c2 = numpyro.sample('c2', dist.TruncatedNormal(mu_u_ld[:,1], sigma_u_ld[:,1], low=0.001, high=1.0))
+                profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
+                u = (P_LD @ (1.0 - profs).T).T
+            else:
+                raise ValueError(f"Unknown ld_profile: {ld_profile}")
+        elif ld_mode == 'uniform':
+            if ld_profile == 'quadratic':
+                u = numpyro.sample(
+                    'u', dist.Uniform(-1.0, 1.0).expand([num_lcs, 2]).to_event(1)
+                )
+            elif ld_profile == 'power2':
+                c1 = numpyro.sample('c1', dist.Uniform(0.0, 1.0).expand([num_lcs]))
+                c2 = numpyro.sample('c2', dist.Uniform(0.0, 1.0).expand([num_lcs]))
                 profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
                 u = (P_LD @ (1.0 - profs).T).T
             else:

@@ -31,4 +31,11 @@ def compute_transit_model_auto(params, t):
         from .harmonica.core import compute_transit_model_harmonica
         return compute_transit_model_harmonica(params, t)
     from .jaxoplanet.core import compute_transit_model
-    return compute_transit_model(params, t)
+    signal = compute_transit_model(params, t)
+    # Surface signals are normalized stellar-system flux minus one.  Scale
+    # them with the fitted constant baseline so normalized eclipse and phase
+    # amplitudes remain exact when the data normalization is not exactly one.
+    if (params.get("_surface_model", "transit") != "transit"
+            or params.get("_stellar_spots", ())):
+        signal = signal * params.get("c", 1.0)
+    return signal

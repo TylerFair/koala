@@ -1,5 +1,7 @@
 # Examples
 
+Run `python tools/surface_publication_example.py all` for synthetic eclipses, phase curves, and stellar spots. The [executed tutorial](../docs/tutorials/synthetic_surfaces.md) shows spectra, a thermal map with uncertainty, corner plots, and residual diagnostics. The matching pipeline configurations are `eclipse.yaml`, `phase_curve.yaml`, and `stellar_spots.yaml`.
+
 The two executed notebooks are the most direct walkthroughs. They write a YAML
 configuration, run the fitter, read the resulting CSV products, and render the
 white-light curve and spectrum with the shared publication style. Their saved

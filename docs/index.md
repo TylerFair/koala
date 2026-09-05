@@ -46,6 +46,7 @@ tutorials/nirspec_g395h
 tutorials/prism
 tutorials/harmonica
 tutorials/executed_notebooks
+tutorials/synthetic_surfaces
 ```
 
 ```{toctree}
@@ -53,6 +54,7 @@ tutorials/executed_notebooks
 :caption: Guides
 
 guides/limb_darkening
+guides/phase_curves
 guides/trends
 guides/samplers
 guides/configuration

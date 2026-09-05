@@ -334,6 +334,29 @@ def compute_transit_model(params, t, *, kernel=None, ld_profile=None):
     the limb darkening parameter vector. ``native_power2`` instead consumes
     scalar direct Power-2 coefficients ``c1`` and ``c2``.
     """
+    surface_model = params.get("_surface_model", "transit")
+    spots = params.get("_stellar_spots", ())
+    surface_basis = params.get("_surface_basis")
+    if surface_basis is not None:
+        from .surface_basis import (
+            compute_emission_basis_model,
+            compute_spot_basis_model,
+        )
+        if hasattr(surface_basis, "uniform"):
+            return compute_emission_basis_model(params, surface_basis)
+        return compute_spot_basis_model(params, surface_basis)
+    if surface_model != "transit" or spots:
+        if "a_rs" not in params:
+            raise ValueError(
+                "Eclipse, phase-curve, and stellar-spot evaluation requires a_rs geometry."
+            )
+        if "u" not in params:
+            raise ValueError("JAXoplanet surface evaluation requires params['u'].")
+        from .surface import compute_surface_model
+        return compute_surface_model(
+            params, t, model=surface_model, spots=spots
+        )
+
     requested_kernel = params.get(_JAXOPLANET_KERNEL_KEY, "auto") if kernel is None else kernel
     profile = params.get(_LD_PROFILE_KEY) if ld_profile is None else ld_profile
     degree = int(jnp.shape(params["u"])[-1]) if "u" in params else None

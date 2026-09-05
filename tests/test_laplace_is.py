@@ -92,7 +92,7 @@ def _tiny_power2_problem(num_channels=2, num_times=15):
     indices = build_transit_window_indices(t, period, t0, duration)
     model = create_vectorized_model(
         detrend_type="linear",
-        ld_mode="informed",
+        ld_mode="stellarprior",
         trend_mode="free",
         n_planets=1,
         ld_profile="power2",
@@ -305,7 +305,7 @@ def test_wide_ld_routes_whole_stage_to_laplace_nuts(monkeypatch, capsys):
         chunk_size=2,
         sampler_backend="laplace_is",
         laplace_is_kwargs={"laplace_is_force": False},
-        checkpoint_signature={"ld_mode": "widegaussian"},
+        checkpoint_signature={"ld_mode": "gaussian"},
         channel_varying_kwargs=("prior_loc",),
         prior_loc=prior_loc,
     )

@@ -17,7 +17,7 @@ from models.channel_batching import (
 )
 
 
-@pytest.mark.parametrize("prior", ["free", "widegaussian", "uniform"])
+@pytest.mark.parametrize("prior", ["gaussian", "uniform"])
 def test_wide_power2_ld_defaults_to_jacobian_corrected_coordinates(prior):
     assert fit_jwst._resolve_ld_parameterization(
         {}, "spectro_ld_parameterization", prior, "power2"
@@ -27,7 +27,7 @@ def test_wide_power2_ld_defaults_to_jacobian_corrected_coordinates(prior):
     ) == "decorrelated"
 
 
-@pytest.mark.parametrize("prior", ["free", "widegaussian", "uniform"])
+@pytest.mark.parametrize("prior", ["gaussian", "uniform"])
 def test_wide_quadratic_ld_keeps_coefficient_default(prior):
     assert fit_jwst._resolve_ld_parameterization(
         {}, "spectro_ld_parameterization", prior, "quadratic"
@@ -37,7 +37,7 @@ def test_wide_quadratic_ld_keeps_coefficient_default(prior):
     ) == "coefficients"
 
 
-@pytest.mark.parametrize("prior", ["fixed", "informed", "sing"])
+@pytest.mark.parametrize("prior", ["fixed", "stellarprior", "sing"])
 def test_other_ld_priors_keep_coefficient_default(prior):
     assert fit_jwst._resolve_ld_parameterization(
         {}, "spectro_ld_parameterization", prior
@@ -48,7 +48,7 @@ def test_explicit_ld_parameterization_overrides_prior_default():
     assert fit_jwst._resolve_ld_parameterization(
         {"spectro_ld_parameterization": "coefficients"},
         "spectro_ld_parameterization",
-        "widegaussian",
+        "gaussian",
     ) == "coefficients"
     with pytest.raises(ValueError, match="does not support decorrelated"):
         fit_jwst._resolve_ld_parameterization(
