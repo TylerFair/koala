@@ -43,6 +43,7 @@ faq
 
 tutorials/soss_order1
 tutorials/nirspec_g395h
+tutorials/wasp39_eclipse
 tutorials/prism
 tutorials/harmonica
 tutorials/executed_notebooks

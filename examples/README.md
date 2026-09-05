@@ -22,6 +22,7 @@ python fit_jwst.py -c examples/niriss_soss_order1.yaml
 | `nirspec_g395m.ipynb` | Executed HAT-P-18 G395M/NRS1 fit, detector masking, and embedded publication plots. |
 | `niriss_soss_order1.yaml` | NIRISS/SOSS order 1 with a linear baseline. Start here. |
 | `nirspec_g395m.yaml` | NIRSpec detector selection and masking a bad stretch of the time series. |
+| `wasp39_eclipse_nrs1.yaml`, `wasp39_eclipse_nrs2.yaml` | Worked WASP-39 b NIRSpec/G395H secondary-eclipse emission spectrum at R=300. |
 | `nirspec_prism.yaml` | PRISM at native resolution with an exponential ramp, and why its chunk width is small. |
 | `limb_darkening_stack.yaml` | Fitting one dataset under several limb-darkening treatments and marginalising over them. |
 | `plot_spectrum.py` | Reading the output spectrum CSV. |

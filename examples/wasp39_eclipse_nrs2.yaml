@@ -1,0 +1,50 @@
+# WASP-39 b NIRSpec/G395H NRS2 secondary eclipse.
+# Supply the matching extracted FITS file. Times must be MJD TDB.
+planet:
+  name: WASP-39
+  period: 4.05528043
+  duration: 0.11693087083333333
+  # Primary-transit epoch; secondary eclipse is half a circular orbit later.
+  t0: 60837.375859785
+  b: 0.4498
+  rprs: 0.1457
+  ecc: 0.0
+  omega: 0.0
+  eclipse_depth_ppm: 1350.0
+  eclipse_depth_prior_width_ppm: 1000.0
+
+stellar:
+  # Eclipse does not constrain stellar limb darkening.
+  ld_coefficients: [0.0, 0.0]
+
+instrument: NIRSPEC/G395H
+nrs: 2
+path: /path/to/wasp39
+input_dir: FITS
+fits_file: WASP-39_eclipse_nrs2_box_spectra_fullres.fits
+output_dir: results/WASP-39_ECLIPSE_G395H_NRS2_R300
+
+resolution:
+  low: 20
+  high: 300
+
+flags:
+  light_curve_model: eclipse
+  fit_geometry: false
+  transit_engine: jaxoplanet
+  detrending_type: linear
+  interpolate_trend: false
+  interpolate_ld: false
+  ld_profile: quadratic
+  ld_prior: fixed
+  need_lowres: true
+  mask_start: jnp.min(t)
+  mask_end: jnp.min(t) + 0.007
+  random_seed: 390302
+  spectro_chunk_size: 40
+
+outlier_clip:
+  whitelight_sigma: 10
+  spectroscopic_sigma: 10
+
+host_device: gpu
