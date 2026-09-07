@@ -1,74 +1,114 @@
-# Systematics trends
+# Choose a systematics trend
 
-Choose the white-light trend with `flags.detrending_type`; the spectroscopic builder uses the corresponding channel model.
+The trend describes flux changes that are not part of the transit. Start with the smallest model that explains the out-of-transit data, then inspect the residuals. A more flexible baseline can absorb transit depth when the visit does not constrain it.
+
+Set the model with one line:
 
 ```yaml
-flags: {detrending_type: linear}
+flags:
+  detrending_type: linear
 ```
 
-| Model | YAML | Parameters |
-|---|---|---|
-| None | `detrending_type: none` | Unit baseline |
-| Linear | `detrending_type: linear` | `c`, `v` |
-| Quadratic | `detrending_type: quadratic` | `c`, `v`, `v2` |
-| Cubic | `detrending_type: cubic` | Adds `v3` |
-| Quartic | `detrending_type: quartic` | Adds `v4` |
-| Spot | `detrending_type: spot` | Linear baseline plus a fixed-center/width spot template; set `spot_amp`, `spot_center`, `spot_width` |
-| Two spots | `detrending_type: 2spot` | Adds the `spot_amp2`, `spot_center2`, `spot_width2` template |
-| Step | `detrending_type: linear_discontinuity` | Linear baseline plus `t_jump`, `jump`, and sigmoid `width`; initialize with `t_jump_guess`, `jump_guess` |
-| Exponential + linear | `detrending_type: explinear` | `c + vt + A exp(-t/tau)` |
+## Which trend should I try?
 
-For an exponential-linear ramp use:
+| What the white-light curve shows | First model to try | YAML value |
+|---|---|---|
+| A flat or gently sloped baseline | Linear | `linear` |
+| Smooth curvature across the whole visit | Quadratic | `quadratic` |
+| Strong settling at the start | Exponential plus linear | `explinear` |
+| A sudden common-mode level change | Linear plus step | `linear_discontinuity` |
+| A localized in-transit bump | Spot template | `spot` |
+| Residual correlated structure after a justified mean model | Gaussian process | `linear+gp` |
+
+`none`, `cubic`, and `quartic` are also supported. Higher polynomial orders are sensitivity tests, not automatic improvements. Combined names such as `spot+explinear` should be used only when both structures are visible in white light.
+
+```{image} ../_static/tutorial_trend_types.svg
+:alt: Schematic comparison of linear, quadratic, exponential-ramp, step, and spot trend shapes
+:width: 820px
+:align: center
+```
+
+The curves are schematics of trend shape, not fits to observed data.
+
+## Try linear and quadratic on one visit
+
+Make two copies of the complete first-transit configuration. The snippets below are edits to those full YAML files; keep the other dataset, stellar, and path fields. In the first, run only white light with a linear baseline:
+
+```yaml
+output_dir: results/WASP-39_LINEAR
+flags:
+  analysis_stage: whitelight
+  detrending_type: linear
+  ld_profile: power2
+  ld_prior: stellarprior
+```
+
+In the second, change only the output directory and trend:
+
+```yaml
+output_dir: results/WASP-39_QUADRATIC
+flags:
+  analysis_stage: whitelight
+  detrending_type: quadratic
+  ld_profile: power2
+  ld_prior: stellarprior
+```
+
+Run both complete YAML files:
+
+```bash
+python fit_jwst.py -c wasp39_linear.yaml
+python fit_jwst.py -c wasp39_quadratic.yaml
+```
+
+Compare `*_whitelight_summary.png` and the transit parameters in `*_bestfit_params.csv`. Keep quadratic only when the baseline supports curvature and the residuals improve without distorting ingress or egress. Restore `analysis_stage: all` for the chosen production fit.
+
+## A practical comparison
+
+Fit white light with the candidate trends that have a physical or instrumental reason. For each fit:
+
+1. Check that the model follows the out-of-transit baseline without bending through ingress or egress.
+2. Check the residual plot for remaining time structure.
+3. Compare the inferred transit depth and geometry. Large movement means trend choice is part of the scientific uncertainty.
+4. Reject fits with poor sampling diagnostics, regardless of residual RMS.
+
+Keep the same masks, limb darkening, and sampling policy during this comparison. If several trends remain credible and change the spectrum, propagate the choice with [model stacking](model_stacking.md).
+
+## Common models
+
+With $x=t-\min(t)$ in days, polynomial trends are additive to the transit model:
+
+$$
+S(t)=c+vx+v_2x^2+\cdots.
+$$
+
+`linear`, `quadratic`, `cubic`, and `quartic` stop after the corresponding term. Linear is a sensible starting point for many SOSS and NIRSpec visits.
+
+An exponential ramp adds early-time settling:
+
+$$
+S(t)=c+vx+A\exp(-x/\tau).
+$$
 
 ```yaml
 flags:
   detrending_type: explinear
 ```
 
-The white-light stage fits `A` and `tau`. The spectroscopic stages fix `tau` to
-the white-light posterior median and fit a channel amplitude `A`. NIRSpec PRISM
-frequently needs `explinear`; SOSS and G395H examples use linear, quadratic,
-spot, or explinear based on visit behavior. Select the simplest trend supported
-by residuals. GP variants are selected by including `gp` in the detrending
-type, such as `linear_gp` or `explinear_gp`.
+White light fits both $A$ and the decay time $\tau$. By default the spectroscopic fits reuse the white-light decay time and fit an amplitude in each channel. This shares the well-measured shape without forcing the ramp to be achromatic.
 
-## Equations and sampled priors
-
-Define $x=t-\min(t)$ in days and let $T(t)$ be the transit contribution. All trends are additive: $f(t)=T(t)+S(t)$. For `none`, $S(t)=1$.
-
-The polynomial family is
-
-$$S_p(t)=c+vx+v_2x^2+v_3x^3+v_4x^4,$$
-
-truncated at the selected order. The sampled prior is $c\sim\mathcal U(0.9,1.1)$. Every active $v,v_2,v_3,v_4\sim\mathcal U(-0.1,0.1)$.
+A discontinuity uses a smooth step centered on `t_jump`:
 
 ```yaml
-flags: {detrending_type: cubic}
+flags:
+  detrending_type: linear_discontinuity
+  t_jump_guess: 59867.20
+  jump_guess: 0.0
 ```
 
-Start with linear for SOSS and many G395H visits. Increase order only for smooth residual structure supported by out-of-transit baseline.
+The channel fits reuse the white-light step time and width. Use this for a real common-mode transition, not a single deviant cadence.
 
-## Exponential ramp
-
-The white-light formula is
-
-$$S(t)=c+vx+A\exp(-x/\tau).$$
-
-$A\sim\mathcal U(-0.1,0.1)$. `log_tau` is uniform between $\log(10^{-3})$ and $\log(10^{-1})$, so $\tau$ spans 0.001--0.1 day. The white-light stage fits both $A$ and $\tau$.
-
-The production spectroscopic stage fixes $\tau$ to the white-light posterior median. Each channel fits `c`, `v`, and its own `A` multiplying the fixed exponential shape. PRISM frequently needs this ramp because visit settling can be strong.
-
-Some SOSS visits also show ramps; decide from the broadband baseline.
-
-## Spot templates
-
-One spot component is
-
-$$G(t)=a\exp[-(t-\mu_s)^2/(2\sigma_s^2)].$$
-
-The white-light `spot` model is $S(t)=c+vx+G(t)$. $a\sim\mathcal U(0,0.1)$. $\mu_s\sim\mathcal N(\mu_\mathrm{guess},0.01)$ day.
-
-$\sigma_s\sim\mathcal U(10^{-4},0.1)$ day.
+A spot template describes a localized Gaussian-shaped feature:
 
 ```yaml
 flags:
@@ -78,60 +118,39 @@ flags:
   spot_width: 0.005
 ```
 
-`2spot` adds the analogous second component. Spectroscopic fits reuse the white-light spot shape and fit `A_spot` or `A_spot2` scales. Their sampled bounds are 0.5--2.
+Use `2spot` only when two distinct features are supported. A spot-shaped residual may also come from timing, limb darkening, or extraction systematics, so inspect ingress and egress before giving it a stellar interpretation.
 
-Use this model for a localized in-transit feature coherent across wavelength.
+## Sample or marginalize the coefficients?
 
-## Discontinuities
-
-The default step template is a smooth sigmoid,
-
-$$H(t;t_j,w)=\left[1+\exp(-(t-t_j)/w)\right]^{-1}.$$
-
-The white-light model is $S(t)=c+vx+jH(t;t_j,w)$. $t_j\sim\mathcal N(t_{j,\mathrm{guess}},0.01)$ day and $j\sim\mathcal N(j_\mathrm{guess},0.01)$. The width has a log-uniform prior from half the median cadence to 30 minutes and is reported in days and minutes.
+The usual mode samples trend coefficients with every channel posterior:
 
 ```yaml
 flags:
-  detrending_type: linear_discontinuity
-  t_jump_guess: 59867.20
-  jump_guess: 0.0
+  trend_inference: sampled_uniform
 ```
 
-The channel stage fixes both `t_jump` and `width` to their white-light posterior medians, then fits `A_jump` on 0.5--2. Use this for a G395H detector tilt event or another common-mode transition.
-
-## Combined and GP models
-
-Spot-plus-step and spot-plus-explinear names sum the corresponding terms. Use a combined model only when both structures are present in white light. Including `gp` selects a tinygp likelihood around the requested mean trend.
-
-`GP_log_sigma` is uniform from $\log(10^{-5})$ to $\log(10^3)$. `GP_log_rho` is uniform from $\log(0.007)$ to $\log(0.3)$ day.
+Conditionally linear coefficients can instead be integrated out under Gaussian priors:
 
 ```yaml
-flags: {detrending_type: linear_gp}
+flags:
+  trend_inference: gaussian_marginalized
 ```
 
-GP trends cannot use Gaussian coefficient marginalization.
+Marginalization can make the nonlinear sampler smaller while preserving draws of the trend coefficients in saved products. It supports the jaxoplanet path and requires a trend with at least one linear coefficient. It does not support GP trends. Treat the two settings as different prior specifications, not merely two computational routes.
 
-## Jitter
+## When is a GP warranted?
 
-The channel uncertainty is
+Add `+gp` only after choosing an adequate mean trend, for example:
 
-$$\sigma_{j,i,\mathrm{total}}^2=\sigma_{j,i}^2+s_j^2.$$
+```yaml
+flags:
+  detrending_type: linear+gp
+```
 
-For the default prior,
+The GP describes correlated residuals. It needs enough baseline to constrain its timescale and cannot be combined with Gaussian trend marginalization. Always compare its inferred depth with a simpler accepted model; a GP can trade against transit shape when its timescale overlaps ingress or egress.
 
-$$\log s_j\sim\mathcal N[\log(0.5\,\mathrm{median}_i\sigma_{j,i}),2^2].$$
+## What to inspect
 
-The `log_uniform` alternative spans jitter from $10^{-6}$ to 1. White light uses a log-uniform jitter from $10^{-5}$ to $10^{-2}$. Jitter describes extra uncorrelated scatter, not time-correlated systematics.
+The white-light summary shows the fit and residuals. `*_whitelight_timeseries.csv` contains `trend_model` and `detrended_flux`; `*_bestfit_params.csv` contains active trend coefficients. Noise-binning plots show whether residual RMS approaches the white-noise expectation as points are averaged.
 
-## Outputs and checks
-
-Active coefficients appear in `*_bestfit_params.csv` with central, standard-deviation, and asymmetric-error columns. Possible fields include `c`, `v`, `v2`, `v3`, `v4`, `A`, `tau`, `t_jump`, `jump`, spot parameters, and template scales. The white-light time-series table includes `trend_model` and `detrended_flux` when available.
-
-Inspect both before interpreting wavelength-dependent depths. Use the noise-binning products to check whether residual RMS approaches white-noise scaling.
-
-## White-light trend coordinates
-
-The fitter chooses numerically stable white-light coordinates for each trend
-family while continuing to report physical centers, widths, jump times, and
-amplitudes. These coordinate choices preserve the configured physical priors
-and are intentionally internal.
+Jitter accounts for extra *uncorrelated* scatter. It does not repair a misspecified baseline or correlated residuals.

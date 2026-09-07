@@ -12,7 +12,6 @@ import numpyro
 import numpyro.distributions as dist
 
 import fit_jwst
-from tools.run_sampler_on_stage_inputs import _base_key_for_seed
 from tools.spectro_stage_inputs import load_stage_inputs
 
 
@@ -120,19 +119,3 @@ def test_dump_hook_is_a_noop_when_environment_is_unset(monkeypatch, tmp_path):
     )
     assert result["x"].shape == (1, 3)
     assert not list(tmp_path.iterdir())
-
-
-def test_reference_seed_uses_pipeline_stage_split():
-    class Stage:
-        meta = {"stage_kind": "low_resolution"}
-        rng_key = jax.random.split(jax.random.PRNGKey(555), 7)[3]
-
-    baseline, baseline_source = _base_key_for_seed(Stage(), 0)
-    replicate, replicate_source = _base_key_for_seed(Stage(), 1)
-    np.testing.assert_array_equal(baseline, Stage.rng_key)
-    np.testing.assert_array_equal(
-        replicate,
-        jax.random.split(jax.random.PRNGKey(556), 7)[3],
-    )
-    assert baseline_source == "dumped_pipeline_key"
-    assert replicate_source == "pipeline_master_seed_split"

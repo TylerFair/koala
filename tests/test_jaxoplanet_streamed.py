@@ -20,14 +20,10 @@ from models.jaxoplanet.core import (
     compute_transit_model,
     resolve_jaxoplanet_kernel,
 )
-from models.jaxoplanet.builder import create_vectorized_model
+from models.jaxoplanet.builder import create_vectorized_model, create_whitelight_model
 from models.jaxoplanet.limb_dark_streamed import (
     light_curve as streamed_core_light_curve,
     limb_dark_light_curve as streamed_orbit_light_curve,
-)
-from models.jaxoplanet.limb_dark_fused import (
-    light_curve as fused_core_light_curve,
-    limb_dark_light_curve as fused_orbit_light_curve,
 )
 
 
@@ -65,42 +61,6 @@ def test_streamed_core_matches_stock_at_contacts_and_edges(c, alpha, r):
     expected = stock_core_light_curve(u, separations, jnp.float64(r), order=10)
     actual = streamed_core_light_curve(u, separations, jnp.float64(r), order=10)
     np.testing.assert_allclose(actual, expected, rtol=2.0e-11, atol=5.0e-12)
-
-
-@pytest.mark.parametrize(
-    ("c", "alpha", "r"),
-    [
-        (0.62, 0.73, 0.12),
-        (1.0e-8, 0.001, 0.12),
-        (1.0 - 1.0e-8, 1.0 - 1.0e-8, 0.12),
-        (0.4, 0.5, 1.2),
-    ],
-)
-def test_fused_core_matches_stock_at_contacts_and_edges(c, alpha, r):
-    u = _power2_coefficients(c, alpha)
-    inner = abs(1.0 - r)
-    outer = 1.0 + r
-    separations = jnp.asarray(
-        [
-            0.0,
-            inner,
-            max(0.0, inner - 1.0e-12),
-            inner + 1.0e-12,
-            outer - 1.0e-12,
-            outer,
-            outer + 1.0e-12,
-            2.0,
-        ],
-        dtype=jnp.float64,
-    )
-    expected = stock_core_light_curve(u, separations, jnp.float64(r), order=10)
-    actual = fused_core_light_curve(u, separations, jnp.float64(r), order=10)
-    # The deliberately pathological r > 1 case cancels several O(1) Green
-    # terms to a zero signal at outer contact.  Fusing that contraction changes
-    # the cancellation residue by about 1e-11 while leaving the physical
-    # production range (r < sqrt(0.5)) at the tighter tolerance.
-    atol = 2.0e-11 if r > 1.0 else 5.0e-12
-    np.testing.assert_allclose(actual, expected, rtol=2.0e-11, atol=atol)
 
 
 def test_streamed_orbit_matches_stock_at_exact_duration_contacts():
@@ -152,34 +112,6 @@ def test_streamed_orbit_gradients_match_stock(impact):
     np.testing.assert_allclose(actual, expected, rtol=2.0e-7, atol=1.0e-10)
 
 
-@pytest.mark.parametrize("impact", [0.05, 0.45, 1.095])
-def test_fused_orbit_gradients_match_stock(impact):
-    times = jnp.linspace(-0.055, 0.055, 41, dtype=jnp.float64)
-
-    def objective(theta, light_curve_builder):
-        c, alpha, radius = theta
-        orbit = TransitOrbit(
-            period=jnp.float64(2.7),
-            duration=jnp.float64(0.12),
-            time_transit=jnp.float64(0.0),
-            impact_param=jnp.float64(impact),
-            radius_ratio=radius,
-        )
-        signal = light_curve_builder(
-            orbit, _power2_coefficients(c, alpha), order=10
-        )(times)
-        return jnp.sum(jnp.square(signal))
-
-    theta = jnp.asarray([0.61, 0.71, 0.12], dtype=jnp.float64)
-    expected = jax.grad(objective)(theta, stock_orbit_light_curve)
-    actual = jax.grad(objective)(theta, fused_orbit_light_curve)
-    relative_l2 = np.linalg.norm(np.asarray(actual - expected)) / max(
-        np.linalg.norm(np.asarray(expected)), np.finfo(np.float64).tiny
-    )
-    assert relative_l2 <= 5.0e-9
-    np.testing.assert_allclose(actual, expected, rtol=2.0e-7, atol=1.0e-10)
-
-
 def test_kernel_routing_is_conservative():
     assert resolve_jaxoplanet_kernel(
         "auto", ld_profile="power2", degree=12
@@ -191,37 +123,29 @@ def test_kernel_routing_is_conservative():
         "streamed", ld_profile="power2", degree=12, keplerian=True
     ) == "stock"
     assert resolve_jaxoplanet_kernel(
-        "fused", ld_profile="power2", degree=12
-    ) == "fused"
-    assert resolve_jaxoplanet_kernel(
-        "fused", ld_profile="quadratic", degree=2
-    ) == "stock"
-    assert resolve_jaxoplanet_kernel(
-        "fused", ld_profile="power2", degree=12, keplerian=True
-    ) == "stock"
-    assert resolve_jaxoplanet_kernel(
-        "quadratic_specialized", ld_profile="quadratic", degree=2
-    ) == "quadratic_specialized"
-    assert resolve_jaxoplanet_kernel(
-        "quadratic_specialized", ld_profile="power2", degree=12
-    ) == "stock"
-    assert resolve_jaxoplanet_kernel(
-        "quadratic_local_jvp", ld_profile="quadratic", degree=2
-    ) == "quadratic_local_jvp"
-    assert resolve_jaxoplanet_kernel(
-        "quadratic_local_jvp", ld_profile="power2", degree=12
-    ) == "stock"
-    assert resolve_jaxoplanet_kernel(
-        "quadratic_local_jvp",
-        ld_profile="quadratic",
-        degree=2,
-        keplerian=True,
-    ) == "stock"
-    assert resolve_jaxoplanet_kernel(
         "auto", ld_profile="power2", degree=10
     ) == "stock"
-    with pytest.raises(ValueError, match="jaxoplanet_kernel"):
-        resolve_jaxoplanet_kernel("unknown")
+    for removed in (
+        "fused",
+        "native_power2",
+        "quadratic_specialized",
+        "quadratic_local_jvp",
+        "unknown",
+    ):
+        with pytest.raises(ValueError, match="jaxoplanet_kernel"):
+            resolve_jaxoplanet_kernel(removed)
+
+
+def test_builders_reject_removed_internal_options():
+    for parameterization in ("decorrelated_linear", "latent_gaussian"):
+        with pytest.raises(ValueError, match="ld_parameterization"):
+            create_whitelight_model(ld_parameterization=parameterization)
+        with pytest.raises(ValueError, match="ld_parameterization"):
+            create_vectorized_model(ld_parameterization=parameterization)
+    with pytest.raises(ValueError, match="two_spot_ordering"):
+        create_whitelight_model(two_spot_ordering="ordered")
+    with pytest.raises(ValueError, match="jitter_prior"):
+        create_vectorized_model(jitter_prior="log_uniform")
 
 
 def test_precomputed_phase_path_matches_stock_orbit_and_gradients():
@@ -308,14 +232,9 @@ def test_power2_builder_auto_trace_matches_stock_with_window_and_shared_phase():
 
     stock = trace("stock")
     automatic = trace("auto")
-    fused = trace("fused")
     for sample_name in ("rors", "depths", "c1", "c2", "log_jitter"):
         np.testing.assert_array_equal(
             np.asarray(automatic[sample_name]["value"]),
-            np.asarray(stock[sample_name]["value"]),
-        )
-        np.testing.assert_array_equal(
-            np.asarray(fused[sample_name]["value"]),
             np.asarray(stock[sample_name]["value"]),
         )
     np.testing.assert_allclose(
@@ -324,17 +243,7 @@ def test_power2_builder_auto_trace_matches_stock_with_window_and_shared_phase():
         rtol=0.0,
         atol=5.0e-11,
     )
-    np.testing.assert_allclose(
-        fused["obs"]["fn"].loc,
-        stock["obs"]["fn"].loc,
-        rtol=0.0,
-        atol=5.0e-11,
-    )
     np.testing.assert_array_equal(
         np.asarray(automatic["obs"]["fn"].scale),
-        np.asarray(stock["obs"]["fn"].scale),
-    )
-    np.testing.assert_array_equal(
-        np.asarray(fused["obs"]["fn"].scale),
         np.asarray(stock["obs"]["fn"].scale),
     )

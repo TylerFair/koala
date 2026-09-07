@@ -331,6 +331,40 @@ def _enrich_initial_values(init_params):
     return enriched
 
 
+def _report_invalid_initial_point(model, init_values, model_args, model_kwargs):
+    """Print which sample sites are non-finite or outside support at ``init_values``."""
+    try:
+        from numpyro import handlers
+        with handlers.seed(rng_seed=0):
+            tr = handlers.trace(
+                handlers.substitute(model, data=init_values)
+            ).get_trace(*model_args, **model_kwargs)
+        print("[init diagnostics] per-site status at the initial point:", flush=True)
+        for name, site in tr.items():
+            if site["type"] != "sample":
+                continue
+            value = site["value"]
+            fn = site["fn"]
+            try:
+                in_support = bool(jnp.all(fn.support(value)))
+            except Exception:
+                in_support = None
+            try:
+                lp = fn.log_prob(value)
+                lp_finite = bool(jnp.all(jnp.isfinite(lp)))
+                lp_sum = float(jnp.sum(lp))
+            except Exception as lp_err:  # pragma: no cover - diagnostics only
+                lp_finite, lp_sum = None, f"error: {lp_err}"
+            flag = "" if (in_support in (True, None) and lp_finite in (True, None)) else "  <-- PROBLEM"
+            print(
+                f"[init diagnostics]   {name}: in_support={in_support} "
+                f"log_prob_finite={lp_finite} log_prob={lp_sum}{flag}",
+                flush=True,
+            )
+    except Exception as diag_err:  # pragma: no cover - diagnostics only
+        print(f"[init diagnostics] could not trace the model: {diag_err}", flush=True)
+
+
 def _first_lane_initial_values(init_params, num_channels):
     """Values passed to NumPyro's trace-building initialization."""
     first = {}
@@ -381,10 +415,7 @@ def _prepare_unconstrained_initial_values(
             # the random value used to trace the model scaffold.  The latter
             # can lie outside the Maxted image (h2 <= 0), where the inverse and
             # induced density are undefined.
-            from .ld_parameterization import (
-                Power2MaxtedTransform,
-                Power2LinearTransform,
-            )
+            from .ld_parameterization import Power2MaxtedTransform
 
             physical = jnp.stack(
                 (init_params["c1"], init_params["c2"]), axis=-1
@@ -394,13 +425,7 @@ def _prepare_unconstrained_initial_values(
                 (
                     transform
                     for transform in distribution_transforms
-                    if isinstance(
-                        transform,
-                        (
-                            Power2MaxtedTransform,
-                            Power2LinearTransform,
-                        ),
-                    )
+                    if isinstance(transform, Power2MaxtedTransform)
                 ),
                 None,
             )
@@ -1457,14 +1482,24 @@ class _IndependentSamplerRunner:
         # initial sites and parameter-dependent supports also reflect this
         # chunk. The expensive jitted transition programs below retain their
         # identity and executable cache.
-        model_info = initialize_model(
-            key_model,
-            self.model,
-            init_strategy=init_to_value(values=first_init),
-            dynamic_args=True,
-            model_args=(t, padded_yerr[0]),
-            model_kwargs={"y": padded_y[0], **first_kwargs},
-        )
+        try:
+            model_info = initialize_model(
+                key_model,
+                self.model,
+                init_strategy=init_to_value(values=first_init),
+                dynamic_args=True,
+                model_args=(t, padded_yerr[0]),
+                model_kwargs={"y": padded_y[0], **first_kwargs},
+            )
+        except RuntimeError as err:
+            _report_invalid_initial_point(
+                self.model, first_init, (t, padded_yerr[0]),
+                {"y": padded_y[0], **first_kwargs},
+            )
+            raise RuntimeError(
+                "NumPyro could not initialise the first lane of this chunk "
+                "(see the per-site report above)."
+            ) from err
         batched_init = _prepare_unconstrained_initial_values(
             enriched_init,
             model_info.model_trace,
@@ -1646,224 +1681,6 @@ def build_independent_nuts_runner(
         lane_width=lane_width,
         channel_varying_kwargs=channel_varying_kwargs,
     )
-
-
-def _get_samples_independent_uncached(
-    model: Callable,
-    key: jax.Array,
-    t,
-    yerr,
-    indiv_y,
-    init_params: Mapping[str, Any],
-    *,
-    nuts_kwargs: Mapping[str, Any] | None = None,
-    mcmc_kwargs: Mapping[str, Any] | None = None,
-    diagnostics_path: str | None = None,
-    num_warmup: int | None = None,
-    num_samples: int | None = None,
-    lane_width: int | None = None,
-    channel_varying_kwargs: tuple[str, ...] = (),
-    dense_mass: bool | None = None,
-    regularize_mass_matrix: bool | None = None,
-    target_accept_prob: float | None = None,
-    max_tree_depth: int | None = None,
-    mass_matrix: str | None = None,
-    laplace_warmup: int | None = None,
-    laplace_target_accept: float | None = None,
-    laplace_max_tree_depth: int | None = None,
-    laplace_start_at_map: bool | None = None,
-    return_diagnostics: bool = False,
-    **model_kwargs,
-):
-    """Sample independent channel posteriors in one vmapped NUTS program.
-
-    The call and returned sample dictionary intentionally mirror
-    ``fit_jwst.get_samples``.  Names in ``channel_varying_kwargs`` receive a
-    length-one internal channel axis in each lane; all other model arguments
-    remain shared.  This explicit list avoids confusing one-planet geometry
-    arrays with channel arrays when a block contains one light curve.  The
-    optional ``lane_width`` pads a short final block by duplicating its last
-    channel, compiles a fixed GPU shape, then discards the dummy lanes.
-
-    Notes
-    -----
-    Dynamic NUTS trees are vmapped.  XLA masks completed lanes until the
-    deepest lane finishes, so similarly difficult channels should be grouped
-    together for best throughput.
-    """
-    options = _resolve_sampler_options(
-        num_warmup=num_warmup,
-        num_samples=num_samples,
-        dense_mass=dense_mass,
-        regularize_mass_matrix=regularize_mass_matrix,
-        target_accept_prob=target_accept_prob,
-        max_tree_depth=max_tree_depth,
-        mass_matrix=mass_matrix,
-        laplace_warmup=laplace_warmup,
-        laplace_target_accept=laplace_target_accept,
-        laplace_max_tree_depth=laplace_max_tree_depth,
-        laplace_start_at_map=laplace_start_at_map,
-        nuts_kwargs=nuts_kwargs,
-        mcmc_kwargs=mcmc_kwargs,
-    )
-    num_warmup = options["num_warmup"]
-    num_samples = options["num_samples"]
-    dense_mass = options["dense_mass"]
-    regularize_mass_matrix = options["regularize_mass_matrix"]
-    target_accept_prob = options["target_accept_prob"]
-    max_tree_depth = options["max_tree_depth"]
-
-    if num_warmup < 0:
-        raise ValueError("num_warmup must be >= 0.")
-    if num_samples < 1:
-        raise ValueError("num_samples must be >= 1.")
-
-    t = _asarray_f64(t)
-    yerr = _asarray_f64(yerr)
-    indiv_y = _asarray_f64(indiv_y)
-    if yerr.ndim != 2 or indiv_y.ndim != 2:
-        raise ValueError("yerr and indiv_y must have shape [channel, time].")
-    if yerr.shape != indiv_y.shape:
-        raise ValueError("yerr and indiv_y must have identical shapes.")
-
-    num_channels = int(yerr.shape[0])
-    if num_channels < 1:
-        raise ValueError("At least one channel is required.")
-    lane_width = num_channels if lane_width is None else int(lane_width)
-    if lane_width < num_channels:
-        raise ValueError(
-            f"lane_width={lane_width} cannot hold {num_channels} channels."
-        )
-
-    padded_yerr = _pad_first_axis(yerr, lane_width)[:, None, :]
-    padded_y = _pad_first_axis(indiv_y, lane_width)[:, None, :]
-    varying_kwargs, shared_kwargs = _partition_model_kwargs(
-        model_kwargs,
-        channel_varying_kwargs,
-        num_channels,
-        lane_width,
-    )
-    enriched_init = _enrich_initial_values(init_params)
-    first_init = _first_lane_initial_values(enriched_init, num_channels)
-
-    def lane_kwargs(varying_lane):
-        return {**shared_kwargs, **varying_lane}
-
-    # A dynamic potential generator lets the same compiled NUTS program receive
-    # different observations and priors in each vmap lane.
-    key_model, key_chains = jax.random.split(key)
-    first_kwargs = {
-        name: _first_tree_lane(value)
-        for name, value in varying_kwargs.items()
-    }
-    model_info = initialize_model(
-        key_model,
-        model,
-        init_strategy=init_to_value(values=first_init),
-        dynamic_args=True,
-        model_args=(t, padded_yerr[0]),
-        model_kwargs={"y": padded_y[0], **lane_kwargs(first_kwargs)},
-    )
-    batched_init = _prepare_unconstrained_initial_values(
-        enriched_init,
-        model_info.model_trace,
-        num_channels,
-        lane_width,
-    )
-    init_kernel, sample_kernel = hmc(
-        potential_fn_gen=model_info.potential_fn,
-        algo="NUTS",
-    )
-
-    chain_keys = jax.random.split(key_chains, lane_width)
-
-    def init_one(z, err, obs, varying, rng):
-        return init_kernel(
-            z,
-            num_warmup=num_warmup,
-            dense_mass=dense_mass,
-            regularize_mass_matrix=regularize_mass_matrix,
-            target_accept_prob=target_accept_prob,
-            max_tree_depth=max_tree_depth,
-            model_args=(t, err),
-            model_kwargs={"y": obs, **lane_kwargs(varying)},
-            rng_key=rng,
-        )
-
-    states = jax.jit(jax.vmap(init_one))(
-        batched_init,
-        padded_yerr,
-        padded_y,
-        varying_kwargs,
-        chain_keys,
-    )
-
-    def advance(states):
-        return jax.vmap(
-            lambda state, err, obs, varying: sample_kernel(
-                state,
-                model_args=(t, err),
-                model_kwargs={"y": obs, **lane_kwargs(varying)},
-            )
-        )(states, padded_yerr, padded_y, varying_kwargs)
-
-    if num_warmup:
-        states = jax.jit(
-            lambda initial: jax.lax.fori_loop(
-                0, num_warmup, lambda _, state: advance(state), initial
-            )
-        )(states)
-
-    def collect_step(state, _):
-        state = advance(state)
-        return state, (
-            state.z,
-            state.num_steps,
-            state.accept_prob,
-            state.diverging,
-        )
-
-    states, (z_samples, num_steps, accept_prob, diverging) = jax.jit(
-        lambda initial: jax.lax.scan(
-            collect_step, initial, xs=None, length=num_samples
-        )
-    )(states)
-
-    postprocess_gen = model_info.postprocess_fn
-
-    def postprocess_lane(z, err, obs, varying):
-        fn = postprocess_gen(
-            t,
-            err,
-            y=obs,
-            **lane_kwargs(varying),
-        )
-        return fn(z)
-
-    postprocess_draw = jax.vmap(
-        postprocess_lane,
-        in_axes=(0, 0, 0, 0),
-    )
-    samples = jax.jit(
-        jax.vmap(
-            postprocess_draw,
-            in_axes=(0, None, None, None),
-        )
-    )(z_samples, padded_yerr, padded_y, varying_kwargs)
-    samples = _squeeze_internal_channel_axis(samples)
-    samples = jax.tree.map(lambda value: value[:, :num_channels], samples)
-
-    diagnostics = IndependentNUTSDiagnostics(
-        num_steps=num_steps[:, :num_channels],
-        accept_prob=accept_prob[:, :num_channels],
-        diverging=diverging[:, :num_channels],
-        step_size=states.adapt_state.step_size[:num_channels],
-        mean_accept_prob=states.mean_accept_prob[:num_channels],
-    )
-    _save_diagnostics(diagnostics_path, diagnostics)
-    if not return_diagnostics:
-        return samples
-    return samples, diagnostics
 
 
 def get_samples_independent(

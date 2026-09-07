@@ -10,16 +10,13 @@ from models.harmonica.builder import create_vectorized_model
 def test_harmonica_resolves_laplace_independent_nuts_options():
     flags = {
         "spectro_sampler": "independent_nuts",
-        "spectro_mass_matrix": "laplace",
-        "spectro_laplace_hessian_method": "finite_difference",
-        "spectro_laplace_target_accept": 0.99,
     }
     options = _resolve_harmonica_stage_nuts_kwargs(
         flags, "harmonica_lr", default_dense_mass=True
     )
     assert options["mass_matrix"] == "laplace"
     assert options["laplace_hessian_method"] == "finite_difference"
-    assert options["laplace_target_accept"] == 0.99
+    assert options["laplace_target_accept"] == 0.95
 
 
 def test_harmonica_quadratic_sing_sites_flow_to_limb_coefficients(monkeypatch):

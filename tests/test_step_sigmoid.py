@@ -29,19 +29,6 @@ def test_free_step_width_prior_and_sites():
     assert float(trace["width_minutes"]["value"]) == width * 1440.0
 
 
-def test_fixed_step_width_has_no_latent_site():
-    t = jnp.arange(4, dtype=jnp.float64)
-
-    def model():
-        sample_step_width(
-            t, {"step_width_mode": "fixed", "step_width_days": 2.5e-4}
-        )
-
-    trace = handlers.trace(handlers.seed(model, jax.random.PRNGKey(4))).get_trace()
-    assert "log_width" not in trace
-    assert float(trace["width"]["value"]) == 2.5e-4
-
-
 def test_free_width_prior_rejects_boundary_as_unconstrained_start():
     t = jnp.arange(12, dtype=jnp.float64) * 2.0e-4
     lower = np.log(0.5 * 2.0e-4)

@@ -11,10 +11,7 @@ import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
 
 from fit_jwst import (
-    _geometry_from_white_light_samples,
     _load_whitelight_geometry_handoff,
-    _select_max_likelihood_retained_draw,
-    _sum_data_log_likelihood_per_draw,
     _write_whitelight_geometry_handoff,
     _resolve_whitelight_laplace_options,
     _geometry_chain_quality,
@@ -28,8 +25,8 @@ def _normal_location_model(t, yerr, y=None):
     numpyro.sample("obs", dist.Normal(location + jnp.zeros_like(t), yerr), obs=y)
 
 
-def test_whitelight_laplace_flag_defaults_and_validation():
-    defaults = _resolve_whitelight_laplace_options({})
+def test_whitelight_laplace_production_constants():
+    defaults = _resolve_whitelight_laplace_options()
     assert defaults == {
         "mass_matrix": "laplace",
         "warmup": 200,
@@ -38,11 +35,8 @@ def test_whitelight_laplace_flag_defaults_and_validation():
         "trust_radius": 5.0,
         "hessian_method": "finite_difference",
     }
-    selected = _resolve_whitelight_laplace_options(
-        {"whitelight_mass_matrix": "laplace", "whitelight_laplace_warmup": 7}
-    )
-    assert selected["mass_matrix"] == "laplace"
-    assert selected["warmup"] == 7
+    assert _resolve_whitelight_laplace_options(True)["target_accept"] == 0.99
+    assert _resolve_whitelight_laplace_options(False, "adaptive")["mass_matrix"] == "adaptive"
 
 
 def test_single_lane_laplace_nuts_preserves_sample_dict_layout():
@@ -101,101 +95,22 @@ def test_whitelight_geometry_quality_uses_required_sites():
     assert rhat == {}
 
 
-def test_summed_data_log_likelihood_uses_observation_distribution_only():
-    samples = {
-        "location": jnp.array([-1.0, 0.0, 1.0]),
-        "location_squared": jnp.array([1.0, 0.0, 1.0]),
-    }
-    time = jnp.arange(2.0)
-    yerr = jnp.array([0.5, 0.25])
-    flux = jnp.array([0.2, -0.1])
-
-    actual = _sum_data_log_likelihood_per_draw(
-        _normal_location_model,
-        samples,
-        time,
-        yerr,
-        y=flux,
-        batch_size=2,
-    )
-    expected = np.asarray(
-        dist.Normal(samples["location"][:, None], yerr[None, :])
-        .log_prob(flux[None, :])
-        .sum(axis=1)
-    )
-
-    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
-    # The prior strongly prefers zero, but is intentionally absent from this
-    # observed-data score.
-    prior_log_prob = np.asarray(dist.Normal(0.0, 0.1).log_prob(samples["location"]))
-    assert not np.allclose(actual, expected + prior_log_prob)
-
-
-def test_max_likelihood_draw_is_finite_coherent_and_maps_chain_index():
-    posterior = {
-        "t0_0": jnp.array([10.0, 20.0, 30.0, 40.0]),
-        "rors_0": jnp.array([0.10, 0.20, jnp.nan, 0.40]),
-        "duration_0": jnp.array([0.01, 0.02, 0.03, 0.04]),
-        "b_0": jnp.array([0.1, 0.2, 0.3, 0.4]),
-        "a_rs_0": jnp.array([10.0, 20.0, 30.0, 40.0]),
-        "cos_i_0": jnp.array([0.01, 0.02, 0.03, 0.04]),
-        "inc_0": jnp.array([1.56, 1.55, 1.54, 1.53]),
-    }
-    # Draw 2 has the largest nominal score but contains a non-finite sample.
-    selected = _select_max_likelihood_retained_draw(
-        posterior,
-        np.array([1.0, 5.0, 9.0, 4.0]),
-        num_chains=2,
-    )
-
-    assert selected["flat_draw_index"] == 1
-    assert selected["chain_index"] == 0
-    assert selected["draw_index"] == 1
-    assert selected["summed_data_log_likelihood"] == 5.0
-
-    def derive_geometry(samples, period, ecc=0.0, omega=0.0):
-        del period, ecc, omega
-        return {
-            name: samples[name]
-            for name in (
-                "duration_0", "b_0", "a_rs_0", "cos_i_0", "inc_0"
-            )
-        }
-
-    geometry = _geometry_from_white_light_samples(
-        selected["samples"], derive_geometry, period=[3.0]
-    )
-    assert geometry == {
-        "period": [3.0],
-        "duration": [0.02],
-        "t0": [20.0],
-        "b": [0.2],
-        "a_rs": [20.0],
-        "cos_i": [0.02],
-        "inclination": [1.55],
-        "rors": [0.2],
-    }
 
 
 def test_geometry_handoff_round_trip_and_tamper_invalidation(tmp_path):
     path = tmp_path / "whitelight_geometry_handoff.json"
     posterior_fingerprint = "posterior-target-123"
     payload = {
-        "estimator": "max_likelihood_draw",
+        "estimator": "posterior_median",
         "posterior_fingerprint_sha256": posterior_fingerprint,
         "transit_engine": "jaxoplanet",
         "param_method": "duration",
         "num_retained_draws": 4,
-        "num_chains": 2,
-        "selected_flat_draw_index": 1,
-        "selected_chain_index": 0,
-        "selected_draw_index": 1,
-        "summed_data_log_likelihood": 42.0,
-        "selected_primitive_parameters": {
-            "t0_0": 20.0,
-            "rors_0": 0.2,
-            "logD_0": float(np.log(0.02)),
-        },
+        "selected_flat_draw_index": None,
+        "selected_chain_index": None,
+        "selected_draw_index": None,
+        "summed_data_log_likelihood": None,
+        "selected_primitive_parameters": {},
         "geometry": {
             "period": [3.0],
             "duration": [0.02],
@@ -212,7 +127,7 @@ def test_geometry_handoff_round_trip_and_tamper_invalidation(tmp_path):
     loaded = _load_whitelight_geometry_handoff(
         path,
         expected_posterior_fingerprint=posterior_fingerprint,
-        expected_estimator="max_likelihood_draw",
+        expected_estimator="posterior_median",
     )
     assert loaded == written
     assert loaded["artifact_fingerprint_sha256"]
@@ -221,7 +136,7 @@ def test_geometry_handoff_round_trip_and_tamper_invalidation(tmp_path):
     assert _load_whitelight_geometry_handoff(
         path,
         expected_posterior_fingerprint="different-target",
-        expected_estimator="max_likelihood_draw",
+        expected_estimator="posterior_median",
     ) is None
 
     tampered = json.loads(path.read_text())
@@ -230,5 +145,5 @@ def test_geometry_handoff_round_trip_and_tamper_invalidation(tmp_path):
     assert _load_whitelight_geometry_handoff(
         path,
         expected_posterior_fingerprint=posterior_fingerprint,
-        expected_estimator="max_likelihood_draw",
+        expected_estimator="posterior_median",
     ) is None

@@ -72,15 +72,6 @@ def test_public_config_parser_rejects_old_prior_aliases(alias):
         )
 
 
-def test_public_config_parser_rejects_legacy_fix_ld_field():
-    import fit_jwst
-
-    with pytest.raises(ValueError, match=r"fix_ld.*ld_prior.*fixed"):
-        fit_jwst._resolve_ld_prior_mode(
-            {"fix_ld": True}, {}, "quadratic"
-        )
-
-
 @pytest.mark.parametrize("profile", ["quadratic", "power2"])
 def test_gaussian_prior_uses_width_point_two_for_both_profiles(profile):
     import jax

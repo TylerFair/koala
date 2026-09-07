@@ -1,26 +1,10 @@
-# Executed notebook examples
+# Executed notebooks
 
-These examples preserve their code, tabular previews, fit log tail, measured
-wall time, and embedded white-light and transmission-spectrum figures. They
-follow the analysis in small narrative steps so the saved result can be read
-before installing or rerunning the pipeline.
+Two saved notebooks show a complete fit, output-table inspection, and plotting:
 
-- {download}`NIRISS/SOSS order-1 notebook <../../examples/niriss_soss_order1.ipynb>`
+- {download}`NIRISS/SOSS order 1 <../../examples/niriss_soss_order1.ipynb>`
+- {download}`NIRSpec/G395M NRS1 <../../examples/nirspec_g395m.ipynb>`
 
-- {download}`NIRSpec/G395M NRS1 notebook <../../examples/nirspec_g395m.ipynb>`
+They include their saved output, so you can read the workflow without installing Koala or obtaining the original FITS files. To rerun one, set `PENUMBRA_EXAMPLE_DATA_ROOT` to the directory containing the extracted FITS file and `PENUMBRA_NOTEBOOK_RESULT_ROOT` to a new results directory. The SOSS notebook defaults to the compact file in `examples/data/`.
 
-Both saved notebooks were executed on an NVIDIA V100. Their source
-configurations deliberately retain `host_device: "cpu"`; CPU reruns are
-supported but slower. Set `PENUMBRA_EXAMPLE_DATA_ROOT` to the directory above
-your `FITS/` folder and choose a fresh `PENUMBRA_NOTEBOOK_RESULT_ROOT` so no
-existing result is replaced.
-
-The notebooks use an R=20 tutorial spectrum and an internal bounded-demo
-runtime profile with reduced warmup and draw counts. The science-facing
-configuration cells contain only supported public and advanced choices. The
-adjacent YAML files are the production starting points; they use the validated
-sampler and convergence defaults automatically.
-
-The plotting cells call the same functions used by the pipeline itself, so the
-embedded figures demonstrate the current publication style rather than a
-notebook-only reimplementation.
+The notebooks use reduced tutorial sampling and $R=20$ spectra to keep the walkthrough manageable. Use the adjacent YAML files and the standard convergence settings for a scientific analysis.

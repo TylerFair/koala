@@ -347,26 +347,18 @@ def test_laplace_runner_reuses_compiled_programs_without_stale_values():
     assert jnp.array_equal(reused["x"], fresh["x"])
 
 
-def test_pipeline_resolves_laplace_spectro_options_by_stage():
+def test_pipeline_resolves_fixed_laplace_spectro_options():
     resolved = fit_jwst._resolve_jaxoplanet_spectro_nuts_kwargs(
-        {
-            "spectro_mass_matrix": "laplace",
-            "spectro_laplace_warmup": 150,
-            "spectro_laplace_target_accept": 0.95,
-            "spectro_laplace_max_tree_depth": 10,
-            "lowres_laplace_warmup": 75,
-            "lowres_laplace_start_at_map": True,
-            "lowres_laplace_trust_radius": 5.0,
-        },
         "lowres",
         {"dense_mass": False, "target_accept_prob": 0.8},
         independent=True,
     )
 
     assert resolved["mass_matrix"] == "laplace"
-    assert resolved["laplace_warmup"] == 75
+    assert resolved["laplace_warmup"] == 150
     assert resolved["laplace_target_accept"] == 0.95
-    assert resolved["laplace_max_tree_depth"] == 10
+    assert resolved["laplace_max_tree_depth"] == 5
+    assert resolved["max_tree_depth"] == 5
     assert resolved["laplace_start_at_map"] is True
     assert resolved["laplace_trust_radius"] == 5.0
     assert resolved["dense_mass"] is True

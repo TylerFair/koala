@@ -1,116 +1,134 @@
-# Fit one dataset
+# Quickstart
 
-Put an extracted box-spectrum FITS file in `FITS/`, then save this as `config.yaml`:
+This walkthrough fits one extracted JWST transit. It uses NIRISS/SOSS as the
+example, but NIRSpec follows the same three steps.
 
-```yaml
-planet: {name: WASP-39, period: 4.05528043, duration: 0.11693087, t0: 59787.055, b: 0.4498, rprs: 0.1457}
-stellar: {feh: 0.04, teff: 5509, logg: 4.22, teff_sigma: 28, logg_sigma: 0.07, feh_sigma: 0.02, ld_model: stagger, ld_data_path: ../exotic_ld_data}
-instrument: NIRISS/SOSS
-order: 1
-path: .
-input_dir: FITS
-output_dir: WASP-39_RESULTS
-fits_file: WASP-39_box_spectra_fullres.fits
-resolution: {high: reference, low: 20, reference_grid: prism_template.csv}
-flags: {detrending_type: linear, ld_profile: power2, ld_prior: informed}
-outlier_clip: {whitelight_sigma: 5, spectroscopic_sigma: 5}
-host_device: gpu
-```
+You need an [installed environment](install.md) and the ExoTiC-LD stellar
+grids. The repository includes a compact real WASP-39 box-spectrum FITS file,
+so this first run needs no separate light-curve download.
 
-Run all stages:
+## 1. Copy an example
+
+From the repository root:
 
 ```bash
-export JAX_ENABLE_X64=1
+cp examples/niriss_soss_order1.yaml config.yaml
+```
+
+Use `examples/nirspec_g395m.yaml` or `examples/nirspec_prism.yaml` instead for
+those modes.
+
+## 2. Point it at the limb-darkening grids
+
+Open `config.yaml` and change this path:
+
+```yaml
+stellar:
+  ld_data_path: /path/to/exotic_ld_data
+```
+
+The example already reads `examples/data/WASP-39_soss_binned8.fits` and writes
+to `results/WASP-39_SOSS_ORDER1`. The FITS file retains every integration and
+both SOSS orders from the real observation, with adjacent detector columns
+combined to keep the repository small. It is a teaching extraction rather
+than a publication data product.
+
+- {download}`Download the example FITS <../examples/data/WASP-39_soss_binned8.fits>`
+- {download}`Read its provenance and transformation <../examples/data/README.md>`
+
+When adapting the configuration to your own observation, replace the example
+planet and stellar values and set `path`, `input_dir`, `fits_file`, and
+`output_dir`. The transit time `planet.t0` and FITS time array must use the same
+time system. Give every distinct scientific setup its own output directory.
+
+For a first fit, keep the example's model choices:
+
+```yaml
+resolution:
+  low: 20
+  high: 100
+
+flags:
+  detrending_type: linear
+  ld_profile: power2
+  ld_prior: stellarprior
+```
+
+Both resolution keys are required by the current pipeline. The low-resolution
+grid is a coarse bridge and check; the high-resolution grid is the final
+spectrum.
+
+## 3. Run the fit
+
+The supplied SOSS example uses `host_device: cpu`, so it can start on any
+machine. A complete CPU fit will be slow. For an installed CUDA-enabled JAX
+environment inside a GPU allocation, change that line to `host_device: gpu`.
+
+```bash
 python fit_jwst.py -c config.yaml
 ```
 
-The output directory contains numbered white-light plots and CSV time series, `chunks/` checkpoints and diagnostics, low- and high-resolution transmission-spectrum CSV files, detailed best-fit parameter and light-curve tables, noise-binning CSV/PNG products, and summary PNGs. Exact stems include the target, instrument, detector or order, and resolution. The spectrum CSV columns are `wavelength`, `wavelength_err`, and, for planet zero, `depth00`, `depth_err00`, `depth_ppm00`, and `depth_err_ppm00`.
+The run first fits the wavelength-summed light curve, then the spectroscopic
+channels. The first GPU batch can pause while JAX compiles; later equal-sized
+batches reuse that work. Completed channel batches are checkpointed, so the
+same command resumes an interrupted run.
+
+## Inspect the result
+
+Start with the white-light model and residual plots in `output_dir`. The exact
+filename includes the target and instrument, but the numbered plots make the
+order clear:
+
+- `11_*_whitelightmodel.png` shows the data and fitted transit.
+- `12_*_whitelightresidual.png` reveals structure left by the trend model.
+- `31_*_spectrum_00.png` shows the final high-resolution transmission
+  spectrum. A low-resolution bridge stage, when used, writes `24_*`.
+
+The white-light residuals should be centered on zero without a coherent ramp,
+step, or localized feature. If they are not, choose an appropriate
+[systematics trend](guides/trends.md) before interpreting the spectrum.
+
+The spectrum CSV contains wavelength, bin half-width, transit depth, and depth
+uncertainty. Find and plot it without depending on the target-specific stem:
 
 ```python
-import pandas as pd
-import matplotlib.pyplot as plt
+from pathlib import Path
 
-s = pd.read_csv("WASP-39_RESULTS/WASP-39_NIRISS_SOSS_order1_R20.csv")
-plt.errorbar(s.wavelength, s.depth_ppm00, xerr=s.wavelength_err,
-             yerr=s.depth_err_ppm00, fmt=".")
+import matplotlib.pyplot as plt
+import pandas as pd
+
+out = Path("results/WASP-39_SOSS_ORDER1")
+spectrum_path = next(out.glob("*_R100.csv"))
+spectrum = pd.read_csv(spectrum_path)
+
+plt.errorbar(
+    spectrum["wavelength"],
+    spectrum["depth_ppm00"],
+    xerr=spectrum["wavelength_err"],
+    yerr=spectrum["depth_err_ppm00"],
+    fmt=".",
+)
 plt.xlabel("Wavelength [micron]")
 plt.ylabel("Transit depth [ppm]")
 plt.show()
 ```
 
-## Before running
+Do not treat a completed process as the only quality check. Read any ESS or
+divergence messages and inspect the JSON diagnostics in `output_dir/chunks/`.
+Koala retries failed channels with an alternate exact sampler, but a channel
+that still fails needs investigation.
 
-Confirm that `FITS/WASP-39_box_spectra_fullres.fits` exists relative to the repository. Confirm that `../exotic_ld_data` resolves from the run directory. Change `output_dir` to a new directory for each scientifically distinct setup.
+## Make the model yours
 
-The supplied orbital time and FITS time array must use the same convention.
+Continue with the choice that matters for your dataset:
 
-## What happens in order
+- [Fit your first transit](tutorials/soss_order1.md) for a fuller SOSS example.
+- [Choose a systematics trend](guides/trends.md) for ramps, steps, spots, and
+  smooth baselines.
+- [Choose limb darkening](guides/limb_darkening.md) for fixed, stellar-prior, or
+  weak priors.
+- [Marginalize over models](guides/model_stacking.md) when several reasonable
+  models give different spectra.
 
-The fitter reads the extracted spectral time series. It applies configured time and wavelength masks. It sums a white-light curve and performs an initial numerical optimization.
-
-It samples the white-light posterior and checks ESS and divergences. It writes the posterior-median geometry handoff. It constructs R=20 wavelength channels because `resolution.low: 20`.
-
-It samples those channels in independent GPU lanes. It constructs the `reference_grid` channels. It samples the high-resolution chunks and writes each checkpoint immediately.
-
-It concatenates accepted chunks in wavelength order. It writes spectra, parameter tables, time-series tables, and plots.
-
-## First files to inspect
-
-Open `00_*_preopt_init_check.png` first. A misplaced transit usually indicates an inconsistent `t0`. Open `11_*_whitelightmodel.png` and `12_*_whitelightresidual.png` next.
-
-The baseline should be described outside transit without obvious coherent structure. Open `14_*_whitelightdetrended.png` to inspect the transit after subtracting the fitted trend. Open `15_*_whitelight_summary.png` for the combined overview.
-
-Only then inspect `24_*_R20_spectrum_00.png` and the high-resolution spectrum.
-
-## Check the log
-
-```text
-Fitting whitelight for outliers and bestfit parameters
-Building jaxoplanet whitelight model: detrend='linear', ld='informed'
-Checkpoint directory: .../chunks
-  chunk 0:... - COMPUTING
-  chunk 0:... - SAVED checkpoint
-Transmission spectroscopy data saved to ...csv
-Analysis complete!
-```
-
-The builder line confirms the requested trend and LD prior. The checkpoint line makes an interrupted run resumable. Read all gate messages; completion alone is not a convergence statement.
-
-## Inspect values numerically
-
-```python
-from pathlib import Path
-import pandas as pd
-
-out = Path("WASP-39_RESULTS")
-white = next(out.glob("*_whitelight_timeseries.csv"))
-print(pd.read_csv(white).describe())
-
-spectra = [p for p in out.glob("*_R*.csv") if "noisebin" not in p.name]
-for path in sorted(spectra):
-    frame = pd.read_csv(path)
-    if "depth_ppm00" in frame:
-        print(path.name, len(frame), frame.depth_ppm00.median())
-```
-
-The light-curve table should have finite flux, uncertainty, and model columns. The spectrum length should agree with the requested grid.
-
-## Resume
-
-If the process stops, run the identical command again. Matching checkpoints load automatically. The fingerprint includes data arrays, priors, model settings, and sampler controls.
-
-Changing any of them creates a distinct checkpoint family.
-
-## Next choices
-
-Use the [Concepts](concepts.md) page to understand the staged fit. Use [Limb darkening](guides/limb_darkening.md) to choose a prior. Use [Systematics trends](guides/trends.md) to match visit behavior.
-
-Use [Samplers](guides/samplers.md) to interpret gate and swap messages. Use [Outputs](guides/outputs.md) for every table column.
-
-## Common first-run problems
-
-**Missing config argument:** use `-c config.yaml`. **FITS file not found:** remember that `fits_file` is joined to `path/input_dir`. **No LD data:** point `stellar.ld_data_path` to the Stagger data tree.
-
-**GPU out of memory:** reduce `flags.vmap_chunk`. **No high-resolution files:** check `analysis_stage` and `resolution.high`. **No low-resolution files:** set `need_lowres: true`.
-
-**Gate failure:** inspect the reported channel before changing sampler thresholds.
+See [Output files](guides/outputs.md) when you are ready to consume the full
+tables and diagnostics.

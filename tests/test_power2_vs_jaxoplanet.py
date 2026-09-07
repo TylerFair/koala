@@ -164,7 +164,6 @@ class TestPower2VsJaxoplanet(unittest.TestCase):
                 err_msg=f"power-2 (alpha={alpha}) should exactly match "
                         f"non-linear basis term"
             )
-            print(f"\n  alpha={alpha}: match to rtol=1e-12 OK")
 
     # ===========================================================
     # 2. Harmonica NumPy vs JAX backend consistency
@@ -194,21 +193,18 @@ class TestPower2VsJaxoplanet(unittest.TestCase):
         """c=0.6, alpha=1.2: differential LD signal should agree < 100 ppm."""
         max_resid, _ = self._compare_differential(
             self._times(), c=0.6, alpha=1.2)
-        print(f"\n  alpha=1.2: differential max |delta| = {max_resid:.2e}")
         self.assertLess(max_resid, 1e-4)
 
     def test_differential_alpha_0p7(self):
         """c=0.4, alpha=0.7."""
         max_resid, _ = self._compare_differential(
             self._times(), c=0.4, alpha=0.7)
-        print(f"\n  alpha=0.7: differential max |delta| = {max_resid:.2e}")
         self.assertLess(max_resid, 1e-4)
 
     def test_differential_alpha_2p0(self):
         """c=0.5, alpha=2.0 (integer exponent => polynomial is exact)."""
         max_resid, _ = self._compare_differential(
             self._times(), c=0.5, alpha=2.0)
-        print(f"\n  alpha=2.0: differential max |delta| = {max_resid:.2e}")
         self.assertLess(max_resid, 1e-4)
 
     def test_differential_sweep(self):
@@ -217,8 +213,6 @@ class TestPower2VsJaxoplanet(unittest.TestCase):
         c = 0.5
         for alpha in [0.3, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0]:
             max_resid, _ = self._compare_differential(times, c, alpha)
-            print(f"\n  alpha={alpha:.1f}: differential max |delta| "
-                  f"= {max_resid:.2e}")
             self.assertLess(
                 max_resid, 2e-4,
                 f"alpha={alpha}: differential {max_resid:.2e} too large"
@@ -243,13 +237,9 @@ class TestPower2VsJaxoplanet(unittest.TestCase):
             u = P @ deficit_true
             deficit_approx = x @ u
             resid = float(jnp.max(jnp.abs(deficit_true - deficit_approx)))
-            cond = float(np.linalg.cond(np.asarray(x)))
-            print(f"\n  degree {deg:2d}: profile resid = {resid:.2e}, "
-                  f"cond = {cond:.2e}")
             if resid < best_resid:
                 best_deg, best_resid = deg, resid
 
-        print(f"\n  Best degree: {best_deg} (resid = {best_resid:.2e})")
         # Degree 12 should be among the best.
         self.assertLessEqual(best_deg, 16)
 
@@ -267,7 +257,6 @@ class TestPower2VsJaxoplanet(unittest.TestCase):
 
         in_transit = f_harm < 0.9999
         baseline = np.max(np.abs(f_harm[in_transit] - f_jaxo[in_transit]))
-        print(f"\n  Uniform LD cross-engine baseline: {baseline:.2e}")
         # Document but do not fail on the expected ~19 ppm baseline.
         self.assertLess(baseline, 1e-3,
                         "Baseline should be at most ~0.1%")

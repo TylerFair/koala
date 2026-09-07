@@ -9,12 +9,7 @@ import numpy as np
 
 from ..common import get_I_power2
 from ..linear_marginalization import marginalized_log_likelihood_and_conditional
-from ..ld_parameterization import (
-    Power2LinearTransform,
-    Power2MaxtedTransform,
-    gaussian_to_truncated_normal,
-    gaussian_to_uniform,
-)
+from ..ld_parameterization import Power2MaxtedTransform
 from ..trend_marginal import build_marginalized_trend_design
 from ..detrend import (
     COMPUTE_KERNELS,
@@ -28,7 +23,6 @@ from ..gp import (
 )
 from ..trends import (
     resolve_whitelight_trend_parameterization,
-    sample_ordered_spot_centers,
     sample_step_width,
     spot_crossing,
 )
@@ -452,25 +446,9 @@ def _ld_variant_data_form(latent, center, scale, low, high, map_code, law,
 
 
 def _resolve_builder_kernel(jaxoplanet_kernel, ld_profile, param_method, *, ld_mode=None):
-    """Validate model-level kernel constraints and return the exact route."""
-
+    """Validate the retained model-level kernel choices and resolve the route."""
+    del ld_mode
     requested = str(jaxoplanet_kernel).lower()
-    if requested == "native_power2":
-        if ld_profile != "power2":
-            raise ValueError(
-                "jaxoplanet_kernel='native_power2' requires ld_profile='power2'."
-            )
-        if param_method != "duration":
-            raise ValueError(
-                "jaxoplanet_kernel='native_power2' supports only "
-                "param_method='duration'; a_rs/Keplerian geometry is unsupported."
-            )
-        if ld_mode == "interpolated":
-            raise ValueError(
-                "jaxoplanet_kernel='native_power2' does not support interpolated "
-                "polynomial limb-darkening coefficients; provide direct Power-2 "
-                "c1/c2 coefficients instead."
-            )
     degree = 12 if ld_profile == "power2" else 2 if ld_profile == "quadratic" else None
     return resolve_jaxoplanet_kernel(
         requested,
@@ -588,8 +566,10 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             "surface_basis requires a supported stellar-spot or emission model "
             "with fixed geometry and fixed limb darkening."
         )
-    if ld_parameterization not in {'coefficients', 'decorrelated', 'decorrelated_linear', 'latent_gaussian'}:
-        raise ValueError("Unknown ld_parameterization.")
+    if ld_parameterization not in {'coefficients', 'decorrelated'}:
+        raise ValueError(
+            "ld_parameterization must be 'coefficients' or 'decorrelated'."
+        )
     if ld_uniform_basis not in {'uplus_uminus', 'coefficients'}:
         raise ValueError("ld_uniform_basis must be 'uplus_uminus' or 'coefficients'.")
     uniform_coefficient_low, uniform_coefficient_high = map(
@@ -599,18 +579,14 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
         raise ValueError("ld_uniform_coefficient_bounds must have low < high.")
     configured_trend_parameterization = trend_parameterization
     two_spot_ordering = str(two_spot_ordering).strip().lower()
-    if two_spot_ordering not in {'legacy', 'ordered'}:
-        raise ValueError("two_spot_ordering must be 'legacy' or 'ordered'.")
-    power2_transform = (
-        Power2LinearTransform()
-        if ld_parameterization == 'decorrelated_linear'
-        else Power2MaxtedTransform()
-    )
-    selected_kernel = _resolve_builder_kernel(
+    if two_spot_ordering != 'legacy':
+        raise ValueError("two_spot_ordering must be 'legacy'.")
+    power2_transform = Power2MaxtedTransform()
+    _resolve_builder_kernel(
         jaxoplanet_kernel, ld_profile, param_method, ld_mode=ld_mode
     )
     detrend_components = _split_components(detrend_type)
-    if ld_profile == "power2" and selected_kernel != "native_power2":
+    if ld_profile == "power2":
         MUS, P = _prepare_power2_poly()
 
     print(f"Building jaxoplanet whitelight model: detrend='{detrend_type}', "
@@ -732,9 +708,8 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             else:
                 c1 = numpyro.deterministic('c1', coefficients[0])
                 c2 = numpyro.deterministic('c2', coefficients[1])
-                if selected_kernel != "native_power2":
-                    prof = get_I_power2(c1, c2, MUS)
-                    u = P @ (1.0 - prof)
+                prof = get_I_power2(c1, c2, MUS)
+                u = P @ (1.0 - prof)
         elif ld_profile == 'quadratic':
             if ld_mode in {'gaussian', 'stellarprior'}:
                 u_prior = jnp.asarray(prior_params['u'], dtype=jnp.float64)
@@ -749,13 +724,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                 coefficient_prior = dist.TruncatedNormal(
                     loc=u_prior, scale=u_sigma, low=0.0, high=1.0
                 ).to_event(1)
-                if ld_parameterization == 'latent_gaussian' and ld_mode in {'gaussian'}:
-                    z = numpyro.sample('ld_latent', dist.Normal(0.0, 1.0).expand([2]).to_event(1))
-                    u = numpyro.deterministic(
-                        'u', gaussian_to_truncated_normal(z, u_prior, u_sigma, 0.0, 1.0)
-                    )
-                else:
-                    u = numpyro.sample("u", coefficient_prior)
+                u = numpyro.sample("u", coefficient_prior)
             elif ld_mode == 'uniform':
                 if ld_uniform_basis == 'uplus_uminus':
                     ld_sumdiff = numpyro.sample(
@@ -768,9 +737,6 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     numpyro.deterministic('l', 1.0 - ld_sumdiff[0])
                     numpyro.deterministic('delta', (ld_sumdiff[0] - ld_sumdiff[1]) / 8.0)
                     u = numpyro.deterministic('u', jnp.stack((u1, u2)))
-                elif ld_parameterization == 'latent_gaussian':
-                    z = numpyro.sample('ld_latent', dist.Normal(0.0, 1.0).expand([2]).to_event(1))
-                    u = numpyro.deterministic('u', gaussian_to_uniform(z, 0.0, 1.0))
                 else:
                     coefficient_prior = dist.Uniform(
                         uniform_coefficient_low, uniform_coefficient_high
@@ -794,14 +760,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                 coefficient_prior = dist.TruncatedNormal(
                     u_prior, u_sigma, low=jnp.asarray([0.0, 0.001]), high=1.0
                 ).to_event(1)
-                if ld_parameterization == 'latent_gaussian' and ld_mode in {'gaussian'}:
-                    z = numpyro.sample('ld_latent', dist.Normal(0.0, 1.0).expand([2]).to_event(1))
-                    coefficients = gaussian_to_truncated_normal(
-                        z, u_prior, u_sigma, jnp.asarray([0.0, 0.001]), 1.0
-                    )
-                    c1 = numpyro.deterministic('c1', coefficients[0])
-                    c2 = numpyro.deterministic('c2', coefficients[1])
-                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'} and ld_mode in {'gaussian'}:
+                if ld_parameterization == 'decorrelated' and ld_mode == 'gaussian':
                     h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, power2_transform))
                     coefficients = _enforce_decorrelated_coefficient_support(
@@ -817,12 +776,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                         u_prior[1], u_sigma[1], low=0.001, high=1.0))
             elif ld_mode == 'uniform':
                 coefficient_prior = dist.Uniform(0.0, 1.0).expand([2]).to_event(1)
-                if ld_parameterization == 'latent_gaussian':
-                    z = numpyro.sample('ld_latent', dist.Normal(0.0, 1.0).expand([2]).to_event(1))
-                    coefficients = gaussian_to_uniform(z, 0.0, 1.0)
-                    c1 = numpyro.deterministic('c1', coefficients[0])
-                    c2 = numpyro.deterministic('c2', coefficients[1])
-                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'}:
+                if ld_parameterization == 'decorrelated':
                     h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, power2_transform))
                     coefficients = _enforce_decorrelated_coefficient_support(
@@ -838,9 +792,8 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                 c2 = numpyro.deterministic('c2', u_prior[1])
             else:
                 raise ValueError(f"Unknown ld_mode: {ld_mode}")
-            if selected_kernel != "native_power2":
-                prof = get_I_power2(c1, c2, MUS)
-                u = P @ (1.0 - prof)
+            prof = get_I_power2(c1, c2, MUS)
+            u = P @ (1.0 - prof)
         else:
             raise ValueError(f"Unknown ld_profile: {ld_profile}")
 
@@ -856,11 +809,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             "_jaxoplanet_kernel": jaxoplanet_kernel,
             "_ld_profile": ld_profile,
         }
-        if selected_kernel == "native_power2":
-            params["c1"] = c1
-            params["c2"] = c2
-        else:
-            params["u"] = u
+        params["u"] = u
         if param_method == 'a_rs':
             params["a_rs"] = jnp.array(a_rss)
             params["ecc"] = eccs
@@ -914,18 +863,14 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
 
         if not detrend_components.isdisjoint({'spot', '2spot'}):
             params['spot_amp'] = numpyro.sample('spot_amp', dist.Uniform(0.0, 0.1))
-            ordered_pair = (
-                '2spot' in detrend_components and two_spot_ordering == 'ordered'
-            )
             if trend_parameterization == 'cadence':
-                if not ordered_pair:
-                    spot_mu_offset_cadences = numpyro.sample(
-                        'spot_mu_offset_cadences', dist.Normal(0.0, 0.01 / cadence)
-                    )
-                    params['spot_mu'] = numpyro.deterministic(
-                        'spot_mu',
-                        prior_params['spot_guess'] + cadence * spot_mu_offset_cadences,
-                    )
+                spot_mu_offset_cadences = numpyro.sample(
+                    'spot_mu_offset_cadences', dist.Normal(0.0, 0.01 / cadence)
+                )
+                params['spot_mu'] = numpyro.deterministic(
+                    'spot_mu',
+                    prior_params['spot_guess'] + cadence * spot_mu_offset_cadences,
+                )
                 spot_sigma_cadences = numpyro.sample(
                     'spot_sigma_cadences',
                     dist.Uniform(1e-4 / cadence, 0.1 / cadence),
@@ -934,10 +879,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     'spot_sigma', cadence * spot_sigma_cadences
                 )
             else:
-                if not ordered_pair:
-                    params['spot_mu'] = numpyro.sample(
-                        'spot_mu', dist.Normal(prior_params['spot_guess'], 0.01)
-                    )
+                params['spot_mu'] = numpyro.sample(
+                    'spot_mu', dist.Normal(prior_params['spot_guess'], 0.01)
+                )
                 params['spot_sigma'] = numpyro.sample(
                     'spot_sigma', dist.Uniform(1e-4, 0.1)
                 )
@@ -949,34 +893,22 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     'spot_sigma2_cadences',
                     dist.Uniform(1e-4 / cadence, 0.1 / cadence),
                 )
-                if two_spot_ordering == 'legacy':
-                    spot_mu2_offset_cadences = numpyro.sample(
-                        'spot_mu2_offset_cadences', dist.Normal(0.0, 0.01 / cadence)
-                    )
-                    params['spot_mu2'] = numpyro.deterministic(
-                        'spot_mu2', spot_guess2 + cadence * spot_mu2_offset_cadences
-                    )
+                spot_mu2_offset_cadences = numpyro.sample(
+                    'spot_mu2_offset_cadences', dist.Normal(0.0, 0.01 / cadence)
+                )
+                params['spot_mu2'] = numpyro.deterministic(
+                    'spot_mu2', spot_guess2 + cadence * spot_mu2_offset_cadences
+                )
                 params['spot_sigma2'] = numpyro.deterministic(
                     'spot_sigma2', cadence * spot_sigma2_cadences
                 )
             else:
-                if two_spot_ordering == 'legacy':
-                    params['spot_mu2'] = numpyro.sample(
-                        'spot_mu2', dist.Normal(spot_guess2, 0.01)
-                    )
+                params['spot_mu2'] = numpyro.sample(
+                    'spot_mu2', dist.Normal(spot_guess2, 0.01)
+                )
                 params['spot_sigma2'] = numpyro.sample(
                     'spot_sigma2', dist.Uniform(1e-4, 0.1)
                 )
-            if two_spot_ordering == 'ordered':
-                params['spot_mu'], params['spot_mu2'] = (
-                    sample_ordered_spot_centers(
-                        prior_params['spot_guess'],
-                        spot_guess2,
-                        cadence,
-                        parameterization=trend_parameterization,
-                    )
-                )
-
         if 'gp' in detrend_components:
             params['GP_log_sigma'] = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-5), jnp.log(1e3)))
             params['GP_log_rho'] = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(0.007), jnp.log(0.3)))
@@ -1015,7 +947,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                             jaxoplanet_kernel='auto',
                             surface_config=None,
                             surface_basis=None,
-                            jitter_prior='log_uniform',
+                            jitter_prior='lognormal',
                             jitter_prior_scale=2.0,
                             jitter_prior_center=0.5,
                             ld_parameterization='coefficients',
@@ -1024,12 +956,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                             ld_variant_as_data=False):
     """Jaxoplanet spectroscopic model with WL-fixed duration- or a_rs-based geometry.
 
-    ``jitter_prior`` selects the prior on the per-channel white-noise jitter:
-
-    * ``'log_uniform'`` (default, historical): ``log_jitter ~ Uniform(log 1e-6, 0)``.
-      When the jitter is not identified by the data this leaves a flat plateau
-      in log-jitter down to the prior floor, which is strongly non-Gaussian.
-    * ``'lognormal'``: ``log_jitter ~ Normal(log(jitter_prior_center * median(yerr)),
+    ``jitter_prior='lognormal'`` uses
+    ``log_jitter ~ Normal(log(jitter_prior_center * median(yerr)),
       jitter_prior_scale)``.  The posterior is likelihood-dominated whenever the
       jitter is identified (posterior widths ~0.1-0.4 in log versus a prior
       width of 2.0 e-folds) and reduces to a smooth Gaussian tail instead of a
@@ -1057,8 +985,10 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
             "surface_basis requires a supported stellar-spot or emission model "
             "with fixed geometry and fixed limb darkening."
         )
-    if ld_parameterization not in {'coefficients', 'decorrelated', 'decorrelated_linear', 'latent_gaussian'}:
-        raise ValueError("Unknown ld_parameterization.")
+    if ld_parameterization not in {'coefficients', 'decorrelated'}:
+        raise ValueError(
+            "ld_parameterization must be 'coefficients' or 'decorrelated'."
+        )
     if ld_uniform_basis not in {'uplus_uminus', 'coefficients'}:
         raise ValueError("ld_uniform_basis must be 'uplus_uminus' or 'coefficients'.")
     uniform_coefficient_low, uniform_coefficient_high = map(
@@ -1066,20 +996,16 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
     )
     if uniform_coefficient_low >= uniform_coefficient_high:
         raise ValueError("ld_uniform_coefficient_bounds must have low < high.")
-    power2_transform = (
-        Power2LinearTransform()
-        if ld_parameterization == 'decorrelated_linear'
-        else Power2MaxtedTransform()
-    )
-    if jitter_prior not in {'log_uniform', 'lognormal'}:
-        raise ValueError(f"Unknown jitter_prior: {jitter_prior}")
+    power2_transform = Power2MaxtedTransform()
+    if jitter_prior != 'lognormal':
+        raise ValueError("jitter_prior must be 'lognormal'.")
     jitter_prior_scale = float(jitter_prior_scale)
     jitter_prior_center = float(jitter_prior_center)
     if jitter_prior_scale <= 0.0 or jitter_prior_center <= 0.0:
         raise ValueError("jitter_prior_scale and jitter_prior_center must be > 0.")
     if trend_mode not in {'free', 'fixed', 'gaussian_marginalized'}:
         raise ValueError(f"Unknown trend_mode: {trend_mode}")
-    selected_kernel = _resolve_builder_kernel(
+    _resolve_builder_kernel(
         jaxoplanet_kernel, ld_profile, param_method, ld_mode=ld_mode
     )
     if transit_window not in {'auto', 'off'}:
@@ -1104,7 +1030,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
             f"({unsupported}). Use the corresponding *_spectroscopic trend family instead."
         )
     compute_lc_kernel = resolve_detrend_kernel(detrend_type)
-    if ld_profile == "power2" and selected_kernel != "native_power2":
+    if ld_profile == "power2":
         MUS_LD, P_LD = _prepare_power2_poly()
 
     print(f"Building jaxoplanet vectorized model: detrend='{detrend_type}', "
@@ -1172,16 +1098,13 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
             yerr_per_lc = jnp.asarray(
                 precomputed_yerr_per_lc, dtype=jnp.float64
             )
-        if jitter_prior == 'lognormal':
-            log_jitter = numpyro.sample(
-                'log_jitter',
-                dist.Normal(
-                    jnp.log(jitter_prior_center * yerr_per_lc),
-                    jnp.full((num_lcs,), jitter_prior_scale, dtype=jnp.float64),
-                ),
-            )
-        else:
-            log_jitter = numpyro.sample('log_jitter', dist.Uniform(jnp.log(1e-6), jnp.log(1)).expand([num_lcs]))
+        log_jitter = numpyro.sample(
+            'log_jitter',
+            dist.Normal(
+                jnp.log(jitter_prior_center * yerr_per_lc),
+                jnp.full((num_lcs,), jitter_prior_scale, dtype=jnp.float64),
+            ),
+        )
         jitter = jnp.exp(log_jitter)
         total_error = numpyro.deterministic('total_error', jnp.sqrt(jitter ** 2 + yerr_per_lc ** 2))
         # ``total_error`` is a compact per-channel posterior summary.  The
@@ -1209,9 +1132,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
             else:
                 c1 = numpyro.deterministic('c1', coefficients[:, 0])
                 c2 = numpyro.deterministic('c2', coefficients[:, 1])
-                if selected_kernel != "native_power2":
-                    profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
-                    u = (P_LD @ (1.0 - profs).T).T
+                profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
+                u = (P_LD @ (1.0 - profs).T).T
         elif ld_mode in {'gaussian', 'stellarprior', 'sing'}:
             if ld_profile == 'quadratic':
                 if ld_mode == 'sing':
@@ -1245,19 +1167,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                     u_prior_dist = dist.TruncatedNormal(
                         loc=mu_u_ld, scale=u_scale, low=0.0, high=1.0
                     ).to_event(1)
-                    if ld_parameterization == 'latent_gaussian' and ld_mode in {'gaussian'}:
-                        z = numpyro.sample(
-                            'ld_latent',
-                            dist.Normal(0.0, 1.0).expand([num_lcs, 2]).to_event(1),
-                        )
-                        u = numpyro.deterministic(
-                            'u',
-                            gaussian_to_truncated_normal(
-                                z, mu_u_ld, u_scale, 0.0, 1.0
-                            ),
-                        )
-                    else:
-                        u = numpyro.sample('u', u_prior_dist)
+                    u = numpyro.sample('u', u_prior_dist)
             elif ld_profile == 'power2':
                 if ld_mode == 'stellarprior' and sigma_u_ld is None:
                     raise ValueError("ld_mode='stellarprior' requires sigma_u_ld.")
@@ -1270,21 +1180,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                     mu_u_ld, sigma_u_ld,
                     low=jnp.asarray([0.0, 0.001]), high=1.0,
                 ).to_event(1)
-                if ld_parameterization == 'latent_gaussian' and ld_mode in {'gaussian'}:
-                    z = numpyro.sample(
-                        'ld_latent',
-                        dist.Normal(0.0, 1.0).expand([num_lcs, 2]).to_event(1),
-                    )
-                    coefficients = gaussian_to_truncated_normal(
-                        z,
-                        mu_u_ld,
-                        sigma_u_ld,
-                        jnp.asarray([0.0, 0.001]),
-                        1.0,
-                    )
-                    c1 = numpyro.deterministic('c1', coefficients[:, 0])
-                    c2 = numpyro.deterministic('c2', coefficients[:, 1])
-                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'} and ld_mode in {'gaussian'}:
+                if ld_parameterization == 'decorrelated' and ld_mode == 'gaussian':
                     h = numpyro.sample(
                         'ld_decorrelated',
                         dist.TransformedDistribution(
@@ -1302,9 +1198,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                         mu_u_ld[:, 0], sigma_u_ld[:, 0], low=0.0, high=1.0))
                     c2 = numpyro.sample('c2', dist.TruncatedNormal(
                         mu_u_ld[:, 1], sigma_u_ld[:, 1], low=0.001, high=1.0))
-                if selected_kernel != "native_power2":
-                    profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
-                    u = (P_LD @ (1.0 - profs).T).T
+                profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
+                u = (P_LD @ (1.0 - profs).T).T
             else:
                 raise ValueError(f"Unknown ld_profile: {ld_profile}")
         elif ld_mode == 'uniform':
@@ -1322,14 +1217,6 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                     numpyro.deterministic(
                         'delta', (ld_sumdiff[:, 0] - ld_sumdiff[:, 1]) / 8.0)
                     u = numpyro.deterministic('u', jnp.stack((u1, u2), axis=1))
-                elif ld_parameterization == 'latent_gaussian':
-                    z = numpyro.sample(
-                        'ld_latent',
-                        dist.Normal(0.0, 1.0).expand([num_lcs, 2]).to_event(1),
-                    )
-                    u = numpyro.deterministic(
-                        'u', gaussian_to_uniform(z, 0.0, 1.0)
-                    )
                 else:
                     coefficient_prior = dist.Uniform(
                         uniform_coefficient_low, uniform_coefficient_high
@@ -1337,15 +1224,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                     u = numpyro.sample('u', coefficient_prior)
             elif ld_profile == 'power2':
                 coefficient_prior = dist.Uniform(0.0, 1.0).expand([num_lcs, 2]).to_event(1)
-                if ld_parameterization == 'latent_gaussian':
-                    z = numpyro.sample(
-                        'ld_latent',
-                        dist.Normal(0.0, 1.0).expand([num_lcs, 2]).to_event(1),
-                    )
-                    coefficients = gaussian_to_uniform(z, 0.0, 1.0)
-                    c1 = numpyro.deterministic('c1', coefficients[:, 0])
-                    c2 = numpyro.deterministic('c2', coefficients[:, 1])
-                elif ld_parameterization in {'decorrelated', 'decorrelated_linear'}:
+                if ld_parameterization == 'decorrelated':
                     h = numpyro.sample('ld_decorrelated', dist.TransformedDistribution(
                         coefficient_prior, power2_transform))
                     coefficients = _enforce_decorrelated_coefficient_support(
@@ -1357,9 +1236,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                     coefficients = numpyro.sample('ld_coefficients', coefficient_prior)
                     c1 = numpyro.deterministic('c1', coefficients[:, 0])
                     c2 = numpyro.deterministic('c2', coefficients[:, 1])
-                if selected_kernel != "native_power2":
-                    profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
-                    u = (P_LD @ (1.0 - profs).T).T
+                profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
+                u = (P_LD @ (1.0 - profs).T).T
             else:
                 raise ValueError(f"Unknown ld_profile: {ld_profile}")
         elif ld_mode == 'fixed':
@@ -1369,9 +1247,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                 c1_mu = numpyro.deterministic('c1', ld_fixed[:, 0])
                 c2_mu = numpyro.deterministic('c2', ld_fixed[:, 1])
                 c1, c2 = c1_mu, c2_mu
-                if selected_kernel != "native_power2":
-                    profs = get_I_power2(c1_mu[:, None], c2_mu[:, None], MUS_LD[None, :])
-                    u = (P_LD @ (1.0 - profs).T).T
+                profs = get_I_power2(c1_mu[:, None], c2_mu[:, None], MUS_LD[None, :])
+                u = (P_LD @ (1.0 - profs).T).T
         elif ld_mode == 'interpolated':
             u = numpyro.deterministic('u', ld_interpolated)
         else:
@@ -1390,12 +1267,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
             "_jaxoplanet_kernel": None,
             "_ld_profile": None,
         }
-        if selected_kernel == "native_power2":
-            params.update({"c1": c1, "c2": c2})
-            in_axes.update({"c1": 0, "c2": 0})
-        else:
-            params["u"] = u
-            in_axes["u"] = 0
+        params["u"] = u
+        in_axes["u"] = 0
         if param_method == 'duration':
             in_axes["duration"] = None
             phase_offsets, phase_mask = build_transit_phase_offsets(

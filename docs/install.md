@@ -1,110 +1,100 @@
 # Installation
 
-Create an environment and install the documentation dependencies:
+Koala currently runs directly from its repository. A dedicated environment
+keeps JAX and its compiled dependencies separate from other analysis code.
+
+## 1. Clone and create an environment
 
 ```bash
-conda create -n jwst-fit python=3.11
-conda activate jwst-fit
-pip install -r docs/requirements.txt
+git clone https://github.com/TylerFair/jwst-lightcurves.git
+cd jwst-lightcurves
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 ```
 
-Install the scientific dependencies used by `fit_jwst.py`, including JAX, NumPyro, jaxoplanet, Astropy, pandas, matplotlib, jaxopt, numpyro-ext, tinygp, ArviZ, PyYAML, and ExoTiC-LD. Follow the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html) for the CUDA wheel matching the cluster driver. The stellar-informed prescriptions also require a local `exotic_ld_data` tree; set `stellar.ld_data_path` to it.
+Python 3.11 is the recommended version.
 
-{{ project }} requires 64-bit JAX:
+## 2. Install the scientific dependencies
+
+For a CPU environment:
 
 ```bash
-export JAX_ENABLE_X64=1
-export JAX_PLATFORMS=gpu       # use cpu on a login node
-export JAX_COMPILATION_CACHE_DIR=/scratch/$USER/jax_cache
-python fit_jwst.py -c config.yaml
+python -m pip install jax numpy numpyro numpyro-ext jaxopt jaxoplanet \
+  astropy pandas scipy matplotlib arviz pyyaml tinygp exotic-ld \
+  'exotedrf[stage4]'
 ```
 
-`FIT_JWST_SEED` overrides `flags.random_seed`, and
-`JWSTJAXFIT_ANALYSIS_STAGE` overrides the corresponding stage control.
+The ExoTEDRF `stage4` extra supplies the box-spectrum reader and binning
+utilities used by the input pipeline.
 
-## Verify the environment
+CPU is useful for checking a configuration and building the documentation. A
+full spectroscopic fit is designed for an NVIDIA GPU. Install the CUDA-enabled
+JAX wheel using the command for your driver and CUDA installation in the
+[JAX installation guide](https://docs.jax.dev/en/latest/installation.html),
+then install the remaining packages above.
 
-Run these checks before submitting a long fit:
+Check what JAX can see:
 
 ```bash
-python -c "import jax; print(jax.__version__, jax.config.x64_enabled, jax.devices())"
-python -c "import numpyro, jaxoplanet; print(numpyro.__version__, jaxoplanet.__version__)"
-python -c "from exotic_ld import StellarLimbDarkening; print('ExoTiC-LD import OK')"
+python -c "import jax; print(jax.devices())"
 ```
 
-The first command must report 64-bit mode as true after `JAX_ENABLE_X64=1` is exported. On a compute node, the device list must include the requested GPU. On a login node, explicitly use `JAX_PLATFORMS=cpu`.
+Run this check inside a GPU allocation on a cluster. Seeing only `CpuDevice`
+there means the JAX build, driver, or allocation needs attention.
 
-## Scientific dependencies
+## 3. Add the limb-darkening data
 
-JAX provides compiled array operations and automatic differentiation. NumPyro provides NUTS and HMC. jaxoplanet evaluates the transit geometry and limb-darkened light curve.
-
-ExoTiC-LD calculates wavelength-dependent stellar intensity coefficients. Astropy reads the FITS extraction. pandas writes result tables.
-
-matplotlib writes the numbered diagnostic figures. jaxopt and numpyro-ext support numerical optimization. tinygp is required by GP trend models.
-
-`scienceplots` and `cmcrameri` are optional publication-style enhancements.
-Plotting falls back to Matplotlib's serif fonts and `mediumorchid` accent when
-either package is unavailable.
-
-ArviZ provides posterior summaries and effective-sample-size diagnostics. PyYAML reads the configuration.
-
-## CPU smoke test
-
-A CPU can check imports and configuration parsing, but a full spectroscopic fit is intended for a GPU.
-
-```bash
-export JAX_ENABLE_X64=1
-export JAX_PLATFORMS=cpu
-export OMP_NUM_THREADS=8
-export XLA_FLAGS=--xla_cpu_multi_thread_eigen=false
-python fit_jwst.py --help
-```
-
-The help output shows the required `-c/--config` argument. Do not set `JAX_PLATFORMS` after importing JAX.
-
-## CUDA installation
-
-Install the JAX CUDA wheel appropriate for the system driver by following the upstream JAX instructions. Do not mix a CPU-only `jaxlib` with a GPU submission and assume it will discover CUDA dynamically. Check `jax.devices()` inside the allocation.
-
-The cluster CUDA module and the JAX wheel must be compatible.
-
-## ExoTiC-LD data
-
-The model-data directory is not embedded in the YAML.
+The `exotic-ld` Python package and its stellar-atmosphere grids are separate.
+Download the grids following the
+[ExoTiC-LD installation guide](https://exotic-ld.readthedocs.io/en/latest/views/installation.html),
+then point each `stellarprior` configuration to the data directory:
 
 ```yaml
 stellar:
   ld_model: stagger
-  ld_data_path: /shared/reference/exotic_ld_data
+  ld_data_path: /path/to/exotic_ld_data
 ```
 
-Use an absolute path on a cluster when the submission working directory may vary. Confirm the compute node can read it. The stellar-informed mode also needs `teff_sigma`, `logg_sigma`, and `feh_sigma`.
+Use an absolute path on a cluster. The compute node must be able to read the
+directory.
 
-## Persistent compilation cache
+## 4. Verify the command-line program
 
-The fitter enables its validated compilation strategy automatically. Use the
-standard `JAX_COMPILATION_CACHE_DIR` environment variable shown above when the
-cache must live on node-visible fast storage. Cache entries depend on JAX/XLA
-versions and static shapes, and a cache does not eliminate the first
-compilation for a new model shape.
-
-## Documentation build
+Run from the repository root:
 
 ```bash
-pip install -r docs/requirements.txt
+python fit_jwst.py --help
+```
+
+You should see the required `-c/--config` option. Then check the numerical
+environment:
+
+```bash
+python -c "import jax, numpyro, jaxoplanet; print(jax.devices())"
+```
+
+Koala enables JAX 64-bit calculations itself. Set the platform before
+Python starts when you need to force one:
+
+```bash
+export JAX_PLATFORMS=cpu   # configuration checks on a login node
+# export JAX_PLATFORMS=gpu # fits inside a GPU allocation
+```
+
+You are ready for the [Quickstart](quickstart.md).
+
+The repository includes a 4.45 MB teaching extraction at
+`examples/data/WASP-39_soss_binned8.fits`, so the quickstart needs no separate
+light-curve download. The `stellarprior` choice still requires the
+ExoTiC-LD grids from step 3.
+
+## Documentation only
+
+```bash
+python -m pip install -r docs/requirements.txt
 sphinx-build -W -b html docs docs/_build/html
 ```
 
-`-W` converts warnings into failures. The Furo theme is configured in `docs/conf.py`.
-
-## Common installation problems
-
-**No GPU appears:** check the allocation, CUDA module, and installed `jaxlib` wheel. **64-bit warning:** export `JAX_ENABLE_X64=1` before Python starts. **ExoTiC-LD file error:** correct `stellar.ld_data_path` and verify node access.
-
-**Import error for tinygp:** install it even when the current configuration does not use a GP, because the main CLI imports the module. **Read the Docs failure:** install only `docs/requirements.txt`; autodoc mocks heavy scientific imports. **Different local and cluster behavior:** print package versions and `jax.devices()` in both environments.
-
-## Reproducible environment record
-
-Save the Python version. Save JAX, jaxlib, NumPyro, and jaxoplanet versions. Record the GPU model and CUDA driver.
-
-Record the ExoTiC-LD model-data revision. Archive the exact YAML and environment variables with the output.
+The repository's `setup.sh` contains a developer-specific environment path;
+it is not an installer and is not needed for the steps above.

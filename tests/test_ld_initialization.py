@@ -32,8 +32,7 @@ def test_decorrelated_power2_initialization_supports_spectroscopic_batches():
 def test_power2_initialization_sites_match_each_parameterization():
     coefficients = jnp.array([0.4, 0.3])
     assert set(_power2_ld_initial_sites(coefficients, "coefficients")) == {"c1", "c2"}
-    assert set(_power2_ld_initial_sites(coefficients, "decorrelated_linear")) == {"ld_decorrelated"}
-    assert set(_power2_ld_initial_sites(coefficients, "latent_gaussian")) == {"ld_latent"}
+    assert set(_power2_ld_initial_sites(coefficients, "decorrelated")) == {"ld_decorrelated"}
 
 
 def test_whitelight_optimizer_rejects_observed_nonphysical_maxted_solution():

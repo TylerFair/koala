@@ -130,6 +130,28 @@ def related_accent_colors(label: str | None, count: int) -> list:
     return [tuple((1.0 - amount) * accent + amount) for amount in blends]
 
 
+def model_palette_colors(count: int) -> list:
+    """Return distinct, colorblind-safe colors for model identities.
+
+    The discrete scientific ``batlow`` palette is deliberately independent of
+    the observing-mode accent: model colors identify assumptions, while the
+    accent continues to identify the combined science result.  Matplotlib's
+    qualitative palette keeps the same distinction when cmcrameri is absent.
+    """
+    if count <= 0:
+        return []
+    if cmc is not None and hasattr(cmc, "batlowS"):
+        colors = cmc.batlowS.colors
+        # Start with mid/dark entries because model curves are intentionally
+        # faded; the lightest categorical entries would disappear on white.
+        preferred = (0, 4, 2, 3, 7, 8, 5, 6, 9, 1)
+        ordered = [colors[index] for index in preferred]
+        ordered.extend(colors[index] for index in range(len(preferred), len(colors)))
+        return [tuple(ordered[index % len(ordered)]) for index in range(count)]
+    fallback = plt.get_cmap("tab10")
+    return [fallback(index % fallback.N) for index in range(count)]
+
+
 def apply_publication_style() -> None:
     """Apply the reference ``science``/``nature`` style or serif fallback."""
     if scienceplots is not None:

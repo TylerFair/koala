@@ -1,156 +1,83 @@
-# Output files
+# Reading the results
 
-List a completed directory with:
+The two files most users need are the transmission-spectrum CSV and the
+white-light time-series CSV. The filenames begin with the target and
+instrument, so inspect a run with:
 
 ```bash
-find OUTPUT -maxdepth 2 -type f | sort
+find OUTPUT -maxdepth 1 -type f | sort
 ```
 
-| Product | Contents |
-|---|---|
-| `*_whitelight_timeseries.csv` | `time_bjd`, hours from `t0`, flux/error, best-fit model, residual and ppm residual, outlier flag; optional transit/trend/GP columns |
-| Resolution spectrum `*.csv` | wavelength center/error and depth, depth error, depth ppm, and ppm error for each planet (`00`, `01`, …) |
-| `*_bestfit_params.csv` | wavelength, radius ratio and depth summaries, LD, trend, jitter, and active Harmonica parameters |
-| `*_wavelengths.csv` | `wavelength_center`, `wavelength_err` |
-| `*_lightcurves_wide.csv` | `time`, then `flux_NNN`, `flux_err_NNN` pairs |
-| `*_noisebin.csv` | bin size and measured p16/median/p84 RMS plus expected white RMS |
-| `chunks/*.pkl` | Fingerprinted posterior checkpoint for a channel range |
-| `chunks/*.diagnostics.json` | ESS, divergence, adaptation, and sampler diagnostics |
-| `*_limb_spectra.csv` | Harmonica area/endpoint depths and transmission-string coefficients |
-| `*_limb_posterior_samples.npz` | Correlated Harmonica posterior arrays |
+## Transmission spectrum
+
+The main spectrum file ends in the fitted resolution, for example
+`WASP-39_NIRISS_SOSS_order1_R100.csv`.
 
 ```python
 import pandas as pd
-spectrum = pd.read_csv("OUTPUT/target_instrument_R100.csv")
-depth = spectrum["depth_ppm00"]
-uncertainty = spectrum["depth_err_ppm00"]
+
+spectrum = pd.read_csv("OUTPUT/WASP-39_NIRISS_SOSS_order1_R100.csv")
+wavelength = spectrum["wavelength"]
+depth_ppm = spectrum["depth_ppm00"]
+uncertainty_ppm = spectrum["depth_err_ppm00"]
 ```
 
-Numbered PNGs show the white-light fit, spectroscopic offset summaries, spectra, noise binning, and Harmonica limb products when enabled. JSON manifests bind cached science products to the configuration and source fingerprint.
+`wavelength_err` is the wavelength half-width/error in microns. The `00`
+suffix denotes the first planet; additional planets use `01`, `02`, and so on.
+Use `depth00` and `depth_err00` for fractional rather than ppm units.
 
-## White-light tables
+The companion `*_bestfit_params.csv` contains radius ratio, limb-darkening,
+trend, and jitter summaries for each channel. It is useful for diagnostics;
+the shorter spectrum CSV is the clean input for atmospheric retrievals and
+plots.
 
-`*_whitelight_timeseries.csv` has these verified columns:
+## White-light fit
+
+`*_whitelight_timeseries.csv` contains the input time and flux alongside the
+fitted model:
 
 | Column | Meaning |
 |---|---|
 | `time_bjd` | Input time |
-| `time_from_t0_hr` | Hours relative to the reference transit time |
-| `flux` | Normalized white-light flux |
-| `flux_err` | Reported uncertainty |
-| `bestfit_model` | Evaluated posterior summary model |
-| `residual` | `flux - bestfit_model` |
-| `residual_ppm` | Residual multiplied by $10^6$ |
-| `is_outlier` | Integer outlier-mask flag |
-| `transit_model` | Transit component, when materialized |
-| `trend_model` | Additive trend component, when materialized |
-| `detrended_flux` | `flux - trend_model`, when available |
-| `gp_flux` | GP predictive flux, for GP fits |
-| `gp_err` | GP predictive uncertainty |
-| `gp_trend` | GP stochastic trend component |
+| `time_from_t0_hr` | Hours from the fitted reference transit time |
+| `flux`, `flux_err` | Normalized flux and reported uncertainty |
+| `bestfit_model` | Posterior-summary light-curve model |
+| `residual`, `residual_ppm` | Data minus model |
+| `is_outlier` | One where the cadence was clipped |
+| `transit_model`, `trend_model`, `detrended_flux` | Model components, when available |
 
-`*_whitelight_bestfit_params.csv` contains the fitted white-light parameter summaries. `*_whitelight_geometry_handoff.json` records the geometry passed to wavelength channels and its source metadata. `*_whitelight_outlier_mask.npy` stores the time mask.
+`*_whitelight_bestfit_params.csv` summarizes the fitted geometry and baseline.
+`*_whitelight_geometry_handoff.json` records the fixed geometry passed to the
+wavelength channels. Keep both with a published spectrum.
 
-`whitelight_mcmc_diagnostics.json` stores convergence and numerical diagnostics.
+## Diagnostics and restart files
 
-## Transmission spectrum CSV
+Numbered PNG files show the white-light fit, residuals, transmission spectrum,
+and noise-binning checks. The exact set depends on the selected stages and
+models. Use the CSV files for numerical work.
 
-The primary spectrum has two wavelength columns followed by four columns per planet.
+The `chunks/` directory contains posterior checkpoints and JSON diagnostics.
+An unchanged run resumes from compatible checkpoints automatically. The
+manifest fingerprints the data and model settings, so a changed analysis does
+not silently reuse an incompatible chain.
 
-| Column | Meaning |
-|---|---|
-| `wavelength` | Bin center in microns |
-| `wavelength_err` | Bin half-width/error in microns |
-| `depth00` | Median of `rors**2` for planet 0 |
-| `depth_err00` | Standard deviation of `rors**2` |
-| `depth_ppm00` | `depth00 * 1e6` |
-| `depth_err_ppm00` | `depth_err00 * 1e6` |
+For each accepted channel, inspect effective sample size, divergences, and the
+recorded sampler. A saved checkpoint only means the computation finished; the
+quality-gate result in its diagnostic JSON determines whether the posterior was
+accepted or retried.
 
-Additional planets repeat the suffix as `01`, `02`, and so on.
+Checkpoint files are Python pickles. They are an implementation and restart
+format, so load only files from a trusted run. For most downstream work, prefer
+the stable CSV products.
 
-## Detailed parameter CSV
+## Light curves and Harmonica products
 
-`*_bestfit_params.csv` starts with:
+`*_wavelengths.csv` maps channel number to wavelength. The matching
+`*_lightcurves_wide.csv` stores `time`, followed by `flux_NNN` and
+`flux_err_NNN` pairs. Channel `NNN` corresponds to the same row in the
+wavelength file.
 
-| Column family | Meaning |
-|---|---|
-| `wavelength`, `wavelength_err` | Channel metadata |
-| `rors` | Radius-ratio central value |
-| `rors_err`, `rors_err_low`, `rors_err_high` | Standard and percentile errors |
-| `depth` | Radius ratio squared |
-| `depth_err`, `depth_err_low`, `depth_err_high` | Depth errors |
-| `depth_ppm` | Depth in ppm |
-| `depth_err_ppm`, `depth_err_low_ppm`, `depth_err_high_ppm` | Ppm errors |
-| `depth_error_ratio_to_median` | Channel depth error divided by median channel error |
-| `depth_error_outlier_gt5x` | True when that ratio exceeds five |
-
-LD families add `u1`, `u2`, `c1`, or `c2`, each with `_err`, `_err_low`, and `_err_high` columns. Trend families add any active `c`, `v`, `v2`, `v3`, `v4`, `A`, `tau`, `t_jump`, `jump`, spot, GP, or template-scale columns with the same error suffixes. Harmonica adds active `a1`, `a3`, and `a5` summaries.
-
-## Light-curve export
-
-`*_wavelengths.csv` contains `wavelength_center` and `wavelength_err`. `*_lightcurves_wide.csv` contains `time`, followed by pairs `flux_000`, `flux_err_000`, `flux_001`, `flux_err_001`, and so on. The channel number matches the row number in the wavelength file.
-
-## Noise-binning CSV
-
-| Column | Meaning |
-|---|---|
-| `bin_size_points` | Number of integrations per temporal bin |
-| `measured_rms` | Median channel RMS, normally ppm |
-| `measured_rms_p16` | 16th percentile across channels |
-| `measured_rms_p84` | 84th percentile across channels |
-| `expected_white_rms` | Median unbinned RMS divided by square root of bin size |
-
-## Read a chunk posterior
-
-Checkpoints are Python pickle dictionaries, not NumPy `.npy` files. Load only checkpoint files produced by a trusted run.
-
-```python
-from pathlib import Path
-import pickle
-import numpy as np
-
-chunk = next(Path("OUTPUT/chunks").glob("*_chunk_*.pkl"))
-with chunk.open("rb") as handle:
-    payload = pickle.load(handle)
-
-# Current checkpoints contain samples plus fingerprint/diagnostic metadata.
-samples = payload["samples"] if "samples" in payload else payload
-for name, value in samples.items():
-    arr = np.asarray(value)
-    print(name, arr.shape)
-
-rors = np.asarray(samples["rors"])
-print(rors.shape)                # [draw, channel, planet] or [draw, channel]
-depth_ppm = rors**2 * 1e6
-median_depth = np.nanmedian(depth_ppm, axis=0)
-```
-
-The leading axis is retained posterior draw. The next axis is channel within the checkpoint. Parameter-specific trailing axes include planet or LD coefficient dimensions.
-
-The checkpoint filename identifies its global channel range. Do not concatenate files by lexical ordering alone; the fitter uses explicit ranges and manifests.
-
-## Harmonica limb CSV
-
-The file contains wavelength metadata, `planet_index`, schema version, and an angular convention string. Schema v3 reports neutral terminator indices because the fit alone cannot identify physical morning/evening hemispheres. The `one`/`two` index is arbitrary; mapping it to physical hemispheres requires external orbital-geometry knowledge. It reports median, lower error, and upper error for:
-
-- `rp_one` and `rp_two` in stellar-radius units;
-
-- `depth_one` and `depth_two` in ppm;
-
-- `depth_total_area` in ppm;
-
-- terminator-one and terminator-two endpoint radii and depths;
-
-- `asymmetry_coefficient` and `endpoint_delta_r` in stellar-radius units;
-
-- `depth_a0` in ppm and `a0` in stellar-radius units;
-
-- every active `a1`, `a3`, and `a5` coefficient.
-
-Optional `bandpass_min` and `bandpass_max` columns appear when supplied. The NPZ companion contains `sample_axes="draw,wavelength"`, units, wavelengths, `a0`, active coefficients, and draw-level radius/depth products. When loading a schema-v2 CSV, the compatibility reader maps old morning columns to index one and old evening columns to index two in memory; users must supply any physical hemisphere interpretation.
-
-## Numbered figures
-
-Numbers 00, 11, 12, 14, and 15 belong to white-light preparation and summaries. Numbers 22--28 belong to low-resolution products. Numbers 31--37 belong to high-resolution products.
-
-The exact set depends on engine, trend, and enabled stages. Use the CSVs for numerical work; the PNGs are diagnostics and presentation summaries.
+Harmonica runs add `*_limb_spectra.csv`, transmission-string figures, and
+`*_limb_posterior_samples.npz`. The CSV reports indexed terminator halves; it
+does not by itself identify physical morning and evening limbs. Preserve the
+NPZ file when the correlation between limb quantities matters.

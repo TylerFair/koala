@@ -119,17 +119,8 @@ def test_laplace_hmc_uses_fd_metric_and_jittered_fixed_work():
     assert not jnp.any(diagnostics.diverging)
 
 
-def test_pipeline_resolves_laplace_hmc_options():
+def test_pipeline_resolves_fixed_laplace_hmc_options():
     resolved = fit_jwst._resolve_jaxoplanet_spectro_nuts_kwargs(
-        {
-            "spectro_mass_matrix": "laplace",
-            "spectro_laplace_hessian_method": "finite_difference",
-            "spectro_laplace_warmup": 100,
-            "spectro_laplace_target_accept": 0.88,
-            "spectro_laplace_fuse_program": True,
-            "spectro_hmc_num_steps": 16,
-            "spectro_hmc_trajectory_jitter": 0.25,
-        },
         "highres",
         {"dense_mass": False, "target_accept_prob": 0.8},
         independent=True,
@@ -138,9 +129,9 @@ def test_pipeline_resolves_laplace_hmc_options():
 
     assert resolved["mass_matrix"] == "laplace"
     assert resolved["laplace_hessian_method"] == "finite_difference"
-    assert resolved["laplace_warmup"] == 100
-    assert resolved["laplace_target_accept"] == 0.88
-    assert resolved["laplace_fuse_program"] is True
-    assert resolved["num_steps"] == 16
+    assert resolved["laplace_warmup"] == 150
+    assert resolved["laplace_target_accept"] == 0.85
+    assert resolved["laplace_fuse_program"] is False
+    assert resolved["num_steps"] == 8
     assert resolved["trajectory_jitter"] == 0.25
     assert "max_tree_depth" not in resolved

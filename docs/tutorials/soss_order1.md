@@ -1,78 +1,54 @@
-# NIRISS/SOSS order 1
+# Fit your first transit
 
-This tutorial fits the WASP-39 b NIRISS/SOSS order-1 box-spectrum extraction. You will run the white-light, R=20, and reference-grid stages with stellar-informed power-2 limb darkening. At the end, you will have diagnostic light-curve plots, resumable channel posteriors, and a transmission-spectrum CSV.
+This tutorial turns an extracted NIRISS/SOSS time series into a transmission spectrum. It uses WASP-39 b, a linear baseline, and power-2 limb darkening with `stellarprior`. The same workflow applies to the other supported JWST modes.
+
+The repository includes a compact real WASP-39 box-spectrum FITS file for this tutorial. You only need to install the environment and download the ExoTiC-LD stellar grids. Koala fits light curves; it does not run the JWST detector calibration or spectral extraction.
+
+## 1. Start from the example
+
+Copy the small, annotated configuration:
 
 ```bash
-cp configs_fiducial_stellarinformed/WASP-39_soss_order1_config.yaml wasp39.yaml
-python fit_jwst.py -c wasp39.yaml
+cp examples/niriss_soss_order1.yaml wasp39.yaml
 ```
 
-Its defining entries are:
+Then point the configuration at your ExoTiC-LD grids:
+
+```yaml
+stellar:
+  ld_data_path: /data/exotic_ld_data
+```
+
+The example already reads `examples/data/WASP-39_soss_binned8.fits` and writes figures, tables, and resumable checkpoints to `results/WASP-39_SOSS_ORDER1`. The teaching FITS retains the complete observation and both SOSS orders, but combines groups of eight adjacent detector columns. Use your original extraction for a scientific analysis.
+
+- {download}`Download the example FITS <../../examples/data/WASP-39_soss_binned8.fits>`
+- {download}`Read its provenance and transformation <../../examples/data/README.md>`
+
+The remaining choices describe the analysis:
 
 ```yaml
 instrument: NIRISS/SOSS
 order: 1
-fits_file: WASP-39_box_spectra_fullres.fits
-resolution: {high: reference, low: 20, reference_grid: prism_template.csv}
+
+resolution:
+  low: 20
+  high: 100
+
 flags:
-  need_lowres: true
+  detrending_type: linear
   ld_profile: power2
   ld_prior: stellarprior
-  detrending_type: linear
 ```
 
-Use `order: 2` with the corresponding order-2 configuration and extraction. Orders are fitted separately. The reference grid is used for high-resolution binning when `high: reference`; `low: 20` supplies the calibration stage.
+This prepares a coarse $R=20$ grid and fits SOSS order 1 in final $R=100$ bins. A standard ExoTEDRF box-spectrum FITS stores order 2 in different extensions; select it with `order: 2` and fit it separately.
 
-## Dataset and complete configuration
+## 2. Run the fit
 
-This example is the WASP-39 b NIRISS/SOSS order-1 visit. The extracted file is `WASP-39_box_spectra_fullres.fits`. The bridge spectrum is binned to $R=20$ and the final spectrum follows `prism_template.csv`.
-
-```yaml
-planet:
-  name: WASP-39                 # Output prefix.
-  period: 4.05528043            # Days.
-  duration: 0.11693087083333333 # Days.
-  t0: 59787.055                 # Same time system as the FITS table.
-  b: 0.4498                     # Initial impact parameter.
-  rprs: 0.1457                  # Initial radius ratio.
-stellar:
-  feh: 0.04                     # Metallicity [M/H].
-  teff: 5509                    # Effective temperature, K.
-  logg: 4.22                    # Surface gravity.
-  teff_sigma: 28                # Uncertainty propagated into LD.
-  logg_sigma: 0.07
-  feh_sigma: 0.02
-  ld_model: stagger             # ExoTiC-LD atmosphere grid.
-  ld_data_path: ../exotic_ld_data
-  ld_prior_min_sigma: 1.0e-4    # Coefficient-prior floor.
-instrument: NIRISS/SOSS
-order: 1                        # Fit order 1 only.
-path: /scratch/midway3/tfairnington/
-input_dir: FITS                 # Relative to path.
-output_dir: WASP-39_SOSS_ORDER1_STELLARINFORMEDLD_POWER2_LINEAR
-fits_file: WASP-39_box_spectra_fullres.fits
-resolution:
-  high: reference               # Final grid comes from the next file.
-  low: 20                       # Low-resolution bridge.
-  reference_grid: prism_template.csv
-flags:
-  vmap_chunk: 40                # Resident GPU lanes.
-  detrending_type: linear       # c + v(t-tmin).
-  ld_prior: stellarprior        # Alias for informed.
-  need_lowres: true
-  ld_profile: power2
-  spectro_sampler: independent_nuts
-  mask_start: jnp.min(t)        # Mask initial settling.
-  mask_end: jnp.min(t) + 0.007
-outlier_clip:
-  whitelight_sigma: 5
-  spectroscopic_sigma: 5
-host_device: gpu
+```bash
+python fit_jwst.py -c wasp39.yaml
 ```
 
-Change `path`, `input_dir`, and `output_dir` for your filesystem. The ephemeris and FITS times must use the same time convention.
-
-## Run
+The example defaults to CPU so it can start on a laptop, although a full spectroscopic fit can be slow. For a GPU run, set `host_device: gpu` in the YAML and make JAX's device choice explicit:
 
 ```bash
 export JAX_ENABLE_X64=1
@@ -80,106 +56,83 @@ export JAX_PLATFORMS=gpu
 python fit_jwst.py -c wasp39.yaml
 ```
 
-The fit masks the initial settling interval, builds the white-light curve, constructs the stellar LD prior, and samples white light. It then runs the R=20 bridge and the reference-grid channels.
+The pipeline first fits the wavelength-summed white-light curve. It fixes the wavelength-channel geometry to the selected white-light posterior-median handoff, then fits the transmission spectrum. Rerunning the same command resumes compatible channel checkpoints.
 
-## Log walkthrough
-
-This trimmed excerpt comes from a completed run:
-
-```text
-[LD prior] Building power2 grid for NIRISS/SOSS (whitelight)
-               with 125 stellar combinations using model=stagger
-Fitting whitelight for outliers and bestfit parameters
-Building jaxoplanet whitelight model: detrend='linear',
-               ld='informed', ld_profile='power2'
-Running chunked MCMC: 20 channels in blocks of 40 (mode=serial)
-Checkpoint directory: .../chunks
-Transmission spectroscopy data saved to ..._R20.csv
-Transmission spectroscopy data saved to ..._Rreference.csv
-Analysis complete!
-```
-
-The 125 combinations propagate the configured stellar uncertainties. `COMPUTING` marks a new chunk. `LOADING from checkpoint` marks a fingerprint-compatible resume.
-
-`reusing compiled ... runner` means an equal-width executable was reused. Read the ESS and divergence lines before accepting a channel.
-
-## White-light fit
+## 3. Check the white-light fit
 
 ```{image} ../_static/soss_wasp39_whitelight.png
-:alt: WASP-39 SOSS order-1 white-light fit
+:alt: WASP-39 b SOSS order-1 white-light data, fitted transit and residuals
 :width: 760px
 :align: center
 ```
 
-Inspect ingress, egress, and the out-of-transit baseline. The separate residual and detrended plots make low-frequency structure easier to see. Resolve a poor white-light baseline before interpreting spectral features.
+This archived WASP-39 example shows the same model and validation step; it is not a regenerated output from your $R=100$ run.
 
-## Transmission spectrum
+Look at ingress, egress, and the out-of-transit baseline. Residuals should be centered on zero without a smooth drift or an isolated feature that the model missed. Fix a poor broadband fit before trusting any spectral structure: wavelength-channel fits inherit its fixed geometry and shared trend information.
+
+The first useful files are:
+
+- `*_whitelight_summary.png` — the fit and residuals at a glance.
+- `*_whitelight_timeseries.csv` — time, data, model, trend, and detrended flux.
+- `*_bestfit_params.csv` — fitted parameters and uncertainties.
+
+If the residual baseline is curved, compare a quadratic trend. If it has a settling ramp, try `explinear`. The [trend tutorial](../guides/trends.md) shows how to make that choice without adding arbitrary flexibility.
+
+## 4. Read the transmission spectrum
 
 ```{image} ../_static/soss_wasp39_spectrum.png
-:alt: WASP-39 SOSS order-1 transmission spectrum
+:alt: WASP-39 b SOSS order-1 transmission spectrum
 :width: 760px
 :align: center
 ```
 
-Depth is calculated as `rors**2` for every draw and reported in fractional units and ppm.
+This archived spectrum uses the project's supplied reference grid. Your first run writes the same quantities in $R=100$ bins.
 
-## Output checklist
-
-- `00_*_preopt_init_check.png`: model at initialization.
-
-- `00_*_init_vs_opt_check.png`: initialization compared with optimization.
-
-- `11_*_whitelightmodel.png`: normalized white-light data and model.
-
-- `12_*_whitelightresidual.png`: white-light residuals.
-
-- `14_*_whitelightdetrended.png`: trend-removed white light.
-
-- `15_*_whitelight_summary.png`: combined white-light panels.
-
-- `22_*_R20_summary.png`: offset low-resolution channel fits.
-
-- `24_*_R20_spectrum_00.png`: low-resolution transmission spectrum.
-
-- `31_*_Rreference_spectrum_00.png`: final transmission spectrum.
-
-- `34_*_Rreference_summary.png`: offset final channel fits.
-
-- `36_*_Rreference_noisebin.png`: residual RMS versus bin size.
-
-- `*_whitelight_timeseries.csv`: white-light data/model table.
-
-- `*_R20.csv`, `*_Rreference.csv`: spectral depth tables.
-
-- `chunks/`: posterior checkpoints and diagnostics.
-
-## Plot the CSV
+The final `*_R100.csv` contains one row per wavelength bin. Transit depths are computed from every posterior radius-ratio draw, so `depth_ppm00` and its uncertainty already preserve the nonlinear transformation $d=(R_p/R_\star)^2$.
 
 ```python
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 
-out = Path("/scratch/midway3/tfairnington/WASP-39_SOSS_ORDER1_STELLARINFORMEDLD_POWER2_LINEAR")
-s = pd.read_csv(out / "WASP-39_NIRISS_SOSS_order1_Rreference.csv")
-good = s[["wavelength", "depth_ppm00", "depth_err_ppm00"]].notna().all(axis=1)
+out = Path("results/WASP-39_SOSS_ORDER1")
+spectrum = pd.read_csv(next(out.glob("*_R100.csv")))
+good = spectrum[["wavelength", "depth_ppm00", "depth_err_ppm00"]].notna().all(axis=1)
+
 fig, ax = plt.subplots(figsize=(8, 4))
-ax.errorbar(s.loc[good, "wavelength"], s.loc[good, "depth_ppm00"],
-            xerr=s.loc[good, "wavelength_err"],
-            yerr=s.loc[good, "depth_err_ppm00"], fmt=".", color="k")
+ax.errorbar(
+    spectrum.loc[good, "wavelength"],
+    spectrum.loc[good, "depth_ppm00"],
+    xerr=spectrum.loc[good, "wavelength_err"],
+    yerr=spectrum.loc[good, "depth_err_ppm00"],
+    fmt="k.",
+)
 ax.set(xlabel="Wavelength [micron]", ylabel="Transit depth [ppm]")
 fig.tight_layout()
 plt.show()
 ```
 
-## Common problems
+Before using the spectrum, inspect the channel-fit summary and the sampler diagnostics in `chunks/`. A smooth-looking spectrum does not rescue divergent chains or channels with poor effective sample size.
 
-**NaN channels:** inspect the extraction and wavelength masks; never replace missing flux with zero. **Order contamination:** fit order 2 separately with `order: 2` and its matching extraction. **Missing bridge products:** retain `need_lowres: true` when the R=20 stage is required.
+## Adapt this example
 
-**Interrupted job:** rerun the identical command; matching chunks load automatically. **Repeated gate failure:** inspect the named wavelength light curve, uncertainties, trend, and masks. Reduce `vmap_chunk` to isolate it.
+Most analyses change only a few lines:
 
-**Out of memory:** lower `vmap_chunk`; the spectral grid and posterior model do not change.
+| Goal | Change |
+|---|---|
+| Fit SOSS order 2 | Set `order: 2`; the same standard box-spectrum FITS stores it in different extensions |
+| Fit NIRSpec | Set the matching `instrument`, `nrs`, and FITS file |
+| Use native wavelength bins | Set `resolution.high: native` |
+| Change constant resolving power | Set `resolution.high` to an integer such as `20` or `300` |
+| Use a supplied wavelength grid | Set `resolution.high: reference` and `reference_grid` |
+| Lower GPU memory use | Reduce `flags.vmap_chunk` |
 
-## Next steps
+Use the [NIRSpec notes](nirspec_g395h.md) for detector handling and the [PRISM notes](prism.md) for long time series and ramps. Read [limb darkening](../guides/limb_darkening.md) before changing the LD treatment. The [outputs guide](../guides/outputs.md) is the reference for every saved column.
 
-Read [Limb darkening](../guides/limb_darkening.md) before changing the stellar-informed prior, [Systematics trends](../guides/trends.md) before adding baseline complexity, and [Samplers](../guides/samplers.md) when a channel triggers the quality gate. The [Outputs](../guides/outputs.md) guide describes every spectrum and detailed-fit column.
+## If the run stops
+
+- **A FITS file is not found:** check the resolved `path/input_dir/fits_file` path.
+- **The first model misses transit:** check `t0`, `period`, `duration`, and their time convention.
+- **A channel contains NaNs:** inspect the extraction or wavelength mask; do not replace missing flux with zero.
+- **The GPU runs out of memory:** lower `flags.vmap_chunk` and rerun.
+- **A quality gate repeatedly fails:** inspect that channel's light curve and uncertainties before changing the sampler.

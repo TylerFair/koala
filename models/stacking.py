@@ -16,7 +16,7 @@ from numpyro import handlers
 from scipy.optimize import minimize
 from scipy.special import logsumexp
 
-from models.laplace_is import psis_smooth_log_weights
+from models.psis import psis_smooth_log_weights
 
 
 def _one_draw_loglik(sample, stage_inputs, model):

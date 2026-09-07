@@ -1,0 +1,27 @@
+/* A quiet scientific front page: generous spacing, restrained color. */
+.content {
+  line-height: 1.65;
+}
+
+.article-container {
+  max-width: 52rem;
+}
+
+.hero-figure {
+  margin: 2rem auto 2.8rem;
+  border-radius: 0.35rem;
+  box-shadow: 0 0.4rem 1.5rem rgb(30 20 38 / 12%);
+}
+
+.sd-card {
+  border: 1px solid var(--color-background-border);
+  box-shadow: none;
+}
+
+.sd-card:hover {
+  border-color: var(--color-brand-primary);
+}
+
+.sd-card-title {
+  color: var(--color-brand-content);
+}

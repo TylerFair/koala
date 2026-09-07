@@ -112,23 +112,3 @@ def test_sing_end_to_end_independent_nuts_laplace_metric():
     assert samples['limb_l'].shape == (2, 1)
     assert jnp.all(jnp.isfinite(samples['c1']))
     assert diagnostics.num_steps.shape == (2, 1)
-
-
-def test_sing_end_to_end_laplace_is():
-    import jax
-    import jax.numpy as jnp
-    from models.laplace_is import get_samples_laplace_is
-
-    model, t, yerr, y, init, kwargs, varying = _tiny_sing_problem()
-    samples, diagnostics = get_samples_laplace_is(
-        model, jax.random.PRNGKey(32), t, yerr, y, init,
-        num_warmup=2, num_samples=8, lane_width=1,
-        laplace_is_num_draws=32, laplace_is_rounds=0,
-        laplace_is_draw_chunk_size=8, laplace_is_map_maxiter=30,
-        laplace_is_fallback=False, channel_varying_kwargs=varying,
-        return_diagnostics=True, **kwargs,
-    )
-    assert samples['c2'].shape == (8, 1)
-    assert samples['limb_delta'].shape == (8, 1)
-    assert jnp.all(jnp.isfinite(samples['c2']))
-    assert diagnostics.pareto_k.shape == (1,)

@@ -8,64 +8,18 @@ _JAXOPLANET_KERNEL_KEY = "_jaxoplanet_kernel"
 _LD_PROFILE_KEY = "_ld_profile"
 _TRANSIT_PHASE_OFFSETS_KEY = "_transit_phase_offsets"
 _TRANSIT_PHASE_MASK_KEY = "_transit_phase_mask"
-_VALID_JAXOPLANET_KERNELS = frozenset(
-    {
-        "auto",
-        "stock",
-        "streamed",
-        "fused",
-        "native_power2",
-        "quadratic_specialized",
-        "quadratic_local_jvp",
-    }
-)
-
-
 def resolve_jaxoplanet_kernel(kernel="auto", *, ld_profile=None, degree=None,
                               keplerian=False):
-    """Resolve kernel routing, conservatively falling back to stock.
-
-    The streamed and fused implementations are deliberately limited to the
-    validated degree-12 power-2 polynomial approximation on duration-based
-    orbits. ``auto`` remains on the lower-risk streamed implementation; the
-    fused contraction is opt-in because its GPU benefit depends strongly on
-    cadence count and batch shape.
-    ``native_power2`` is an explicitly opt-in float64-only evaluator of the
-    Power-2 law's native ``c, alpha`` coefficients.  It is limited to the
-    duration orbit.  Both direct-u1/u2 specializations are opt-in and limited to degree-two
-    quadratic duration-based orbits. ``quadratic_local_jvp`` is tuned for
-    short fixed-LD GPU windows; it remains mathematically valid for free LD,
-    but that use has no promised speedup. Keplerian and otherwise unsupported
-    calls remain on stock jaxoplanet even when another kernel is requested.
-    """
+    """Resolve the retained stock/streamed kernel routes."""
     kernel = str(kernel).lower()
-    if kernel not in _VALID_JAXOPLANET_KERNELS:
+    if kernel not in {"auto", "stock", "streamed"}:
         raise ValueError(
-            "jaxoplanet_kernel must be one of "
-            "{'auto', 'stock', 'streamed', 'fused', "
-            "'native_power2', 'quadratic_specialized', "
-            "'quadratic_local_jvp'}; "
+            "jaxoplanet_kernel must be one of {'auto', 'stock', 'streamed'}; "
             f"received {kernel!r}."
-        )
-    if kernel == "native_power2":
-        if not bool(jax.config.x64_enabled):
-            raise RuntimeError(
-                "jaxoplanet_kernel='native_power2' requires JAX float64 "
-                "(jax_enable_x64=True); its <=2 ppm validation does not "
-                "cover float32 execution."
-            )
-        return "native_power2" if not keplerian and ld_profile == "power2" else "stock"
-    if kernel in {"quadratic_specialized", "quadratic_local_jvp"}:
-        return (
-            kernel
-            if not keplerian and ld_profile == "quadratic" and degree == 2
-            else "stock"
         )
     supported = not keplerian and ld_profile == "power2" and degree == 12
     if not supported:
         return "stock"
-    if kernel == "fused":
-        return "fused"
     return "streamed" if kernel != "stock" else "stock"
 
 
@@ -205,59 +159,6 @@ def _compute_transit_model_duration(params, t, *, kernel="stock"):
     phase_offsets = params.get(_TRANSIT_PHASE_OFFSETS_KEY)
     phase_mask = params.get(_TRANSIT_PHASE_MASK_KEY)
 
-    if kernel == "native_power2":
-        from .experimental_power2_native import light_curve as native_light_curve
-
-        if "c1" not in params or "c2" not in params:
-            raise ValueError(
-                "jaxoplanet_kernel='native_power2' requires direct Power-2 "
-                "coefficients params['c1'] and params['c2']."
-            )
-        c1 = jnp.asarray(params["c1"], dtype=jnp.float64)
-        c2 = jnp.asarray(params["c2"], dtype=jnp.float64)
-        if c1.size != 1 or c2.size != 1:
-            raise ValueError(
-                "A single light curve must provide scalar Power-2 c1 and c2 "
-                "coefficients to native_power2."
-            )
-        c1 = jnp.reshape(c1, ())
-        c2 = jnp.reshape(c2, ())
-
-        if phase_offsets is None:
-            phase_offsets, phase_mask = build_transit_phase_offsets(
-                t, periods, t0s, durations
-            )
-        else:
-            phase_offsets = jnp.asarray(phase_offsets, dtype=jnp.float64)
-            if phase_offsets.ndim != 2 or phase_offsets.shape[0] != periods.shape[0]:
-                raise ValueError(
-                    "Precomputed transit phase offsets must have shape "
-                    "(n_planets, n_times)."
-                )
-            if phase_mask is None:
-                phase_mask = jnp.fabs(phase_offsets) < 0.5 * durations[:, None]
-            else:
-                phase_mask = jnp.asarray(phase_mask, dtype=bool)
-                if phase_mask.shape != phase_offsets.shape:
-                    raise ValueError(
-                        "Precomputed transit phase mask shape must match offsets."
-                    )
-
-        def get_native_lc(duration, b, rors, dt, mask):
-            speed = 2.0 * jnp.sqrt(
-                jnp.maximum(0.0, jnp.square(1.0 + rors) - jnp.square(b))
-            ) / duration
-            separation = jnp.sqrt(jnp.square(speed * dt) + jnp.square(b))
-            signal = native_light_curve(
-                c1, c2, separation, rors, order=16
-            )
-            return jnp.where(mask, signal, 0.0)
-
-        batched_lcs = jax.vmap(get_native_lc)(
-            durations, bs, rorss, phase_offsets, phase_mask
-        )
-        return jnp.sum(batched_lcs, axis=0)
-
     if phase_offsets is not None:
         from jaxoplanet.core.limb_dark import light_curve as stock_light_curve
         from .limb_dark_streamed import light_curve as streamed_light_curve
@@ -275,16 +176,7 @@ def _compute_transit_model_duration(params, t, *, kernel="stock"):
             if phase_mask.shape != phase_offsets.shape:
                 raise ValueError("Precomputed transit phase mask shape must match offsets.")
 
-        if kernel == "streamed":
-            lc_kernel = streamed_light_curve
-        elif kernel == "fused":
-            from .limb_dark_fused import light_curve as lc_kernel
-        elif kernel == "quadratic_specialized":
-            from .limb_dark_quadratic import light_curve as lc_kernel
-        elif kernel == "quadratic_local_jvp":
-            from .limb_dark_quadratic_local_jvp import light_curve as lc_kernel
-        else:
-            lc_kernel = stock_light_curve
+        lc_kernel = streamed_light_curve if kernel == "streamed" else stock_light_curve
 
         def get_lc_from_phase(duration, b, rors, dt, mask):
             speed = 2 * jnp.sqrt(
@@ -299,16 +191,10 @@ def _compute_transit_model_duration(params, t, *, kernel="stock"):
         )
         return jnp.sum(batched_lcs, axis=0)
 
-    if kernel == "streamed":
-        from .limb_dark_streamed import limb_dark_light_curve
-    elif kernel == "fused":
-        from .limb_dark_fused import limb_dark_light_curve
-    elif kernel == "quadratic_specialized":
-        from .limb_dark_quadratic import limb_dark_light_curve
-    elif kernel == "quadratic_local_jvp":
-        from .limb_dark_quadratic_local_jvp import limb_dark_light_curve
-    else:
+    if kernel != "streamed":
         from jaxoplanet.light_curves import limb_dark_light_curve
+    else:
+        from .limb_dark_streamed import limb_dark_light_curve
 
     def get_lc(period, duration, t0, b, rors):
         orbit = TransitOrbit(
@@ -331,8 +217,7 @@ def compute_transit_model(params, t, *, kernel=None, ld_profile=None):
     Expects params to contain 'period', 't0', 'b', 'rors', and either
     'duration' or ('a_rs', with optional 'ecc' and 'omega'). These should be
     arrays where the 0-th dimension is the planet index, except 'u' which is
-    the limb darkening parameter vector. ``native_power2`` instead consumes
-    scalar direct Power-2 coefficients ``c1`` and ``c2``.
+    the limb darkening parameter vector.
     """
     surface_model = params.get("_surface_model", "transit")
     spots = params.get("_stellar_spots", ())
@@ -370,17 +255,12 @@ def compute_transit_model(params, t, *, kernel=None, ld_profile=None):
     if "a_rs" in params:
         if "u" not in params:
             raise ValueError(
-                "Keplerian/a_rs transit evaluation requires polynomial or "
-                "quadratic params['u']; native_power2 supports only the "
-                "duration parameterization."
+                "Keplerian/a_rs transit evaluation requires params['u']."
             )
         return _compute_transit_model_keplerian(params, t)
 
-    if selected_kernel != "native_power2" and "u" not in params:
-        raise ValueError(
-            "The selected jaxoplanet transit kernel requires params['u']; "
-            "direct c1/c2 coefficients are accepted only by native_power2."
-        )
+    if "u" not in params:
+        raise ValueError("The selected jaxoplanet transit kernel requires params['u'].")
 
     indices = params.get(_TRANSIT_WINDOW_INDEX_KEY)
     if indices is None:

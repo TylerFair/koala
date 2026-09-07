@@ -78,7 +78,7 @@ def test_postfit_metadata_is_rebuilt_for_the_current_clipped_time_axis():
     params = _attach_jaxoplanet_eval_metadata(
         _duration_map_params(),
         full_time,
-        jaxoplanet_kernel="quadratic_specialized",
+        jaxoplanet_kernel="auto",
         ld_profile="quadratic",
         transit_window_optimization="auto",
     )
@@ -86,7 +86,7 @@ def test_postfit_metadata_is_rebuilt_for_the_current_clipped_time_axis():
     rebuilt = _attach_jaxoplanet_eval_metadata(
         params,
         clipped_time,
-        jaxoplanet_kernel="quadratic_specialized",
+        jaxoplanet_kernel="auto",
         ld_profile="quadratic",
         transit_window_optimization="auto",
     )
@@ -113,13 +113,13 @@ def test_select_eval_params_preserves_duration_route_and_optimized_metadata():
         transit_engine="jaxoplanet",
         param_method="duration",
         t=times,
-        jaxoplanet_kernel="quadratic_specialized",
+        jaxoplanet_kernel="auto",
         ld_profile="quadratic",
         transit_window_optimization="auto",
     )
 
     assert "a_rs" not in selected
-    assert selected["_jaxoplanet_kernel"] == "quadratic_specialized"
+    assert selected["_jaxoplanet_kernel"] == "auto"
     assert selected["_ld_profile"] == "quadratic"
     assert selected["_transit_phase_offsets"].shape[-1] == times.size
     assert "_transit_window_indices" in selected
@@ -130,7 +130,7 @@ def test_plotting_forwards_postfit_jaxoplanet_metadata_unchanged():
     map_params = _attach_jaxoplanet_eval_metadata(
         _duration_map_params(),
         times,
-        jaxoplanet_kernel="quadratic_specialized",
+        jaxoplanet_kernel="auto",
         ld_profile="quadratic",
         transit_window_optimization="auto",
     )
@@ -145,46 +145,10 @@ def test_plotting_forwards_postfit_jaxoplanet_metadata_unchanged():
         )
 
     forwarded = model.call_args.args[0]
-    assert forwarded["_jaxoplanet_kernel"] == "quadratic_specialized"
+    assert forwarded["_jaxoplanet_kernel"] == "auto"
     assert forwarded["_ld_profile"] == "quadratic"
     np.testing.assert_array_equal(
         np.asarray(forwarded["_transit_phase_offsets"]),
         np.asarray(map_params["_transit_phase_offsets"]),
     )
-    np.testing.assert_array_equal(np.asarray(actual), np.asarray(expected))
-
-
-def test_plotting_forwards_native_power2_coefficients_without_polynomial_u():
-    times = jnp.linspace(-0.08, 0.08, 33)
-    map_params = _attach_jaxoplanet_eval_metadata(
-        {
-            **_duration_map_params(),
-            "c1": jnp.asarray([0.61, 0.64]),
-            "c2": jnp.asarray([0.72, 0.68]),
-        },
-        times,
-        jaxoplanet_kernel="native_power2",
-        ld_profile="power2",
-        transit_window_optimization="auto",
-    )
-    map_params.pop("u")
-    expected = jnp.zeros_like(times)
-
-    with patch("plotting.compute_transit_model_auto", return_value=expected) as model:
-        actual = _single_curve_transit_signal(
-            np.asarray(times),
-            map_params,
-            {
-                "period": np.asarray([2.75]),
-                "transit_engine": "jaxoplanet",
-                "param_method": "duration",
-            },
-            1,
-        )
-
-    forwarded = model.call_args.args[0]
-    assert "u" not in forwarded
-    np.testing.assert_array_equal(np.asarray(forwarded["c1"]), 0.64)
-    np.testing.assert_array_equal(np.asarray(forwarded["c2"]), 0.68)
-    assert forwarded["_jaxoplanet_kernel"] == "native_power2"
     np.testing.assert_array_equal(np.asarray(actual), np.asarray(expected))

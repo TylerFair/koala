@@ -4,8 +4,10 @@
 # changes the fitted geometry.
 #
 #   python -m tools.stacking.run_matrix examples/nirspec_g395m.yaml \
-#       examples/limb_darkening_stack.yaml
-#   python -m tools.stacking.stack_spectra <analysis-spec> --output results/
+#       examples/limb_darkening_stack.yaml --workspace model_stack
+#   bash model_stack/run_all.sh
+#   python -m tools.stacking.stack_spectra model_stack/analysis.yaml \
+#       --output model_stack/results/
 #
 # The stacker weights the variants per wavelength channel by their
 # leave-one-out predictive score on the light-curve points, aligns their
@@ -22,7 +24,7 @@ variants:
         ld_prior: fixed
         detrending_type: linear
 
-  - name: stellar_informed_power2
+  - name: stellarprior_power2
     overrides:
       flags:
         ld_profile: power2

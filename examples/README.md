@@ -1,36 +1,38 @@
 # Examples
 
-Run `python tools/surface_publication_example.py all` for synthetic eclipses, phase curves, and stellar spots. The [executed tutorial](../docs/tutorials/synthetic_surfaces.md) shows spectra, a thermal map with uncertainty, corner plots, and residual diagnostics. The matching pipeline configurations are `eclipse.yaml`, `phase_curve.yaml`, and `stellar_spots.yaml`.
+For self-contained examples beyond transits, run
+`python tools/surface_publication_example.py all`. The
+[executed surface tutorial](../docs/tutorials/synthetic_surfaces.md) shows
+synthetic eclipse and phase-curve spectra, a thermal map with uncertainty,
+stellar-spot recovery, corner plots, and light-curve residual diagnostics.
+Each analysis saves PNG/PDF figures, posterior samples, and numerical tables.
 
-The two executed notebooks are the most direct walkthroughs. They write a YAML
-configuration, run the fitter, read the resulting CSV products, and render the
-white-light curve and spectrum with the shared publication style. Their saved
-outputs were produced on a V100 GPU, while the configuration source retains
-`host_device: "cpu"` so a machine without a GPU can rerun them (more slowly).
-
-Each YAML file remains available as a complete configuration for one dataset.
-Copy the closest one, point `path`, `input_dir` and `fits_file` at your extracted
-spectra, and run it:
+Begin with `niriss_soss_order1.yaml`. It is the smallest complete configuration and uses numeric $R=100$ bins, so it does not depend on a separate wavelength-grid file:
 
 ```bash
-python fit_jwst.py -c examples/niriss_soss_order1.yaml
+cp examples/niriss_soss_order1.yaml my_transit.yaml
+# edit the data paths and target parameters
+python fit_jwst.py -c my_transit.yaml
 ```
 
-| File | What it shows |
+The repository does not bundle the extracted FITS data or ExoTiC-LD atmosphere grids. Point `path`, `input_dir`, `fits_file`, and `stellar.ld_data_path` at your local copies before running.
+
+| Example | Use it for |
 |---|---|
-| `niriss_soss_order1.ipynb` | Executed WASP-39 SOSS order-1 fit, output inspection, and embedded publication plots. |
-| `nirspec_g395m.ipynb` | Executed HAT-P-18 G395M/NRS1 fit, detector masking, and embedded publication plots. |
-| `niriss_soss_order1.yaml` | NIRISS/SOSS order 1 with a linear baseline. Start here. |
-| `nirspec_g395m.yaml` | NIRSpec detector selection and masking a bad stretch of the time series. |
-| `wasp39_eclipse_nrs1.yaml`, `wasp39_eclipse_nrs2.yaml` | Worked WASP-39 b NIRSpec/G395H secondary-eclipse emission spectrum at R=300. |
-| `nirspec_prism.yaml` | PRISM at native resolution with an exponential ramp, and why its chunk width is small. |
-| `limb_darkening_stack.yaml` | Fitting one dataset under several limb-darkening treatments and marginalising over them. |
-| `plot_spectrum.py` | Reading the output spectrum CSV. |
+| `niriss_soss_order1.yaml` | A first SOSS order-1 transit with a linear trend |
+| `nirspec_g395m.yaml` | NIRSpec detector selection and masking a cadence interval |
+| `nirspec_g395h.yaml` | A G395H/NRS1 fit with a quadratic baseline |
+| `nirspec_prism.yaml` | Native-grid PRISM with an exponential ramp and small GPU batches |
+| `harmonica_soss_order1.yaml` | Advanced asymmetric-ingress/egress fitting |
+| `limb_darkening_stack.yaml` | Repeating one fit under several limb-darkening choices |
+| `eclipse.yaml` | A generated secondary-eclipse injection and recovery |
+| `wasp39_eclipse_nrs1.yaml`, `wasp39_eclipse_nrs2.yaml` | The worked WASP-39 b G395H eclipse at $R=300$ |
+| `phase_curve.yaml` | A generated full-orbit thermal phase curve |
+| `stellar_spots.yaml` | A generated transit with physical rotating Starry spots |
+| `plot_spectrum.py` | Reading and plotting a spectrum CSV |
+| `niriss_soss_order1.ipynb` | Saved end-to-end SOSS walkthrough |
+| `nirspec_g395m.ipynb` | Saved end-to-end G395M walkthrough |
 
-The examples set only what the dataset requires. Sampler settings and prior
-parameterisations are left at their defaults. The native-cadence PRISM example
-is the one exception: it lowers the advanced resident-channel width to fit that
-long time series comfortably on a V100.
+The YAML files set the scientific and dataset-specific choices. They leave most sampler settings at validated defaults. Copy the closest example and change only the fields your dataset or analysis requires.
 
-Everything not shown here — trend models, limb-darkening prescriptions,
-sampler behaviour, output files — is in the [documentation](../docs).
+The [first-transit tutorial](../docs/tutorials/soss_order1.md) explains the complete workflow. The focused tutorials cover [trend choice](../docs/guides/trends.md), [limb darkening](../docs/guides/limb_darkening.md), [eclipses, phase curves, and stellar spots](../docs/guides/phase_curves.md), and [model stacking](../docs/guides/model_stacking.md).

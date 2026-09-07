@@ -1,4 +1,4 @@
-# WASP-39 b, NIRISS/SOSS order 1, stellar-informed power-2 limb darkening,
+# WASP-39 b, NIRISS/SOSS order 1, power-2 limb darkening with `stellarprior`,
 # linear baseline. This is the standard starting point for a SOSS transit.
 
 planet:
@@ -17,19 +17,19 @@ stellar:
   logg_sigma: 0.07
   feh_sigma: 0.02
   ld_model: "stagger"
-  ld_data_path: "../exotic_ld_data"
+  ld_data_path: "/path/to/exotic_ld_data"
 
 instrument: 'NIRISS/SOSS'
 order: 1
 
-path: '/path/to/work'
-input_dir: 'FITS'
-fits_file: 'WASP-39_box_spectra_fullres.fits'
-output_dir: 'WASP-39_SOSS_ORDER1'
+path: '.'
+input_dir: 'examples/data'
+fits_file: 'WASP-39_soss_binned8.fits'
+output_dir: 'results/WASP-39_SOSS_ORDER1'
 
 resolution:
-  high: 'reference'                  # 'reference' | 'native' | an integer R
-  reference_grid: 'prism_template.csv'
+  low: 20                           # prepared as a coarse bridge/check
+  high: 100                          # constant resolving power; no grid file needed
 
 flags:
   detrending_type: 'linear'
@@ -40,4 +40,4 @@ outlier_clip:
   whitelight_sigma: 5
   spectroscopic_sigma: 5
 
-host_device: "gpu"
+host_device: "cpu"                    # portable default; use "gpu" for production

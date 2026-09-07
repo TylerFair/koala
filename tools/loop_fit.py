@@ -11,13 +11,120 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import warnings
 
+import arviz as az
 import jax
+import numpy as np
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+DIAGNOSTIC_SITES = (
+    "A_spot",
+    "rors",
+    "depths",
+    "c",
+    "v",
+    "log_jitter",
+    "c1",
+    "c2",
+    "total_error",
+    "delta_r",
+    "a1",
+    "q",
+    "limb_l",
+    "limb_delta",
+)
+
+COMPILE_EVENTS = {
+    "/jax/core/compile/jaxpr_trace_duration": "jaxpr_trace_seconds",
+    "/jax/core/compile/jaxpr_to_mlir_module_duration": "mlir_lowering_seconds",
+    "/jax/core/compile/backend_compile_duration": "backend_compile_seconds",
+}
+
+
+class _CompilationEvents:
+    def __init__(self):
+        self.events = []
+
+    def listener(self, event, duration_secs, **_):
+        if event in COMPILE_EVENTS:
+            self.events.append((event, float(duration_secs)))
+
+    def mark(self):
+        return len(self.events)
+
+    def since(self, mark):
+        result = {name: 0.0 for name in COMPILE_EVENTS.values()}
+        result.update(
+            {
+                name.replace("_seconds", "_count"): 0
+                for name in COMPILE_EVENTS.values()
+            }
+        )
+        for event, duration in self.events[mark:]:
+            name = COMPILE_EVENTS[event]
+            result[name] += duration
+            result[name.replace("_seconds", "_count")] += 1
+        result["total_recorded_compile_seconds"] = sum(
+            result[name] for name in COMPILE_EVENTS.values()
+        )
+        return result
+
+
+def _component_series(array, num_channels):
+    array = np.asarray(array)
+    if array.ndim < 2 or array.shape[1] != num_channels:
+        return []
+    trailing = array.shape[2:]
+    if not trailing:
+        return [("", array)]
+    result = []
+    for component in np.ndindex(trailing):
+        suffix = "[" + ",".join(str(index) for index in component) + "]"
+        result.append((suffix, array[(slice(None), slice(None), *component)]))
+    return result
+
+
+def _arviz_diagnostics(samples, num_channels):
+    rows = []
+    for site in DIAGNOSTIC_SITES:
+        if site not in samples:
+            continue
+        for suffix, values in _component_series(samples[site], num_channels):
+            for channel in range(num_channels):
+                series = np.asarray(values[:, channel], dtype=np.float64)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    try:
+                        ess = float(
+                            np.asarray(az.ess(series[None, :], method="bulk"))
+                        )
+                    except Exception:
+                        ess = float("nan")
+                rows.append(
+                    {
+                        "site": f"{site}{suffix}",
+                        "channel": channel,
+                        "ess_bulk": ess,
+                        # Production returns one chain. A valid rank R-hat
+                        # cannot be estimated from it; do not manufacture
+                        # pseudo-independent chains by splitting one trace.
+                        "r_hat": None,
+                    }
+                )
+    finite_ess = [row["ess_bulk"] for row in rows if np.isfinite(row["ess_bulk"])]
+    return {
+        "rows": rows,
+        "ess_bulk_min": min(finite_ess) if finite_ess else None,
+        "r_hat_note": (
+            "Unavailable: these stage samplers produce one chain. ArviZ "
+            "R-hat requires at least two independent chains."
+        ),
+    }
 
 
 def _variant_stage(stage, variant):
@@ -108,11 +215,9 @@ def _variant_stage(stage, variant):
 def run_spectroscopic_loop(stage_paths, output_dir, *, samples=1000):
     """Run same-shaped stage dumps while retaining one runner per LD law."""
     import jax
-    import numpy as np
     import pandas as pd
     from tools.spectro_stage_inputs import load_stage_inputs
     import fit_jwst
-    from tools.run_sampler_on_stage_inputs import _CompilationEvents, _arviz_diagnostics
 
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -247,7 +352,7 @@ class LoopVariant:
 # calibration sample for the fitted gray offset.
 LOOP_VARIANTS = (
     LoopVariant("fixed_power2", "power2", "fixed"),
-    LoopVariant("informed_power2", "power2", "informed"),
+    LoopVariant("stellarprior_power2", "power2", "stellarprior"),
     LoopVariant("uniform_power2", "power2", "uniform"),
     LoopVariant("fixed_quadratic", "quadratic", "fixed"),
     LoopVariant("uniform_quadratic", "quadratic", "uniform"),

@@ -1,6 +1,8 @@
 # GPUs and clusters
 
-Use a Slurm script that activates the environment and requests one GPU:
+A full spectrum is intended to run on one GPU. Ask the scheduler for a GPU,
+set the JAX platform before Python starts, and run the same command used
+locally:
 
 ```bash
 #!/bin/bash
@@ -8,98 +10,89 @@ Use a Slurm script that activates the environment and requests one GPU:
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=12:00:00
-cd /path/to/repository
+
+cd /path/to/Koala
+source /path/to/environment/bin/activate
+
 export JAX_ENABLE_X64=1
 export JAX_PLATFORMS=gpu
 export OMP_NUM_THREADS=8
-export JAX_COMPILATION_CACHE_DIR=/scratch/$USER/jax_cache
+export PYTHONHASHSEED=0
+export JAX_COMPILATION_CACHE_DIR=/path/to/persistent/jax_cache
+
 python fit_jwst.py -c config.yaml
 ```
 
-For a CPU smoke test, set `JAX_PLATFORMS=cpu` before Python starts. Do not import
-JAX and then change the platform. Compile padding and the persistent
-compilation cache are managed automatically. Cache reuse requires compatible
-JAX/XLA versions and static model shapes.
-
-GPU memory grows with cadence count, model complexity, and `vmap_chunk`. Start
-with 40 independent channels on V100/A100 and reduce the width after an
-out-of-memory error.
-
-The default processes one planet on one GPU and checkpoints every completed
-channel block. Multi-worker checkpoint orchestration is an internal recovery
-facility rather than a normal configuration choice.
-
-## Platform selection
-
-JAX selects its platform when it first initializes. Set the platform in the job environment before Python starts.
+Site syntax varies, but the Python command and environment variables do not.
+Confirm the allocation before a long run:
 
 ```bash
-export JAX_PLATFORMS=gpu
-export JAX_ENABLE_X64=1
+python -c "import jax; print(jax.config.x64_enabled, jax.devices())"
 ```
 
-Use `cpu` for read-only import checks on a login node. Do not run the production spectroscopic sampler on a shared login node.
+It should report 64-bit mode and the allocated GPU. A CPU platform is suitable
+for import checks and small tests; avoid a production fit on a shared login
+node.
 
-## Device check
+For bit-for-bit reproduction, set the same `PYTHONHASHSEED` before every
+Python process. The configured scientific random seed controls Koala's JAX
+random stream, while Python's hash seed can also affect latent-parameter
+ordering during white-light MAP optimization. Runs with different hash seeds
+can therefore follow different, statistically equivalent NUTS trajectories.
 
-```bash
-python -c "import jax; print(jax.devices())"
+## Memory and chunk size
+
+GPU memory grows with cadence count, model complexity, and the number of
+resident wavelength channels. The independent samplers default to 40 channels.
+If the process runs out of memory, reduce only the resident width:
+
+```yaml
+flags:
+  spectro_chunk_size: 20
 ```
 
-Run this inside the Slurm allocation. It should report the allocated V100, A100, or other supported CUDA device.
+Try 10 or 4 for long native-cadence PRISM data or a more expensive model.
+This setting changes concurrency, not the wavelength grid or posterior. The
+legacy key `vmap_chunk` has the same role.
 
-## Memory controls
+## Checkpoints and wall time
 
-`vmap_chunk` controls resident independent chains. Lowering it reduces memory approximately with channel concurrency. It does not rebin wavelength data.
+Every completed channel block is written under `output_dir/chunks/`. If a job
+reaches its wall-time limit, resubmit the same config and output directory;
+compatible blocks are loaded and the run continues. Do not edit the YAML
+between submissions unless you intend to start a new checkpoint family.
 
-Native PRISM usually needs more care because it combines many channels with long time arrays. Harmonica can also use more memory than a symmetric transit model. Start at 40 only when that width is known to fit the device and workload.
+JAX compilation makes the first block of a new shape slower. Put
+`JAX_COMPILATION_CACHE_DIR` on persistent, node-visible scratch to reuse
+compatible compilations across jobs. Cache entries depend on code, JAX/XLA
+versions, and static shapes.
 
-Use 20, 10, or 4 after an allocation failure. The final partial-width chunk can compile a separate executable.
+## Split a long run into stages
 
-## Cache placement
-
-Set the standard `JAX_COMPILATION_CACHE_DIR` environment variable to persistent
-scratch visible to every node that may resume the run. Avoid a network home
-directory with a tight metadata quota. Cache reuse requires compatible code,
-JAX/XLA versions, and static shapes.
-
-Stellar power-2 prior grids use a separate fingerprinted cache at
-`/scratch/midway3/tfairnington/ld_prior_cache`. Change
-`stellar.ld_prior_cache_dir` when that location is not shared, or set
-`stellar.ld_prior_cache: false` to disable it. An unavailable cache directory
-does not stop a fit.
-
-## Checkpointed chunking
-
-One process walks through all channel ranges by default. Every completed chunk
-is checkpointed before the next starts, so resubmitting the same configuration
-continues from compatible saved work. Site-specific multi-worker orchestration
-must give each worker a disjoint range and combine only a complete checkpoint
-set; its compatibility controls are intentionally not part of the normal YAML
-surface.
-
-## Split stages
+Most analyses should use the default `analysis_stage: all`. When scheduler
+limits require separate jobs, first prepare the shared products:
 
 ```yaml
 flags:
   analysis_stage: prep
 ```
 
-This completes data preparation and required low-resolution work. Use `analysis_stage: highres` in a later allocation for the final channels. Prepared products are fingerprinted.
+Then submit the same analysis with `analysis_stage: highres` and the same
+output directory. The available values are `all`, `whitelight`, `prep`, and
+`highres`. Prepared artifacts are fingerprinted; do not combine products from
+different configs.
 
-## Wall-time planning
+## Common failures
 
-Budget for white light, low resolution, high resolution, and plotting. The first static channel width normally includes 1--1.5 minutes of compilation. Equal-width chunks then take seconds to a few minutes each on V100/A100.
+**No GPU appears.** Check that the job requested a GPU and that the installed
+JAX wheel matches the cluster CUDA environment.
 
-Difficult channels can take longer or trigger an alternate sampler. Use the number of channels and chunk width to estimate the call count. Keep time for the final partial-width compilation and output writing.
+**Out of memory.** Lower `spectro_chunk_size` and resume. Rebin the spectrum
+only when a coarser wavelength grid is also the scientific goal.
 
-## Cluster troubleshooting
+**The restart recomputes everything.** Compare the YAML and software revision
+with the original run. A changed fingerprint correctly creates new
+checkpoints.
 
-**CUDA device unavailable:** check Slurm GPU allocation and the JAX CUDA wheel. **Out of memory:** reduce `vmap_chunk` and resume with the new checkpoint family. **Cache misses:** check JAX versions, node-visible path, and static widths.
-
-**Array collision:** verify unique worker assignments and shared configuration.
-**Combine reports missing files:** do not force it; find and rerun the missing
-assignment. **Job reaches wall time:** resubmit unchanged so completed chunks
-load.
-
-**Slow filesystem:** place cache and outputs on project or scratch storage suited to many checkpoint files.
+**The first block is slow.** This is normally compilation. Equal-width blocks
+should reuse the runner; a smaller final block may need one additional compile.

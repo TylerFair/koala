@@ -28,6 +28,7 @@ fits_file: 'HAT-P-18_nrs1_box_spectra_fullres_G395M.fits'
 output_dir: 'HAT-P-18_G395M_NRS1'
 
 resolution:
+  low: 20
   high: 'reference'
   reference_grid: 'prism_template.csv'
 

@@ -1,127 +1,140 @@
-# Model stacking for transmission spectra
+# Marginalize over model choices
 
-Transmission spectra inherit choices made while fitting each light curve. Reasonable limb-darkening priors or baseline trends can yield different depths even when every fit passes its sampler checks. Model stacking carries that uncertainty into the spectrum instead of selecting one assumption and treating it as known.
+A transmission spectrum can depend on reasonable analysis choices: limb-darkening prior, baseline trend, or treatment of a detector event. Model stacking carries disagreement between accepted fits into the reported spectrum instead of silently choosing one.
 
-This tutorial uses the HAT-P-18 b NIRSpec/G395M NRS1 visit. Its production reference grid has 208 wavelength channels. The scientific question is deliberately plain: how much does the transmission spectrum move when we change the limb-darkening treatment, and what spectrum results when we marginalize over that choice? Three full pipeline fits compare fixed power-2, uniform quadratic, and Sing quadratic limb darkening while holding the linear systematics trend fixed.
+This tutorial uses three HAT-P-18 b NIRSpec/G395M fits. They share the same data, linear trend, wavelength grid, and sampler policy; only limb darkening changes:
 
-## The model matrix
+- fixed power-2;
+- broad uniform quadratic;
+- Sing-calibrated quadratic.
 
-Each variant is a full pipeline run. It therefore gets its own white-light fit and geometry handoff, low-resolution bridge, and reference-grid spectroscopic fit. The matrix file uses small overrides on the checked stellar-informed configuration:
+Every candidate must be a scientifically defensible, converged fit. Stacking does not repair a bad model or a failed chain.
+
+## 1. Define the candidates
+
+Start with one working dataset configuration, then describe only the differences in a matrix:
 
 ```yaml
-dataset: hatp18_nrs1_g395m_ref
+dataset: hatp18_nrs1_g395m
 analysis_stage: all
+
 variants:
-  - name: fixed_power2_linear
+  - name: fixed_power2
     overrides:
-      input_dir: /scratch/midway3/tfairnington/FITS
-      flags: {ld_prior: fixed, ld_profile: power2, detrending_type: linear}
-  - name: uniform_quadratic_linear
+      flags:
+        ld_profile: power2
+        ld_prior: fixed
+
+  - name: uniform_quadratic
     overrides:
-      input_dir: /scratch/midway3/tfairnington/FITS
-      flags: {ld_prior: uniform, ld_profile: quadratic,
-              detrending_type: linear}
-  - name: sing_quadratic_linear
+      flags:
+        ld_profile: quadratic
+        ld_prior: uniform
+
+  - name: sing_quadratic
     overrides:
-      input_dir: /scratch/midway3/tfairnington/FITS
-      stellar: {ld_mu_min: 0.2}
-      flags: {ld_prior: sing, ld_profile: quadratic,
-              detrending_type: linear}
+      stellar:
+        ld_mu_min: 0.2
+      flags:
+        ld_profile: quadratic
+        ld_prior: sing
 ```
 
-Keep the sampling policy identical: independent NUTS, a Laplace metric, lognormal jitter, and a minimum depth ESS of 400. Changing both the scientific assumption and sampler policy would make the comparison difficult to interpret.
+The complete {download}`example matrix <../../examples/limb_darkening_stack.yaml>` also includes a power-2 `stellarprior` reference fit. Remove that row to reproduce the three-model figure below.
 
-## Run the fits and stack them
+Change one scientific axis at a time. If the matrix changes limb darkening, keep the trend, masks, wavelength bins, and sampling requirements fixed. Each variant needs its own white-light fit because limb darkening can change the inferred geometry.
 
-`run_matrix.py` materializes one isolated configuration and one GPU queue script per variant. On a system without the project dispatcher, the generated configurations can instead be passed to `fit_jwst.py` individually.
+## 2. Create and run the fits
+
+The matrix helper creates one complete YAML per candidate, a portable analysis manifest, and a shell script that runs the fits:
 
 ```bash
 python tools/stacking/run_matrix.py \
-  configs_fiducial_stellarinformed/HAT-P-18_nrs1_g395m_config.yaml \
-  configs_stacking/hatp18_nrs1_g395m_reference_matrix.yaml \
-  --queue-start 410
+  examples/nirspec_g395m.yaml \
+  examples/limb_darkening_stack.yaml \
+  --workspace model_stack
 ```
 
-After every fit has a successful exit marker, make the likelihood archives and combined products on CPU:
+The base configuration supplies the data paths and target parameters. Edit it and confirm that one ordinary fit can read your data before creating the matrix. The generated candidate configurations write to `model_stack/fits/`; saved likelihood inputs go to `model_stack/stage_inputs/`.
+
+Run every candidate:
+
+```bash
+bash model_stack/run_all.sh
+```
+
+The script uses `python` from the active environment. To select another interpreter, set `PYTHON`:
+
+```bash
+PYTHON=/path/to/python bash model_stack/run_all.sh
+```
+
+The script contains absolute executable and configuration paths, so it can be launched from another working directory. After the fits finish, `analysis.yaml` resolves fit products relative to its own location; the completed workspace can then be moved and stacked elsewhere.
+
+Before combining anything, confirm that every candidate has:
+
+- the same cadences and wavelength grid;
+- an accepted sampler diagnostic for every included channel;
+- pointwise likelihood information from the same predictive unit;
+- no unexplained white-light residual structure.
+
+## 3. Compute the predictive stack
+
+Once the fits and saved stage inputs are complete:
 
 ```bash
 export JAX_ENABLE_X64=1
 export JAX_PLATFORMS=cpu
-python tools/stacking/stack_spectra.py \
-  configs_stacking/hatp18_nrs1_g395m_reference_analysis.yaml \
+python tools/stacking/stack_spectra.py model_stack/analysis.yaml \
   --stage high_resolution \
-  --output acceleration_reports/stacking \
-  --label hatp18_nrs1_g395m_reference \
+  --output model_stack/results \
+  --label hatp18_nrs1_g395m \
   --n-out 20000
 ```
 
-The analysis replays the exact saved NumPyro stage for every posterior draw and stores the Normal log density of every cadence. Computation is float64; the reusable likelihood archives are float32.
+For each wavelength channel, PSIS-LOO estimates how well each model predicts a held-out cadence. Stacking chooses non-negative weights that sum to one and maximize the predictive density of their mixture. The output spectrum is formed by mixing posterior depth draws with those channel-specific weights.
 
-## What stacking optimizes
+This is predictive model averaging. Bayesian evidence asks a different question and depends on the complete parameter priors; BIC and Laplace evidence are approximations to evidence, not substitutes for PSIS-LOO stacking. Do not compare their numerical weights as though they were the same quantity.
 
-For model $m$, channel $c$, and cadence $i$, PSIS-LOO estimates the predictive density $p_m(y_{ci}\mid y_{c,-i})$. Stacking chooses non-negative channel-specific weights that sum to one and maximize
+The arrays file also records pseudo-BMA+ weights as a secondary comparison. The publication figure uses stacking weights so that its meaning stays unambiguous.
 
-\[
-\sum_i \log\left[\sum_m w_{mc}p_m(y_{ci}\mid y_{c,-i})\right].
-\]
+## 4. Separate gray offsets from spectral shape
 
-The target is prediction of another light-curve point in the same wavelength channel. This is more direct than asking which complete model is true. The posterior depth is a draw-level mixture: select a model using its channel weight, then select one of that model's depth draws.
+Changing limb darkening can shift an entire spectrum through the fitted reference radius. By default the stacker estimates one achromatic depth offset per model, aligns the candidates, mixes their posterior draws, and restores the model-weighted mean level. This prevents a nearly constant radius shift from looking like wavelength-dependent atmospheric uncertainty.
 
-Pseudo-BMA+ is provided as a cheaper comparison. It exponentiates summed LOO scores and averages over 1,000 Bayesian-bootstrap reweightings of the cadences. It is usually smoother but does not optimize the predictive mixture directly. White-light Laplace BMA instead approximates a marginal likelihood and is sensitive to prior volume. It is only available when the pipeline saves the white-light MAP log joint and full Hessian.
+The output also retains the absolute, unaligned candidates and stack. Use those columns when the absolute reference-radius level matters, and always state whether the published spectrum is aligned.
 
-## Achromatic offset alignment
-
-A constant depth displacement is degenerate with the planet's reference radius or reference pressure. It should not masquerade as wavelength-dependent model uncertainty. For each model, the analysis first computes
-
-\[
-\Delta_m =
-\frac{\sum_c \left(\tilde d_{mc}-\bar d_c\right)/s_{mc}^2}
-     {\sum_c 1/s_{mc}^2},
-\]
-
-where $\tilde d_{mc}$ is the model median, $s_{mc}$ its posterior standard deviation, and $\bar d_c$ the across-model mean median. Mixture draws use $d_{mcs}-\Delta_m$, then add back the model-weighted average offset. Thus the headline spectrum keeps the model-average absolute level while its extra width measures spectral-shape disagreement.
-
-The CSV also retains every absolute model spectrum and an unaligned stacked spectrum. Use those columns when the reference-radius level is scientifically relevant or when comparing to an atmosphere model with an explicit reference pressure.
-
-## Read the diagnostic figure
+## 5. Read the result
 
 ```{image} ../_static/model_stacking_hatp18_fitted_sing_uplus_v2.png
-:alt: HAT-P-18 b NIRSpec G395M model-stacking diagnostics
+:alt: HAT-P-18 b NIRSpec G395M stacked transmission spectrum and model weights
 :width: 900px
 :align: center
 ```
 
-The first panel shows the absolute candidate spectra and the headline offset-aligned stack. The second compares aligned and absolute stacked intervals. If their widths differ strongly while their shapes agree, the candidate models mainly disagree about reference radius.
+Panel a shows the offset-aligned stacked spectrum with its 16th--84th percentile interval. The faded lines are candidate medians. Their separation shows which wavelength regions depend on the limb-darkening treatment.
 
-The third panel shows channel-specific stacking weights and pseudo-BMA+ weights. A zero stacking weight is not a failed model: it means that model does not improve the optimal predictive mixture in that channel. Rapid wavelength-to-wavelength changes can be real, but they also motivate checking whether cadence-level noise correlations are being ignored.
+Panel b shows the per-channel depth precision (half the 16th--84th percentile width, in ppm) of each candidate model and of the stack. Where the stack tracks the most precise candidate, the mixture is not inflating the error; where it sits above every candidate, disagreement between the models is being propagated into the stacked uncertainty.
 
-The final panel shows the maximum Pareto $\hat k$ and the disagreement ratio. Values below 0.7 support ordinary PSIS-LOO; a channel with points above 0.7 needs exact refits, moment matching, or a more appropriate grouped predictive unit. `disagreement` is the aligned 16--84 percent half-width divided by the smallest single-model half-width. Values near one mean shape robustness; values above one identify assumption-sensitive channels.
+Panel c shows the stacking weights. A zero weight does not mean that a fit failed; it means that model did not improve the optimal predictive mixture in that channel. Rapid channel-to-channel changes deserve scrutiny because cadence-level LOO assumes the residuals are conditionally independent.
 
-For the HAT-P-18 run shown here, all 428,064 pointwise diagnostics satisfy $\hat k<0.7$; the global maximum is 0.537. Mean stacking weights are 0.673 for fixed power-2, 0.120 for wide-uniform quadratic, and 0.208 for Sing quadratic. Fixed is dominant in 140 of 208 channels, while uniform and Sing dominate 24 and 44 channels. Their fitted achromatic depth offsets are -11.4, +5.7, and +6.1 ppm. Once those gray shifts are removed, median disagreement is 1.010 and the largest channel reaches 2.084. The aligned spectrum differs from the staged stellar-informed production spectrum by -9.8 +/- 17.7 ppm, with a residual slope of 9.99 ppm/micron and a median error-bar ratio of 0.991.
+:::{dropdown} Details of the illustrated run
+All 428,064 pointwise diagnostics have Pareto $\hat k<0.7$ and the global maximum is 0.537. Mean weights are 0.673 for fixed power-2, 0.120 for broad-uniform quadratic, and 0.208 for Sing quadratic. After gray-offset alignment, the median disagreement ratio is 1.010 and its largest value is 2.084. The stack differs from the staged power-2 `stellarprior` production spectrum by $-9.8\pm17.7$ ppm on average, with a median uncertainty ratio of 0.991.
 
-Here `uniform` uses the current wide flat priors $u_+\in[-1,2]$ and
-$u_-\in[-2,2]$, following Sing et al. (2026). This is a broader prior than the
-historical independent $u_1,u_2\in[0,1]$ box, so the uniform model was rerun
-rather than reusing its older posterior.
+The broad-uniform fit uses $u_+\in[-1,2]$ and $u_-\in[-2,2]$, rather than the older independent $u_1,u_2\in[0,1]$ box. The Sing calibration fits broad $u_+$ and $u_-$ coordinates at low resolution, transforms them to $(l,\delta)$, and pools ESS-inflated channel uncertainties. It measured $\Delta l=+0.00725\pm0.01745$ and $\Delta\delta=+0.00349\pm0.00366$; all 11 calibration channels had bulk ESS above 235 and zero divergences, so the fitted correction was used instead of the fallback.
+:::
 
-The revised Sing calibration follows Section 3.3 of Sing et al. (2026): it fits independent broad $u_+$ and $u_-$ coordinates, transforms the posterior to $(l,\delta)$, and uses ESS-inflated channel uncertainties for pooling. It measured $\Delta l=+0.00725\pm0.01745$ and $\Delta\delta=+0.00349\pm0.00366$. All 11 channels exceeded bulk ESS 235, with zero calibration divergences, so the fitted correction—not the tabulated fallback—was used. Both measurements agree with the Table 3 population values within their quoted star-to-star scatter.
+The companion diagnostics figure written beside the numerical products compares absolute and aligned intervals, plots maximum Pareto $\hat k$, and reports disagreement ratios. Treat a channel above $\hat k=0.7$ as a prompt for exact refits, moment matching, or a better grouped predictive unit.
 
-## Second worked example: WASP-39 b
+## Outputs worth keeping
 
-The same machinery was also validated on four WASP-39 b G395H models over its 68-channel production grid. There the informed linear-plus-discontinuity model had mean stacking weight 0.942, global maximum $\hat k=0.547$, and the aligned stack agreed with production at -5.43 +/- 15.93 ppm. Its figure remains available as `docs/_static/model_stacking_wasp39.png`; full details, including two excluded initialization failures, are in `acceleration_reports/stacking/stacking.md`.
+| Product | Use |
+|---|---|
+| `*_stacked.csv` | Portable aligned and absolute spectrum |
+| `*_stacking.png` | Spectrum and channel weights |
+| `*_stacking_diagnostics.png` | Offset, Pareto-$\hat k$, and disagreement checks |
+| `*_diagnostics.json` | Machine-readable offsets and weight summaries |
+| `*_stacking_arrays.npz` | Mixture draws, weights, and LOO results |
+| `*_pointwise_loglik.npz` | Reusable pointwise likelihood archive for each model |
 
-## Outputs
-
-- `*_stacked.csv` is the portable table. Headline columns are aligned; `absolute_*` columns retain the unaligned mixture.
-
-- `*_diagnostics.json` records offsets, Pareto summaries, and model-average weights.
-
-- `*_arrays.npz` retains weights, LOO results, mixture draws, and summaries for downstream plots.
-
-- `*_loglik_*.npz` stores one reusable pointwise likelihood cube per model.
-
-## Assumptions and next steps
-
-Pointwise LOO assumes conditionally independent residuals. If residuals remain time-correlated, use blocked LOO or leave-future-out prediction rather than interpreting cadence-level weights literally. The candidate list also matters: omitting a plausible trend creates model-expansion bias, while adding many nearly duplicate variants can change pseudo-BMA-style probabilities.
-
-Useful extensions are to serialize the white-light MAP Hessian and log joint for genuine Laplace BMA, compare channel-wise trend selection with white-light-only screening, test quadratic and physically justified exponential-linear trends, and propagate detector-level offsets when joining NRS1 and NRS2. Read [Systematics trends](trends.md), [Samplers](samplers.md), and [Outputs](outputs.md) before expanding the matrix.
+Pointwise LOO is only appropriate when a cadence is the relevant predictive unit and residual dependence has been modeled adequately. For time-correlated residuals, use blocked LOO or leave-future-out prediction before interpreting the weights. The result is also conditional on the candidate set: include the plausible alternatives you would have been willing to publish individually.

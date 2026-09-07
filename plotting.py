@@ -103,15 +103,7 @@ def _single_curve_transit_signal(t, map_params, transit_params, idx):
                     np.atleast_1d(map_params[harmonic_name][idx])
                 )
     else:
-        if map_params.get("_jaxoplanet_kernel") == "native_power2":
-            if "c1" not in map_params or "c2" not in map_params:
-                raise ValueError(
-                    "native_power2 plotting requires direct c1/c2 coefficients."
-                )
-            params["c1"] = jnp.asarray(map_params["c1"][idx])
-            params["c2"] = jnp.asarray(map_params["c2"][idx])
-        else:
-            params["u"] = jnp.asarray(map_params["u"][idx])
+        params["u"] = jnp.asarray(map_params["u"][idx])
         for name in _JAXOPLANET_EVAL_METADATA:
             if name in map_params:
                 params[name] = map_params[name]

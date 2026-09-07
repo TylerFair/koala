@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 os.environ.setdefault("JAX_ENABLE_X64", "1")
+os.environ.setdefault("MPLBACKEND", "Agg")
 
 import numpy as np
 
@@ -12,6 +13,7 @@ from models.stacking import (
     psis_loo,
     stacking_weights,
 )
+from tools.stacking.stack_spectra import render_stacking_figures_from_arrays
 
 
 def test_stacking_weights_recover_known_predictive_mixture():
@@ -85,3 +87,44 @@ def test_achromatic_alignment_removes_constant_model_offset_from_width():
     np.testing.assert_allclose(result["aligned_summary"]["disagreement"], 1.0,
                                rtol=0.025)
     assert np.all(absolute_sigma > 1.5 * single_sigma)
+
+
+def test_saved_arrays_render_publication_and_diagnostics_figures(tmp_path):
+    rng = np.random.default_rng(20260904)
+    wavelength = np.linspace(2.9, 5.1, 18)
+    model_names = np.array(["fixed_power2_linear", "uniform_linear", "stellarprior_linear_step"])
+    baseline = 0.019 + 1.8e-4 * np.sin(2.4 * wavelength)
+    model_depth_median = np.vstack((
+        baseline - 3.0e-5,
+        baseline + 5.0e-5 * np.cos(4.0 * wavelength),
+        baseline + 4.0e-5,
+    ))
+    weights = rng.dirichlet(np.ones(model_names.size), size=wavelength.size).T
+    aligned_mixture = rng.normal(baseline, 8.0e-5, size=(500, wavelength.size))
+    absolute_mixture = rng.normal(
+        baseline + 2.0e-5, 1.1e-4, size=(500, wavelength.size)
+    )
+    khat = rng.uniform(0.05, 0.58, size=(model_names.size, wavelength.size, 9))
+    arrays_path = tmp_path / "synthetic_stacking_arrays.npz"
+    np.savez_compressed(
+        arrays_path,
+        wavelength=wavelength,
+        stacking_weights=weights,
+        khat=khat,
+        aligned_mixture=aligned_mixture,
+        absolute_mixture=absolute_mixture,
+        model_names=model_names,
+        model_depth_median=model_depth_median,
+        aligned_disagreement=np.linspace(1.0, 1.35, wavelength.size),
+        absolute_disagreement=np.linspace(1.1, 1.7, wavelength.size),
+    )
+
+    publication_path, diagnostics_path = render_stacking_figures_from_arrays(
+        arrays_path
+    )
+
+    assert publication_path == tmp_path / "synthetic_stacking.png"
+    assert diagnostics_path == tmp_path / "synthetic_stacking_diagnostics.png"
+    for path in (publication_path, diagnostics_path):
+        assert path.is_file()
+        assert path.stat().st_size > 1_000

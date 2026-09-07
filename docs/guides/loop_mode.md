@@ -1,38 +1,31 @@
 # Limb-darkening loop mode
 
-Loop mode fits several limb-darkening assumptions from replayable stage-input
-dumps in one Python process. Models with the same limb-darkening law share one
-callable and one resident sampler runner; the prior centres, scales, bounds,
-and coordinate map are array inputs to that callable.
+Loop mode is a developer tool for comparing several limb-darkening priors
+while reusing compiled spectroscopic runners. It is not needed for an ordinary
+fit or for the model-stacking tutorial.
 
-Bounded coordinate variants are pulled back from per-variant lower and upper
-bounds through a smooth sigmoid map. This keeps every proposal in the valid
-coordinate domain while preserving the standalone prior, including its change
-of variables. Spectroscopic fits use the normal production quality gate and
-selectively retry failing channels with HMC and then adaptive NUTS; the spectrum
-records the sampler retained for each channel.
-
-The primary NUTS and HMC runners use a shared resident channel width. Adaptive
-fallback lanes are processed in fixed groups of four, so one small joint-NUTS
-program can be reused when different variants fail the gate in different
-numbers of channels. Padding lanes are discarded from the saved posterior.
-
-Pass each stage as `VARIANT=PATH`. Uniform quadratic must precede Sing when the
-Sing centres are calibrated from its low-resolution posterior.
+The working command consumes previously prepared spectroscopic stage dumps:
 
 ```bash
 python tools/loop_fit.py \
-  --output-dir /scratch/my_loop \
-  --stage uniform_quadratic=/scratch/inputs/low_resolution_inputs.pkl \
-  --stage sing_quadratic=/scratch/inputs/sing_low_resolution_inputs.pkl
+  --output-dir /path/to/my_loop \
+  --stage uniform_quadratic=/path/to/inputs/uniform.pkl \
+  --stage sing_quadratic=/path/to/inputs/sing.pkl
 ```
 
-Each variant and stage receives a `spectrum.csv` and `summary.json`. The root
-`loop_summary.json` records execution and compilation events. Existing files
-are never replaced, so use a new output directory for each invocation.
+Each item is `VARIANT=/absolute/path/to/stage.pkl`. Uniform quadratic must
+precede Sing when its low-resolution posterior supplies the Sing offset
+calibration. Each variant writes a `spectrum.csv`, posterior samples, and a
+`summary.json`; the root directory receives `loop_summary.json`.
 
-The current command-line driver consumes spectroscopic stage dumps. A reusable
-white-light runner exists, but constructing its model arguments and feeding its
-per-variant geometry into the stage dumps is not yet connected to the command
-line. White-light fits and their geometry handoffs must therefore be prepared
-before creating those dumps.
+The `--config` interface can generate a six-variant plan with `--plan-only`,
+but direct execution from that plan is intentionally disabled because the
+main fitter does not yet expose the required in-process staged API. Use the
+regular CLI for standalone fits:
+
+```bash
+python fit_jwst.py -c config.yaml
+```
+
+Loop output directories are expected to be new. The tool refuses to replace
+generated plan files, which keeps comparisons replayable.

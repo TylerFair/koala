@@ -1,126 +1,108 @@
-# {{ project }}
+# Koala
 
-{{ project }} fits JWST transit light curves from extracted box-spectrum FITS files. It fits a white-light curve first, passes the orbital geometry to wavelength channels, and writes light-curve diagnostics and transmission spectra.
+**Kool exOplAnet Lightcurve Analysis**
 
-## How it works
+## JWST light-curve fitting, from transits to phase curves
 
-The white-light fit measures the shared transit geometry and visit-level systematics at high signal-to-noise. Spectroscopic fits then hold the posterior-median geometry fixed and infer one radius ratio, limb profile, jitter term, and trend per wavelength channel. Channels run in GPU-resident chunks, and every exact posterior must pass an effective-sample-size and divergence gate before it is accepted. Read [How the fit works](concepts.md) before choosing a limb prior or sampler.
+Koala fits extracted JWST time-series spectra. Give it a FITS extraction
+and a short YAML file; it fits the white-light transit, carries the shared
+geometry into every wavelength channel, and produces a transmission spectrum
+with diagnostics you can inspect. JAXoplanet fits also support
+[eclipses, thermal phase curves, and stellar spots](guides/phase_curves.md).
 
-```bash
-conda activate jaxoplanet
-export JAX_ENABLE_X64=1
-export JAX_PLATFORMS=gpu
-cp configs_fiducial_stellarinformed/WASP-39_soss_order1_config.yaml config.yaml
-# Edit path, input_dir, output_dir, and fits_file in config.yaml.
-python fit_jwst.py -c config.yaml
-ls /path/from/config/output_dir
-python -c "import pandas as pd; print(pd.read_csv('/path/to/spectrum.csv').head())"
+Built for NIRISS/SOSS and NIRSpec, with GPU-parallel inference in JAX and
+NumPyro.
+
+```{button-ref} quickstart
+:color: primary
+:shadow:
+
+Fit your first dataset
 ```
 
-Features include:
+```{button-ref} install
+:color: secondary
 
-- JWST NIRISS/SOSS orders 1 and 2.
-- NIRSpec G395H, G395M, G140H, G235H, and PRISM, including NRS1/NRS2 selection.
-- White-light, low-resolution, and high-resolution spectroscopic stages.
-- Stellar-informed, Sing, fixed, wide-Gaussian, and free limb darkening.
-- Polynomial, spot, discontinuity, exponential-ramp, and GP systematics.
-- Laplace-metric HMC samplers implemented in JAX for GPUs.
-- Harmonica transmission-string fits for limb asymmetry.
+Install Koala
+```
+
+```{image} _static/soss_wasp39_spectrum.png
+:alt: NIRISS/SOSS transmission spectrum of WASP-39 b fitted with Koala
+:class: hero-figure
+:width: 760px
+:align: center
+```
+
+## The workflow
+
+1. Start from the example for your instrument and point it at an extracted
+   box-spectrum FITS file.
+2. Inspect the white-light fit and residuals before trusting the spectrum.
+3. Choose a trend and limb-darkening treatment supported by the data.
+4. Resume, compare, or stack models without changing the basic workflow.
+
+The numerical machinery stays behind the configuration file. The
+[Introduction](concepts.md) explains what the stages mean when you are ready
+to make scientific choices.
+
+## Tutorials
+
+::::{grid} 1 2 2 2
+:gutter: 2
+
+:::{grid-item-card} Fit your first transit
+:link: tutorials/soss_order1
+:link-type: doc
+
+Run a NIRISS/SOSS example and learn which output plots matter first.
+:::
+
+:::{grid-item-card} Choose a systematics trend
+:link: guides/trends
+:link-type: doc
+
+Compare linear, polynomial, ramp, step, spot, and GP descriptions.
+:::
+
+:::{grid-item-card} Choose limb darkening
+:link: guides/limb_darkening
+:link-type: doc
+
+Understand the five `ld_prior` choices and when each applies.
+:::
+
+:::{grid-item-card} Marginalize over models
+:link: guides/model_stacking
+:link-type: doc
+
+Propagate disagreement between plausible light-curve models into the spectrum.
+:::
+::::
+
+## Other observing modes
+
+- [WASP-39 b G395H secondary eclipse](tutorials/wasp39_eclipse.md) presents a real $R=300$ emission spectrum.
+- [Synthetic eclipses, phase curves, and stellar spots](tutorials/synthetic_surfaces.md)
+  demonstrates emission spectra, thermal maps, corner plots, and residual checks.
+- [NIRSpec/G395H](tutorials/nirspec_g395h.md) covers detector-aware fitting.
+- [NIRSpec/PRISM](tutorials/prism.md) covers long time series and ramps.
+- [Harmonica](tutorials/harmonica.md) covers asymmetric transit shapes.
 
 ```{toctree}
-:maxdepth: 2
-:caption: Getting started
+:hidden:
+:maxdepth: 1
 
 install
-quickstart
 concepts
+quickstart
 faq
 ```
 
 ```{toctree}
-:maxdepth: 2
-:caption: Tutorials
+:hidden:
+:maxdepth: 1
 
-tutorials/soss_order1
-tutorials/nirspec_g395h
+tutorials/index
 tutorials/wasp39_eclipse
-tutorials/prism
-tutorials/harmonica
-tutorials/executed_notebooks
-tutorials/synthetic_surfaces
+reference
 ```
-
-```{toctree}
-:maxdepth: 2
-:caption: Guides
-
-guides/limb_darkening
-guides/phase_curves
-guides/trends
-guides/samplers
-guides/configuration
-guides/outputs
-guides/gpu_and_clusters
-guides/model_stacking
-guides/loop_mode
-api
-citing
-```
-
-## Choose a starting point
-
-New users should run the [quickstart](quickstart.md), then read [How the fit works](concepts.md). SOSS users can begin with the [order-1 tutorial](tutorials/soss_order1.md). NIRSpec users can begin with [G395H](tutorials/nirspec_g395h.md) or [PRISM](tutorials/prism.md).
-
-Asymmetric ingress/egress analyses should begin with the [Harmonica tutorial](tutorials/harmonica.md).
-
-## Analysis sequence
-
-1. Prepare a box-spectrum FITS extraction.
-
-2. Choose the detector or SOSS order.
-
-3. Choose low- and high-resolution wavelength grids.
-
-4. Choose the limb-darkening law and prior.
-
-5. Select the simplest trend supported by the white-light baseline.
-
-6. Fit white light and inspect its residuals.
-
-7. Run any required low-resolution calibration stage.
-
-8. Sample high-resolution channels in checkpointed chunks.
-
-9. Check ESS and divergences.
-
-10. Read the accepted depth posteriors from the spectrum CSV.
-
-## Supported observing modes
-
-NIRISS/SOSS is selected with `instrument: NIRISS/SOSS` and an `order`. NIRSpec modes are selected with their full instrument string and `nrs` detector number. G395H and G395M cover the long-wavelength NIRSpec detectors.
-
-G140H and G235H use the same detector-aware configuration structure. PRISM supports native or constant-resolving-power channel grids. NRS1 and NRS2 are fitted separately.
-
-SOSS orders 1 and 2 are fitted separately.
-
-## Principal products
-
-Every run writes white-light diagnostic plots and a time-series table. Spectroscopic stages write one transmission-spectrum CSV per resolution. Detailed tables include radius ratio, depth, limb darkening, jitter, and active trend parameters.
-
-Chunk checkpoints make long GPU runs resumable. JSON diagnostics record numerical quality. Harmonica adds limb spectra, transmission-string figures, and joint limb posterior arrays.
-
-## Configuration philosophy
-
-The YAML is the analysis record. Keep target values, stellar values, extraction paths, model choices, and sampler controls together. Use a new output directory for a scientifically distinct configuration.
-
-Set a random seed explicitly for a published analysis. Archive the geometry handoff and diagnostics beside the final spectrum.
-
-## Glossary
-
-**White light:** the wavelength-summed transit time series. **Channel:** one wavelength-bin light curve. **Chunk:** a group of channels evaluated by one compiled sampler call.
-
-**Lane:** one independent channel position inside a vectorized chunk. **Bridge stage:** the optional low-resolution spectroscopic fit. **Geometry handoff:** fixed orbital quantities selected from white light.
-
-**Laplace metric:** local inverse-Hessian scaling used by NUTS or HMC. **Gate:** the ESS and divergence criteria required before accepting a posterior. **Reference grid:** an externally supplied wavelength grid used for binning.
-
-**Transmission string:** Harmonica's angle-dependent planet radius boundary.

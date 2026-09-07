@@ -20,29 +20,30 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _literal_flag_keys():
     """Return literal keys used through the local ``flags`` mapping."""
-    source = (ROOT / "fit_jwst.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
     keys = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "flags"
-            and node.func.attr in {"get", "setdefault", "pop"}
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
-            and isinstance(node.args[0].value, str)
-        ):
-            keys.add(node.args[0].value)
-        if (
-            isinstance(node, ast.Subscript)
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "flags"
-            and isinstance(node.slice, ast.Constant)
-            and isinstance(node.slice.value, str)
-        ):
-            keys.add(node.slice.value)
+    paths = [ROOT / "fit_jwst.py", *(ROOT / "koala").rglob("*.py")]
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "flags"
+                and node.func.attr in {"get", "setdefault", "pop"}
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                keys.add(node.args[0].value)
+            if (
+                isinstance(node, ast.Subscript)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "flags"
+                and isinstance(node.slice, ast.Constant)
+                and isinstance(node.slice.value, str)
+            ):
+                keys.add(node.slice.value)
     return keys
 
 
@@ -67,7 +68,11 @@ def _markdown_yaml_documents():
 
 
 def _printed_literal_text():
-    paths = [ROOT / "fit_jwst.py", *(ROOT / "models").rglob("*.py")]
+    paths = [
+        ROOT / "fit_jwst.py",
+        *(ROOT / "koala").rglob("*.py"),
+        *(ROOT / "models").rglob("*.py"),
+    ]
     for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -144,7 +149,8 @@ def test_notebook_smoke_profile_is_internal_only():
     assert apply_bounded_demo_runtime(config) is config
     added = set(config["flags"]) - original
     assert added
-    assert added <= fit_jwst.INTERNAL_FLAGS
+    assert {"whitelight_num_warmup", "whitelight_num_samples",
+            "highres_num_warmup", "highres_num_samples"} <= added
 
 
 def test_documented_yaml_flags_are_public_or_advanced():

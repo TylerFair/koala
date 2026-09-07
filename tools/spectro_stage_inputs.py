@@ -12,6 +12,93 @@ from typing import Any, Mapping
 import jax
 import jax.numpy as jnp
 import numpy as np
+
+
+def _component_series(array, num_channels):
+    array = np.asarray(array)
+    if array.ndim < 2 or array.shape[1] != num_channels:
+        return []
+    trailing = array.shape[2:]
+    if not trailing:
+        return [("", array)]
+    return [
+        (
+            "[" + ",".join(str(index) for index in component) + "]",
+            array[(slice(None), slice(None), *component)],
+        )
+        for component in np.ndindex(trailing)
+    ]
+
+
+def _reference_channels(array, start, end, candidate_channels):
+    if array.ndim < 2 or array.shape[1] == candidate_channels:
+        return array
+    if array.shape[1] >= end:
+        return array[:, start:end]
+    raise ValueError(
+        f"Reference channel axis {array.shape[1]} cannot provide {start}:{end}."
+    )
+
+
+def _safe_scaled_shift(value, reference, sigma):
+    difference = float(value - reference)
+    if sigma > 0.0:
+        return difference / sigma
+    return 0.0 if difference == 0.0 else float(np.copysign(np.inf, difference))
+
+
+def compare_samples(candidate, reference, start, end):
+    """Compare matching per-channel posterior components from two stage runs."""
+    num_channels = end - start
+    rows = []
+    for site in sorted(set(candidate) & set(reference)):
+        candidate_components = dict(
+            _component_series(np.asarray(candidate[site]), num_channels)
+        )
+        reference_components = dict(
+            _component_series(
+                _reference_channels(
+                    np.asarray(reference[site]), start, end, num_channels
+                ),
+                num_channels,
+            )
+        )
+        for suffix in sorted(set(candidate_components) & set(reference_components)):
+            for channel in range(num_channels):
+                cand = np.asarray(candidate_components[suffix][:, channel], dtype=float)
+                ref = np.asarray(reference_components[suffix][:, channel], dtype=float)
+                cand_q16, cand_median, cand_q84 = np.percentile(cand, [16, 50, 84])
+                ref_q16, ref_median, ref_q84 = np.percentile(ref, [16, 50, 84])
+                ref_sigma = float(np.std(ref, ddof=1)) if ref.size > 1 else 0.0
+                cand_sigma = float(np.std(cand, ddof=1)) if cand.size > 1 else 0.0
+                median_z = abs(_safe_scaled_shift(cand_median, ref_median, ref_sigma))
+                sigma_ratio = (
+                    cand_sigma / ref_sigma
+                    if ref_sigma > 0.0
+                    else (1.0 if cand_sigma == 0.0 else float("inf"))
+                )
+                passed = bool(median_z < 0.1 and 0.9 <= sigma_ratio <= 1.1)
+                rows.append({
+                    "site": f"{site}{suffix}",
+                    "channel": start + channel,
+                    "abs_median_shift_ref_sigma": median_z,
+                    "sigma_ratio": sigma_ratio,
+                    "p16_shift_ref_sigma": _safe_scaled_shift(
+                        cand_q16, ref_q16, ref_sigma
+                    ),
+                    "p84_shift_ref_sigma": _safe_scaled_shift(
+                        cand_q84, ref_q84, ref_sigma
+                    ),
+                    "pass": passed,
+                })
+    if not rows:
+        raise ValueError("Candidate and reference have no comparable per-channel sites.")
+    return {
+        "pass": all(row["pass"] for row in rows),
+        "num_rows": len(rows),
+        "num_failed": sum(not row["pass"] for row in rows),
+        "rows": rows,
+    }
 import numpyro
 
 
@@ -119,7 +206,7 @@ class StageInputs:
         return int(np.shape(self.y)[1])
 
     def select(self, start: int, end: int) -> "StageInputs":
-        """Select channels exactly as ``fit_jwst.get_samples_chunked`` does."""
+        """Select channels exactly as ``koala.sampling.get_samples_chunked`` does."""
         if not (0 <= int(start) < int(end) <= self.num_channels):
             raise ValueError(
                 f"Channel slice must satisfy 0 <= start < end <= "
