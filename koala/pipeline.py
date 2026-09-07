@@ -592,6 +592,27 @@ def run(cfg, config_path=None):
             f"flags.transit_engine={transit_engine!r}."
         )
     transit_window_optimization = 'auto'
+    spectro_cadence_reduction = str(
+        flags.get('spectro_cadence_reduction', 'auto')
+    ).strip().lower()
+    if spectro_cadence_reduction not in {'auto', 'off'}:
+        raise ValueError(
+            "flags.spectro_cadence_reduction must be 'auto' or 'off'."
+        )
+    spectro_transit_grid = str(
+        flags.get('spectro_transit_grid', 'auto')
+    ).strip().lower()
+    if spectro_transit_grid not in {'auto', 'off'}:
+        raise ValueError(
+            "flags.spectro_transit_grid must be 'auto' or 'off'."
+        )
+    spectro_transit_grid_nodes = int(
+        flags.get('spectro_transit_grid_nodes', 769)
+    )
+    if spectro_transit_grid_nodes < 13:
+        raise ValueError(
+            "flags.spectro_transit_grid_nodes must be at least 13."
+        )
     vmap_chunk = flags.get('spectro_chunk_size', flags.get('vmap_chunk', False))
     vmap_chunk_size = None
     if isinstance(vmap_chunk, str) and vmap_chunk.lower() == 'auto':
@@ -796,6 +817,9 @@ def run(cfg, config_path=None):
             'ld_profile': ld_profile,
             'param_method': param_method,
             'transit_window': transit_window_optimization,
+            'cadence_reduction': spectro_cadence_reduction,
+            'transit_grid': spectro_transit_grid,
+            'transit_grid_nodes': spectro_transit_grid_nodes,
             'ld_parameterization': spectro_ld_parameterization,
             'ld_uniform_basis': ld_uniform_basis,
             'ld_uniform_coefficient_bounds': tuple(ld_uniform_coefficient_bounds),

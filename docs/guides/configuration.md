@@ -87,6 +87,9 @@ These controls affect execution rather than the scientific model:
 flags:
   random_seed: 555
   spectro_chunk_size: 20
+  spectro_cadence_reduction: auto
+  spectro_transit_grid: auto
+  spectro_transit_grid_nodes: 769
   analysis_stage: all
 ```
 
@@ -94,6 +97,22 @@ flags:
 The default is 40 for the independent samplers; lower it after an out-of-memory
 error. It does not change the wavelength bins. The older spelling `vmap_chunk`
 is still accepted.
+
+`spectro_cadence_reduction` can be `auto` (the default) or `off`. For the
+fixed-timescale spectroscopic exponential-linear trend with more than 5,000
+cadences, `auto` evaluates the likelihood directly in the transit windows and
+uses exact, reported-error-grouped sufficient statistics outside them. Masked
+cadences are excluded from both pieces.
+
+`spectro_transit_grid` can also be `auto` (the default) or `off`. On ordinary
+duration-parameterized transit stages with more than 5,000 cadences, `auto`
+evaluates the limb-darkened model on a contact-aware Chebyshev grid and
+interpolates a separate model value for every transit-window cadence. It is
+not time binning: all observed fluxes, errors, and likelihood residuals remain
+separate. `spectro_transit_grid_nodes` sets the total nodes (default `769`);
+the default has a measured full-prior maximum interpolation error below 0.01
+ppm for the PRISM validation geometry. Short light curves, Keplerian geometry,
+and surface models retain the original path.
 
 `analysis_stage` can be `all`, `whitelight`, `prep`, or `highres`. A normal
 run uses `all`; staged cluster runs are described in [GPUs and clusters](gpu_and_clusters.md).
@@ -103,7 +122,9 @@ unless you have a reason to compare backends; see [Samplers](samplers.md).
 
 Advanced execution controls are `chunk_mode`, `chunk_parallel_job_count`,
 `chunk_parallel_job_index`, `spectro_sampler`, `spectro_min_depth_ess`,
-`spectro_max_divergences`, `jax_compilation_cache_dir`, and `plots`. Scientific
+`spectro_max_divergences`, `spectro_cadence_reduction`,
+`spectro_transit_grid`, `spectro_transit_grid_nodes`,
+`jax_compilation_cache_dir`, and `plots`. Scientific
 advanced controls are `transit_engine`, `trend_inference`, `ld_uniform_basis`,
 `harmonica_max_order`, `harmonica_spectro_parameterization`,
 `harmonica_spectro_fit_jitter`, and `harmonica_spectro_odd_frac_sigma`.

@@ -78,6 +78,7 @@ from models.gp import (
     compute_lc_cubic_gp_mean, compute_lc_quartic_gp_mean, compute_lc_explinear_gp_mean
 )
 from models.detrend import resolve_detrend_kernel
+from models.cadence_reduction import build_explinear_oot_statistics
 from models.trend_marginal import (
     marginalized_trend_coefficient_names,
     materialize_marginalized_trend_samples,
@@ -184,6 +185,7 @@ for _module in (artifacts, config, constants, data, geometry, harmonica_products
                 limb_darkening, outputs, sampling, surface):
     globals().update({name: value for name, value in vars(_module).items()
                       if not name.startswith("__")})
+
 
 def _run_low_resolution_stage_hook(
     A_RS_BASE,
@@ -510,7 +512,13 @@ def _run_low_resolution_stage_hook(
             'trend_mode': lr_trend_mode,
             'n_planets': n_planets,
             **(
-                {'transit_window_indices': lr_transit_window_indices}
+                {
+                    'transit_window_indices': lr_transit_window_indices,
+                    'transit_grid_non_grazing': bool(
+                        np.max(np.abs(np.asarray(B_BASE)))
+                        < 1.0 - np.sqrt(0.5)
+                    ),
+                }
                 if transit_engine == 'jaxoplanet' else {}
             ),
             **_engine_spectro_kw,
@@ -625,6 +633,28 @@ def _run_low_resolution_stage_hook(
             )
             model_run_args_lr['exp_trend'] = exp_trend_lr
             model_run_args_lr['fixed_tau'] = fixed_tau_spectro
+
+        if (
+            transit_engine == 'jaxoplanet'
+            and _engine_spectro_kw.get('cadence_reduction') == 'auto'
+            and int(time_lr.size) > 5000
+            and lr_trend_mode == 'free'
+            and detrend_type_multiwave == 'explinear_spectroscopic'
+            and lr_transit_window_indices is not None
+        ):
+            reference_beta_lr = np.column_stack((
+                np.asarray(init_params_lr['c']),
+                np.asarray(init_params_lr['v']),
+                np.asarray(init_params_lr['A']),
+            ))
+            model_run_args_lr.update(build_explinear_oot_statistics(
+                time_lr,
+                flux_lr,
+                flux_err_lr,
+                lr_transit_window_indices,
+                exp_trend_lr,
+                reference_beta_lr,
+            ))
 
         trend_names_lr = None
         if lr_trend_mode == 'gaussian_marginalized':
@@ -846,6 +876,9 @@ def _run_low_resolution_stage_hook(
             param_method=param_method,
             n_planets=n_planets,
             transit_window=transit_window_optimization,
+            transit_grid_non_grazing=lr_model_builder_kwargs.get(
+                'transit_grid_non_grazing', False
+            ),
         )
 
         samples_lr = _run_sampling_stage(
@@ -885,6 +918,15 @@ def _run_low_resolution_stage_hook(
                 ),
                 'jaxoplanet_kernel': jaxoplanet_kernel,
                 'transit_window_optimization': transit_window_optimization,
+                'spectro_cadence_reduction': _engine_spectro_kw.get(
+                    'cadence_reduction', 'off'
+                ),
+                'spectro_transit_grid': _engine_spectro_kw.get(
+                    'transit_grid', 'off'
+                ),
+                'spectro_transit_grid_nodes': _engine_spectro_kw.get(
+                    'transit_grid_nodes'
+                ),
                 'surface_config': surface_config,
                 'harmonica_max_order': max_harmonic_order,
                 'harmonica_spectro_parameterization': harmonica_spectro_parameterization,
@@ -1432,7 +1474,13 @@ def _run_high_resolution_stage_hook(
         'trend_mode': hr_trend_mode,
         'n_planets': n_planets,
         **(
-            {'transit_window_indices': hr_transit_window_indices}
+            {
+                'transit_window_indices': hr_transit_window_indices,
+                'transit_grid_non_grazing': bool(
+                    np.max(np.abs(np.asarray(B_BASE)))
+                    < 1.0 - np.sqrt(0.5)
+                ),
+            }
             if transit_engine == 'jaxoplanet' else {}
         ),
         **_engine_spectro_kw,
@@ -1515,6 +1563,28 @@ def _run_high_resolution_stage_hook(
         model_run_args_hr['exp_trend'] = exp_trend_hr
         model_run_args_hr['fixed_tau'] = fixed_tau_spectro
 
+    if (
+        transit_engine == 'jaxoplanet'
+        and _engine_spectro_kw.get('cadence_reduction') == 'auto'
+        and int(time_hr.size) > 5000
+        and hr_trend_mode == 'free'
+        and detrend_type_multiwave == 'explinear_spectroscopic'
+        and hr_transit_window_indices is not None
+    ):
+        reference_beta_hr = np.column_stack((
+            np.asarray(init_params_hr['c']),
+            np.asarray(init_params_hr['v']),
+            np.asarray(init_params_hr['A']),
+        ))
+        model_run_args_hr.update(build_explinear_oot_statistics(
+            time_hr,
+            flux_hr,
+            flux_err_hr,
+            hr_transit_window_indices,
+            exp_trend_hr,
+            reference_beta_hr,
+        ))
+
     trend_names_hr = None
     if hr_trend_mode == 'gaussian_marginalized':
         (
@@ -1564,6 +1634,9 @@ def _run_high_resolution_stage_hook(
         param_method=param_method,
         n_planets=n_planets,
         transit_window=transit_window_optimization,
+        transit_grid_non_grazing=hr_model_builder_kwargs.get(
+            'transit_grid_non_grazing', False
+        ),
     )
 
     if (
@@ -1611,6 +1684,15 @@ def _run_high_resolution_stage_hook(
             ),
             'jaxoplanet_kernel': jaxoplanet_kernel,
             'transit_window_optimization': transit_window_optimization,
+            'spectro_cadence_reduction': _engine_spectro_kw.get(
+                'cadence_reduction', 'off'
+            ),
+            'spectro_transit_grid': _engine_spectro_kw.get(
+                'transit_grid', 'off'
+            ),
+            'spectro_transit_grid_nodes': _engine_spectro_kw.get(
+                'transit_grid_nodes'
+            ),
             'surface_config': surface_config,
             'harmonica_max_order': max_harmonic_order,
             'harmonica_spectro_parameterization': harmonica_spectro_parameterization,

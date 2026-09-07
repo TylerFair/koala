@@ -28,6 +28,9 @@ from ..trends import (
 )
 
 
+_AUTO_CADENCE_REDUCTION_THRESHOLD = 5000
+
+
 def _enforce_decorrelated_coefficient_support(coefficients, low, high):
     """Apply a numerically zero outside-support density and safe model values."""
     coefficients = jnp.asarray(coefficients)
@@ -59,6 +62,7 @@ from ..harmonica.core import (
 from .core import (
     build_transit_phase_offsets,
     compute_transit_model,
+    compute_transit_model_window,
     resolve_jaxoplanet_kernel,
 )
 from models.limb_darkening_config import GAUSSIAN_LD_WIDTH
@@ -944,6 +948,10 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                             n_planets=1, ld_profile='quadratic',
                             param_method='duration', transit_window='off',
                             transit_window_indices=None,
+                            cadence_reduction='off',
+                            transit_grid='off',
+                            transit_grid_nodes=769,
+                            transit_grid_non_grazing=False,
                             jaxoplanet_kernel='auto',
                             surface_config=None,
                             surface_basis=None,
@@ -1010,6 +1018,16 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
     )
     if transit_window not in {'auto', 'off'}:
         raise ValueError("transit_window must be either 'auto' or 'off'.")
+    cadence_reduction = str(cadence_reduction).lower()
+    if cadence_reduction not in {'auto', 'off'}:
+        raise ValueError("cadence_reduction must be either 'auto' or 'off'.")
+    transit_grid = str(transit_grid).lower()
+    if transit_grid not in {'auto', 'off'}:
+        raise ValueError("transit_grid must be either 'auto' or 'off'.")
+    transit_grid_nodes = int(transit_grid_nodes)
+    if transit_grid_nodes < 13:
+        raise ValueError("transit_grid_nodes must be at least 13.")
+    transit_grid_non_grazing = bool(transit_grid_non_grazing)
     use_transit_window = (
         transit_window == 'auto'
         and transit_window_indices is not None
@@ -1022,6 +1040,28 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
         if transit_window_indices.ndim != 1:
             raise ValueError("transit_window_indices must be one-dimensional.")
     detrend_components = _split_components(detrend_type)
+    cadence_reduction_eligible = (
+        cadence_reduction == 'auto'
+        and use_transit_window
+        and ld_profile == 'power2'
+        and n_planets == 1
+        and surface_config.get("model") == "transit"
+        and not surface_config.get("spots")
+        and transit_grid_non_grazing
+        and trend_mode == 'free'
+        and detrend_components == {'explinear_spectroscopic'}
+    )
+    transit_grid_eligible = (
+        transit_grid == 'auto'
+        and use_transit_window
+        and n_planets == 1
+        and param_method == 'duration'
+        and surface_config.get("model") == "transit"
+        and not surface_config.get("spots")
+        and ld_profile == 'power2'
+        and ld_mode != 'interpolated'
+        and transit_grid_non_grazing
+    )
     unsupported_non_spectroscopic = {'spot', '2spot', 'linear_discontinuity'}
     if detrend_components & unsupported_non_spectroscopic:
         unsupported = ", ".join(sorted(detrend_components & unsupported_non_spectroscopic))
@@ -1048,9 +1088,23 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                           likelihood_mask=None, ld_center=None, ld_scale=None,
                           ld_low=None, ld_high=None, ld_map_code=0,
                           ld_latent_low=None, ld_latent_high=None,
-                          surface_basis_data=None):
+                          surface_basis_data=None,
+                          oot_reference_beta=None,
+                          oot_group_yerr=None,
+                          oot_group_count=None,
+                          oot_group_reference_sse=None,
+                          oot_group_x_reference_residual=None,
+                          oot_group_xx=None):
 
         num_lcs = jnp.atleast_2d(yerr).shape[0]
+        use_cadence_reduction = (
+            cadence_reduction_eligible
+            and int(jnp.shape(t)[0]) > _AUTO_CADENCE_REDUCTION_THRESHOLD
+        )
+        use_transit_grid = (
+            transit_grid_eligible
+            and int(jnp.shape(t)[0]) > _AUTO_CADENCE_REDUCTION_THRESHOLD
+        )
         t0s = mu_t0
         bs = mu_b
 
@@ -1285,6 +1339,13 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
         if use_transit_window:
             params["_transit_window_indices"] = transit_window_indices
             in_axes["_transit_window_indices"] = None
+        if use_transit_grid:
+            params['_transit_grid_nodes'] = transit_grid_nodes
+            in_axes['_transit_grid_nodes'] = None
+            params['_transit_grid_c1'] = c1
+            params['_transit_grid_c2'] = c2
+            in_axes['_transit_grid_c1'] = 0
+            in_axes['_transit_grid_c2'] = 0
 
         surface_params = _sample_surface_parameters(
             surface_config, n_planets, num_lcs=num_lcs
@@ -1465,6 +1526,205 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                     in_axes.update({'spot_amp': 0, 'spot_mu': 0, 'spot_sigma': 0})
             else:
                 raise ValueError(f"Unknown trend_mode: {trend_mode}")
+
+        if use_cadence_reduction:
+            statistics = (
+                oot_reference_beta,
+                oot_group_yerr,
+                oot_group_count,
+                oot_group_reference_sse,
+                oot_group_x_reference_residual,
+                oot_group_xx,
+            )
+            if y is None or any(value is None for value in statistics):
+                raise ValueError(
+                    "cadence_reduction='auto' requires observed y and the "
+                    "precomputed out-of-transit sufficient statistics."
+                )
+            indices = transit_window_indices
+            if use_transit_grid:
+                from jaxoplanet.core.limb_dark import (
+                    light_curve as stock_light_curve,
+                )
+                from .limb_dark_streamed import (
+                    light_curve as streamed_light_curve,
+                )
+                from .transit_grid import (
+                    power2_grid_reduced_log_likelihood,
+                )
+
+                selected_kernel = resolve_jaxoplanet_kernel(
+                    jaxoplanet_kernel,
+                    ld_profile=ld_profile,
+                    degree=int(jnp.shape(u)[-1]),
+                    keplerian=False,
+                )
+                grid_kernel = (
+                    streamed_light_curve
+                    if selected_kernel == 'streamed'
+                    else stock_light_curve
+                )
+                active_y = jnp.atleast_2d(
+                    jnp.asarray(y, dtype=jnp.float64)
+                )[:, indices]
+                active_yerr = yerr_matrix[:, indices]
+                if likelihood_mask is None:
+                    active_mask = jnp.ones_like(active_y, dtype=bool)
+                else:
+                    active_mask = jnp.broadcast_to(
+                        jnp.asarray(likelihood_mask, dtype=bool),
+                        jnp.shape(jnp.atleast_2d(y)),
+                    )[:, indices]
+                reference_beta = jnp.atleast_2d(jnp.asarray(
+                    oot_reference_beta, dtype=jnp.float64
+                ))
+                group_error = jnp.atleast_2d(jnp.asarray(
+                    oot_group_yerr, dtype=jnp.float64
+                ))
+                group_count = jnp.atleast_2d(jnp.asarray(
+                    oot_group_count, dtype=jnp.float64
+                ))
+                group_reference_sse = jnp.atleast_2d(jnp.asarray(
+                    oot_group_reference_sse, dtype=jnp.float64
+                ))
+                group_xr = jnp.asarray(
+                    oot_group_x_reference_residual, dtype=jnp.float64
+                )
+                group_xx = jnp.asarray(oot_group_xx, dtype=jnp.float64)
+                if group_xr.ndim == 2:
+                    group_xr = group_xr[None, ...]
+                    group_xx = group_xx[None, ...]
+                theta = jnp.stack((
+                    rors[:, 0],
+                    c1,
+                    c2,
+                    params['c'],
+                    params['v'],
+                    params['A'],
+                    jitter,
+                ), axis=1)
+                phase_active = params['_transit_phase_offsets'][0, indices]
+                phase_mask_active = params['_transit_phase_mask'][0, indices]
+                time_basis = t[indices] - jnp.min(t)
+                exp_basis = jnp.asarray(exp_trend)[indices]
+
+                def lane_log_likelihood(
+                    lane_theta,
+                    lane_u,
+                    lane_y,
+                    lane_yerr,
+                    lane_mask,
+                    lane_reference_beta,
+                    lane_group_error,
+                    lane_group_count,
+                    lane_reference_sse,
+                    lane_group_xr,
+                    lane_group_xx,
+                ):
+                    return power2_grid_reduced_log_likelihood(
+                        grid_kernel,
+                        lane_theta,
+                        lane_u,
+                        phase_active,
+                        phase_mask_active,
+                        time_basis,
+                        exp_basis,
+                        lane_y,
+                        lane_yerr,
+                        lane_mask,
+                        lane_reference_beta,
+                        lane_group_error,
+                        lane_group_count,
+                        lane_reference_sse,
+                        lane_group_xr,
+                        lane_group_xx,
+                        duration=mu_duration[0],
+                        impact=bs[0],
+                        num_nodes=transit_grid_nodes,
+                        order=10,
+                    )
+
+                reduced_log_prob = jax.vmap(lane_log_likelihood)(
+                    theta,
+                    u,
+                    active_y,
+                    active_yerr,
+                    active_mask,
+                    reference_beta,
+                    group_error,
+                    group_count,
+                    group_reference_sse,
+                    group_xr,
+                    group_xx,
+                )
+                numpyro.factor('obs_active', jnp.sum(reduced_log_prob[:, 0]))
+                numpyro.factor(
+                    'obs_out_of_window', jnp.sum(reduced_log_prob[:, 1])
+                )
+                return
+
+            transit_active = jax.vmap(
+                compute_transit_model_window,
+                in_axes=(in_axes, None),
+            )(params, t)
+            time_active = t[indices]
+            trend_active = (
+                params['c'][:, None]
+                + params['v'][:, None] * (time_active - jnp.min(t))
+                + params['A'][:, None] * jnp.asarray(exp_trend)[indices]
+            )
+            active_model = transit_active + trend_active
+            active_error = error_broadcast[:, indices]
+            active_y = jnp.atleast_2d(
+                jnp.asarray(y, dtype=jnp.float64)
+            )[:, indices]
+            active_log_prob = dist.Normal(
+                active_model, active_error
+            ).log_prob(active_y)
+            if likelihood_mask is not None:
+                active_mask = jnp.asarray(likelihood_mask, dtype=bool)
+                active_mask = jnp.broadcast_to(
+                    active_mask, jnp.shape(jnp.atleast_2d(y))
+                )[:, indices]
+                active_log_prob = jnp.where(
+                    active_mask, active_log_prob, 0.0
+                )
+            numpyro.factor('obs_active', jnp.sum(active_log_prob))
+
+            reference_beta = jnp.atleast_2d(jnp.asarray(
+                oot_reference_beta, dtype=jnp.float64
+            ))
+            beta = jnp.stack(
+                (params['c'], params['v'], params['A']), axis=1
+            )
+            delta = beta - reference_beta
+            group_xr = jnp.asarray(
+                oot_group_x_reference_residual, dtype=jnp.float64
+            )
+            group_xx = jnp.asarray(oot_group_xx, dtype=jnp.float64)
+            if group_xr.ndim == 2:
+                group_xr = group_xr[None, ...]
+                group_xx = group_xx[None, ...]
+            group_sse = (
+                jnp.atleast_2d(jnp.asarray(
+                    oot_group_reference_sse, dtype=jnp.float64
+                ))
+                - 2.0 * jnp.einsum('lp,lgp->lg', delta, group_xr)
+                + jnp.einsum('lp,lgpq,lq->lg', delta, group_xx, delta)
+            )
+            group_count = jnp.atleast_2d(jnp.asarray(
+                oot_group_count, dtype=jnp.float64
+            ))
+            group_error = jnp.atleast_2d(jnp.asarray(
+                oot_group_yerr, dtype=jnp.float64
+            ))
+            group_variance = group_error**2 + jitter[:, None]**2
+            group_log_prob = -0.5 * (
+                group_sse / group_variance
+                + group_count * jnp.log(2.0 * jnp.pi * group_variance)
+            )
+            numpyro.factor('obs_out_of_window', jnp.sum(group_log_prob))
+            return
 
         if 'explinear_spectroscopic' in detrend_components:
             y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(

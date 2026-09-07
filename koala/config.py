@@ -148,7 +148,7 @@ def _resolve_stage_vmap_width(
     *,
     num_cadences,
     mcmc_kwargs,
-    **unused,
+    **context,
 ):
     """Resolve the documented automatic resident width."""
     if str(default_width).lower() != 'auto':
@@ -164,13 +164,32 @@ def _resolve_stage_vmap_width(
             "spectro_chunk_size='auto' requires a backend that reports "
             "memory_stats()['bytes_limit']."
         )
+    accelerated_long_cadence = (
+        int(num_cadences) > 5_000
+        and str(flags.get('spectro_cadence_reduction', 'auto')).lower()
+        == 'auto'
+        and str(flags.get('spectro_transit_grid', 'auto')).lower() == 'auto'
+        and context.get('sampler_backend') == 'independent_nuts'
+        and context.get('transit_engine') == 'jaxoplanet'
+        and context.get('ld_profile') == 'power2'
+        and context.get('ld_mode') != 'interpolated'
+        and context.get('trend_inference') == 'sampled_uniform'
+        and context.get('detrend_type') == 'explinear_spectroscopic'
+        and context.get('param_method') == 'duration'
+        and int(context.get('n_planets', 0)) == 1
+        and context.get('transit_window') == 'auto'
+        and bool(context.get('transit_grid_non_grazing', False))
+    )
     model = SpectroMemoryModel(
         intercept_bytes=160_000_000,
         bytes_per_lane=0.0,
-        bytes_per_lane_cadence=6_000.0,
+        bytes_per_lane_cadence=(2_500.0 if accelerated_long_cadence else 6_000.0),
         bytes_per_draw_lane=128.0,
     )
-    speed_cap = 4 if int(num_cadences) > 10_000 else 160
+    if int(num_cadences) > 10_000:
+        speed_cap = 40 if accelerated_long_cadence else 4
+    else:
+        speed_cap = 160
     width = resolve_spectro_auto_width(
         model,
         bytes_limit=bytes_limit,
@@ -183,6 +202,7 @@ def _resolve_stage_vmap_width(
     print(
         f"[spectro auto-width] stage={stage_name}, cadences={num_cadences}, "
         f"bytes_limit={bytes_limit}, headroom=25%, speed_cap={speed_cap}, "
+        f"cadence_acceleration={accelerated_long_cadence}, "
         f"selected={width} lanes.",
         flush=True,
     )

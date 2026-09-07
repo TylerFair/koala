@@ -58,6 +58,9 @@ FLAG_TIERS = {
         'plots',
         'random_seed',
         'spectro_chunk_size',
+        'spectro_cadence_reduction',
+        'spectro_transit_grid',
+        'spectro_transit_grid_nodes',
         'spectro_max_divergences',
         'spectro_min_depth_ess',
         'spectro_sampler',
@@ -99,6 +102,12 @@ JAXOPLANET_CHANNEL_VARYING_MODEL_KWARGS = (
     "trend_prior_mean",
     "trend_prior_scale",
     "surface_basis_data",
+    "oot_reference_beta",
+    "oot_group_yerr",
+    "oot_group_count",
+    "oot_group_reference_sse",
+    "oot_group_x_reference_residual",
+    "oot_group_xx",
 )
 
 

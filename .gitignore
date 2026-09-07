@@ -111,6 +111,11 @@ WALNUTS_GPU_FEASIBILITY.md
 *.sh
 !examples/*.sh
 tools/*
+!tools/profile_prism_cadence.py
+!tools/profile_prism_candidate_gpu.py
+!tools/benchmark_prism_cadence_reduction.py
+!tools/audit_prism_transit_grid.py
+!tools/run_prism_sampler_ab.py
 !tools/loop_fit.py
 !tools/stacking/
 !tools/spectro_stage_inputs.py

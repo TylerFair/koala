@@ -158,6 +158,7 @@ def _compute_transit_model_duration(params, t, *, kernel="stock"):
 
     phase_offsets = params.get(_TRANSIT_PHASE_OFFSETS_KEY)
     phase_mask = params.get(_TRANSIT_PHASE_MASK_KEY)
+    transit_grid_nodes = params.get("_transit_grid_nodes")
 
     if phase_offsets is not None:
         from jaxoplanet.core.limb_dark import light_curve as stock_light_curve
@@ -179,6 +180,41 @@ def _compute_transit_model_duration(params, t, *, kernel="stock"):
         lc_kernel = streamed_light_curve if kernel == "streamed" else stock_light_curve
 
         def get_lc_from_phase(duration, b, rors, dt, mask):
+            if transit_grid_nodes is not None:
+                from .transit_grid import (
+                    interpolate_duration_transit,
+                    interpolate_power2_duration_transit,
+                )
+
+                if (
+                    "_transit_grid_c1" in params
+                    and "_transit_grid_c2" in params
+                ):
+                    return interpolate_power2_duration_transit(
+                        lc_kernel,
+                        params["_transit_grid_c1"],
+                        params["_transit_grid_c2"],
+                        params["u"],
+                        dt,
+                        mask,
+                        duration=duration,
+                        impact=b,
+                        radius_ratio=rors,
+                        num_nodes=int(transit_grid_nodes),
+                        order=10,
+                    )
+
+                return interpolate_duration_transit(
+                    lc_kernel,
+                    params["u"],
+                    dt,
+                    mask,
+                    duration=duration,
+                    impact=b,
+                    radius_ratio=rors,
+                    num_nodes=int(transit_grid_nodes),
+                    order=10,
+                )
             speed = 2 * jnp.sqrt(
                 jnp.maximum(0, jnp.square(1 + rors) - jnp.square(b))
             ) / duration
@@ -282,3 +318,33 @@ def compute_transit_model(params, t, *, kernel=None, ld_profile=None):
         active_params, t[indices], kernel=selected_kernel
     )
     return jnp.zeros_like(t, dtype=active_flux.dtype).at[indices].set(active_flux)
+
+
+def compute_transit_model_window(params, t):
+    """Evaluate and return only the statically selected transit cadences."""
+    indices = params.get(_TRANSIT_WINDOW_INDEX_KEY)
+    if indices is None:
+        raise ValueError("A static transit window is required.")
+    indices = jnp.asarray(indices, dtype=jnp.int32)
+    requested_kernel = params.get(_JAXOPLANET_KERNEL_KEY, "auto")
+    profile = params.get(_LD_PROFILE_KEY)
+    degree = int(jnp.shape(params["u"])[-1])
+    selected_kernel = resolve_jaxoplanet_kernel(
+        requested_kernel,
+        ld_profile=profile,
+        degree=degree,
+        keplerian=False,
+    )
+    active_params = dict(params)
+    active_params.pop(_TRANSIT_WINDOW_INDEX_KEY, None)
+    if _TRANSIT_PHASE_OFFSETS_KEY in active_params:
+        active_params[_TRANSIT_PHASE_OFFSETS_KEY] = (
+            active_params[_TRANSIT_PHASE_OFFSETS_KEY][:, indices]
+        )
+        if _TRANSIT_PHASE_MASK_KEY in active_params:
+            active_params[_TRANSIT_PHASE_MASK_KEY] = (
+                active_params[_TRANSIT_PHASE_MASK_KEY][:, indices]
+            )
+    return _compute_transit_model_duration(
+        active_params, t[indices], kernel=selected_kernel
+    )

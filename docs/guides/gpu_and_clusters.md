@@ -51,9 +51,28 @@ flags:
   spectro_chunk_size: 20
 ```
 
-Try 10 or 4 for long native-cadence PRISM data or a more expensive model.
-This setting changes concurrency, not the wavelength grid or posterior. The
-legacy key `vmap_chunk` has the same role.
+Try 10 or 4 for a more expensive model. Long, ordinary power-2 PRISM transits
+with the default cadence acceleration now fit 40 resident channels on a 16 GB
+V100; `spectro_chunk_size: auto` selects at most 40 for that measured path and
+retains the conservative four-lane cap when the path is not eligible. This
+setting changes concurrency, not the wavelength grid or posterior. The legacy
+key `vmap_chunk` has the same role.
+
+For spectroscopic stages longer than 5,000 cadences, the default
+`spectro_cadence_reduction: auto` compresses the out-of-transit likelihood into
+exact sufficient statistics, and `spectro_transit_grid: auto` evaluates the
+transit on a contact-aware 769-node grid. The latter still evaluates a distinct
+model and likelihood residual at every observed cadence; it is not time
+binning. Both switches remain on the original code path for shorter SOSS and
+G395H series. Set either switch to `off` for a direct-kernel comparison.
+
+For reference, the audited HAT-P-65 NRS1 run on a 16 GB V100 used 40-channel
+chunks and completed white light, 42 R20 channels, and 369 native channels in
+21:10 with 5.66 GiB peak resident memory. The same tree with both switches
+off took 56:47 on the same V100, a 2.7x end-to-end speed-up, and the two
+native spectra agree to 0.03 sigma in every channel. Compilation and white-light work are
+included in both wall times, so individual spectroscopic potential evaluations
+show a larger speed-up.
 
 ## Checkpoints and wall time
 
