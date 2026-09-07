@@ -32,29 +32,62 @@ class _MemoryDevice:
         return {"bytes_limit": 12_701_761_536}
 
 
-def _prism_width(monkeypatch, flags):
+def _prism_width(monkeypatch, flags, **overrides):
     monkeypatch.setattr(config.jax, "devices", lambda: [_MemoryDevice()])
+    context = {
+        "sampler_backend": "independent_nuts",
+        "trend_inference": "sampled_uniform",
+        "transit_engine": "jaxoplanet",
+        "ld_profile": "power2",
+        "ld_mode": "stellarprior",
+        "detrend_type": "explinear_spectroscopic",
+        "param_method": "duration",
+        "n_planets": 1,
+        "transit_window": "auto",
+        "transit_grid_non_grazing": True,
+    }
+    context.update(overrides)
     return config._resolve_stage_vmap_width(
         flags,
         "highres",
         "auto",
         num_cadences=40_715,
         mcmc_kwargs={"num_samples": 1000},
-        sampler_backend="independent_nuts",
-        trend_inference="sampled_uniform",
-        transit_engine="jaxoplanet",
-        ld_profile="power2",
-        ld_mode="stellarprior",
-        detrend_type="explinear_spectroscopic",
-        param_method="duration",
-        n_planets=1,
-        transit_window="auto",
-        transit_grid_non_grazing=True,
+        **context,
     )
 
 
 def test_long_prism_auto_width_uses_measured_accelerated_cap(monkeypatch):
     assert _prism_width(monkeypatch, {}) == 40
+
+
+def test_long_quadratic_linear_prism_uses_accelerated_cap(monkeypatch):
+    assert _prism_width(
+        monkeypatch,
+        {},
+        ld_profile="quadratic",
+        ld_mode="uniform",
+        detrend_type="linear",
+        transit_grid_outer_contact_safe=True,
+    ) == 40
+
+
+def test_long_grazing_prism_uses_accelerated_cap(monkeypatch):
+    assert _prism_width(
+        monkeypatch,
+        {},
+        transit_grid_non_grazing=False,
+        transit_grid_outer_contact_safe=True,
+    ) == 40
+
+
+def test_outer_contact_unsafe_prism_retains_conservative_cap(monkeypatch):
+    assert _prism_width(
+        monkeypatch,
+        {},
+        transit_grid_non_grazing=False,
+        transit_grid_outer_contact_safe=False,
+    ) == 4
 
 
 def test_long_prism_auto_width_retains_conservative_cap_when_disabled(

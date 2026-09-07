@@ -6,6 +6,7 @@ import yaml
 import jax
 import jax.numpy as jnp
 from models.channel_batching import SpectroMemoryModel, resolve_spectro_auto_width
+from models.cadence_reduction import linear_spectro_trend_coefficient_names
 from models.limb_darkening_config import resolve_ld_prior
 from models.trend_marginal import marginalized_trend_coefficient_names
 from .constants import *
@@ -171,14 +172,19 @@ def _resolve_stage_vmap_width(
         and str(flags.get('spectro_transit_grid', 'auto')).lower() == 'auto'
         and context.get('sampler_backend') == 'independent_nuts'
         and context.get('transit_engine') == 'jaxoplanet'
-        and context.get('ld_profile') == 'power2'
+        and context.get('ld_profile') in {'power2', 'quadratic'}
         and context.get('ld_mode') != 'interpolated'
+        and bool(context.get(
+            'transit_grid_outer_contact_safe',
+            context.get('transit_grid_non_grazing', False),
+        ))
         and context.get('trend_inference') == 'sampled_uniform'
-        and context.get('detrend_type') == 'explinear_spectroscopic'
+        and linear_spectro_trend_coefficient_names(
+            context.get('detrend_type')
+        ) is not None
         and context.get('param_method') == 'duration'
         and int(context.get('n_planets', 0)) == 1
         and context.get('transit_window') == 'auto'
-        and bool(context.get('transit_grid_non_grazing', False))
     )
     model = SpectroMemoryModel(
         intercept_bytes=160_000_000,

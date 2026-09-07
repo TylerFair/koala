@@ -51,20 +51,23 @@ flags:
   spectro_chunk_size: 20
 ```
 
-Try 10 or 4 for a more expensive model. Long, ordinary power-2 PRISM transits
-with the default cadence acceleration now fit 40 resident channels on a 16 GB
-V100; `spectro_chunk_size: auto` selects at most 40 for that measured path and
-retains the conservative four-lane cap when the path is not eligible. This
+Try 10 or 4 for a more expensive model. Long, compatible power-2 and quadratic
+PRISM transits with the default cadence acceleration can use 40 resident
+channels on a 16 GB V100; `spectro_chunk_size: auto` selects at most 40 for an
+eligible path and retains the conservative four-lane cap otherwise. This
 setting changes concurrency, not the wavelength grid or posterior. The legacy
 key `vmap_chunk` has the same role.
 
 For spectroscopic stages longer than 5,000 cadences, the default
-`spectro_cadence_reduction: auto` compresses the out-of-transit likelihood into
-exact sufficient statistics, and `spectro_transit_grid: auto` evaluates the
-transit on a contact-aware 769-node grid. The latter still evaluates a distinct
-model and likelihood residual at every observed cadence; it is not time
-binning. Both switches remain on the original code path for shorter SOSS and
-G395H series. Set either switch to `off` for a direct-kernel comparison.
+`spectro_cadence_reduction: auto` compresses the out-of-transit likelihood for
+fixed-basis additive trends into exact sufficient statistics, and
+`spectro_transit_grid: auto` evaluates compatible power-2 or quadratic-LD
+transits on a contact-aware grid. The normal default is 769 nodes; conservative
+power-2 grazing geometry is raised automatically to 2049 nodes. The grid still
+evaluates a distinct model and likelihood residual at every observed cadence;
+it is not time binning. Both switches remain on the original code path for
+shorter SOSS and G395H series. Set either switch to `off` for a direct-kernel
+comparison.
 
 For reference, the audited HAT-P-65 NRS1 run on a 16 GB V100 used 40-channel
 chunks and completed white light, 42 R20 channels, and 369 native channels in
@@ -73,6 +76,13 @@ off took 56:47 on the same V100, a 2.7x end-to-end speed-up, and the two
 native spectra agree to 0.03 sigma in every channel. Compilation and white-light work are
 included in both wall times, so individual spectroscopic potential evaluations
 show a larger speed-up.
+
+The widened grazing audit uses 2049 nodes for extra error margin. In a paired
+40-lane `b=0.95` native-PRISM sampler check, it reduced post-compilation work
+from 218 s to 107 s (2.0x); one-time compilation reduced the complete-run gain
+to 1.35x. A real quadratic-wide-u+/u- plus linear-trend check reduced post-
+compilation work from 117 s to 53 s (2.2x; 1.26x including first compilation).
+Ordinary and quadratic cases retain the lighter 769-node default.
 
 ## Checkpoints and wall time
 

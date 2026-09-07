@@ -184,6 +184,12 @@ def _compute_transit_model_duration(params, t, *, kernel="stock"):
                 from .transit_grid import (
                     interpolate_duration_transit,
                     interpolate_power2_duration_transit,
+                    interpolate_quadratic_duration_transit,
+                )
+                grid_lc_kernel = (
+                    stock_light_curve
+                    if params.get('_transit_grid_force_stock_kernel', False)
+                    else lc_kernel
                 )
 
                 if (
@@ -191,7 +197,7 @@ def _compute_transit_model_duration(params, t, *, kernel="stock"):
                     and "_transit_grid_c2" in params
                 ):
                     return interpolate_power2_duration_transit(
-                        lc_kernel,
+                        grid_lc_kernel,
                         params["_transit_grid_c1"],
                         params["_transit_grid_c2"],
                         params["u"],
@@ -201,11 +207,30 @@ def _compute_transit_model_duration(params, t, *, kernel="stock"):
                         impact=b,
                         radius_ratio=rors,
                         num_nodes=int(transit_grid_nodes),
+                        contact_fallback_margin=float(
+                            params.get('_transit_grid_contact_fallback_margin', 0.0)
+                        ),
+                        order=10,
+                    )
+
+                if params.get("_transit_grid_quadratic", False):
+                    return interpolate_quadratic_duration_transit(
+                        grid_lc_kernel,
+                        params["u"],
+                        dt,
+                        mask,
+                        duration=duration,
+                        impact=b,
+                        radius_ratio=rors,
+                        num_nodes=int(transit_grid_nodes),
+                        contact_fallback_margin=float(
+                            params.get('_transit_grid_contact_fallback_margin', 0.0)
+                        ),
                         order=10,
                     )
 
                 return interpolate_duration_transit(
-                    lc_kernel,
+                    grid_lc_kernel,
                     params["u"],
                     dt,
                     mask,
@@ -213,6 +238,9 @@ def _compute_transit_model_duration(params, t, *, kernel="stock"):
                     impact=b,
                     radius_ratio=rors,
                     num_nodes=int(transit_grid_nodes),
+                    contact_fallback_margin=float(
+                        params.get('_transit_grid_contact_fallback_margin', 0.0)
+                    ),
                     order=10,
                 )
             speed = 2 * jnp.sqrt(

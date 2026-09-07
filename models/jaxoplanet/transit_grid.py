@@ -75,7 +75,15 @@ def _local_quintic_uniform(values, coordinates, segment_sizes, segment_offsets):
 
 
 def build_duration_transit_grid(*, impact, radius_ratio, num_nodes: int):
-    """Return the contact-split separation grid used by the interpolant."""
+    """Return a separation grid split only at contacts that actually exist.
+
+    A non-grazing transit has an interior second/third-contact separation at
+    ``1 - radius_ratio`` and uses two Lobatto segments.  A grazing transit has
+    only first/fourth contact, so all nodes cover the single physical interval
+    from the minimum separation to ``1 + radius_ratio``.  Keeping the two JAX
+    branches the same static size lets sampled radius ratios cross the grazing
+    boundary without recompilation.
+    """
     num_nodes = int(num_nodes)
     if num_nodes < 13:
         raise ValueError("transit_grid_nodes must be at least 13.")
@@ -84,6 +92,7 @@ def build_duration_transit_grid(*, impact, radius_ratio, num_nodes: int):
     outer_size = num_nodes - inner_size
     inner_nodes = _chebyshev_lobatto_nodes(inner_size)
     outer_nodes = _chebyshev_lobatto_nodes(outer_size)
+    grazing_nodes = _chebyshev_lobatto_nodes(num_nodes)
     impact = jnp.abs(jnp.asarray(impact, dtype=jnp.float64))
     radius_ratio = jnp.abs(jnp.asarray(radius_ratio, dtype=jnp.float64))
     outer_contact = 1.0 + radius_ratio
@@ -94,7 +103,9 @@ def build_duration_transit_grid(*, impact, radius_ratio, num_nodes: int):
     outer_separation = inner_contact + (
         outer_contact - inner_contact
     ) * outer_nodes
-    return jnp.concatenate((inner_separation, outer_separation), axis=0)
+    split_grid = jnp.concatenate((inner_separation, outer_separation), axis=0)
+    grazing_grid = impact + (outer_contact - impact) * grazing_nodes
+    return jnp.where(impact < inner_contact, split_grid, grazing_grid)
 
 
 def _duration_interpolation_metadata(
@@ -119,18 +130,36 @@ def _duration_interpolation_metadata(
     separation = jnp.sqrt(
         jnp.square(impact) + jnp.square(normalized_phase) * speed_scale
     )
+    epsilon = 16.0 * jnp.finfo(jnp.float64).eps
     inner_coordinate = jnp.clip(
-        (separation - impact) / (inner_contact - impact), 0.0, 1.0
+        (separation - impact)
+        / jnp.maximum(inner_contact - impact, epsilon),
+        0.0,
+        1.0,
     )
     outer_coordinate = jnp.clip(
         (separation - inner_contact) / (2.0 * radius_ratio), 0.0, 1.0
     )
-    use_inner = separation < inner_contact
-    segment_coordinate = jnp.where(
-        use_inner, inner_coordinate, outer_coordinate
+    has_inner_contact = impact < inner_contact
+    use_inner = has_inner_contact & (separation < inner_contact)
+    split_coordinate = jnp.where(use_inner, inner_coordinate, outer_coordinate)
+    grazing_coordinate = jnp.clip(
+        (separation - impact)
+        / jnp.maximum(outer_contact - impact, epsilon),
+        0.0,
+        1.0,
     )
-    segment_size = jnp.where(use_inner, inner_size, outer_size)
-    segment_offset = jnp.where(use_inner, 0, inner_size)
+    segment_coordinate = jnp.where(
+        has_inner_contact, split_coordinate, grazing_coordinate
+    )
+    segment_size = jnp.where(
+        has_inner_contact,
+        jnp.where(use_inner, inner_size, outer_size),
+        num_nodes,
+    )
+    segment_offset = jnp.where(
+        has_inner_contact, jnp.where(use_inner, 0, inner_size), 0
+    )
     indices, weights = _local_quintic_metadata(
         _chebyshev_coordinate(segment_coordinate),
         segment_size,
@@ -184,6 +213,7 @@ def _duration_transit_from_radius_u(
     duration,
     impact,
     num_nodes: int,
+    contact_fallback_margin: float = 0.0,
     order: int = 10,
 ):
     phase_offsets = jnp.asarray(phase_offsets, dtype=jnp.float64)
@@ -198,7 +228,7 @@ def _duration_transit_from_radius_u(
     flux_grid = light_curve_kernel(
         u_reference, separation_grid, radius, order=order
     ).at[-1].set(0.0)
-    return interpolate_duration_transit_grid(
+    flux = interpolate_duration_transit_grid(
         flux_grid,
         phase_offsets,
         phase_mask,
@@ -206,6 +236,33 @@ def _duration_transit_from_radius_u(
         impact=impact,
         radius_ratio=radius,
     )
+    if float(contact_fallback_margin) > 0.0:
+        # Radius is sampled while impact is fixed, so a near-grazing handoff
+        # can cross the point where second/third contacts coalesce.  The
+        # direct kernel is retained only in this narrow, nonsmooth band.
+        def direct_at_cadences():
+            normalized_phase = jnp.clip(
+                2.0 * jnp.abs(phase_offsets) / duration, 0.0, 1.0
+            )
+            outer_contact = 1.0 + radius
+            separation = jnp.sqrt(
+                impact**2
+                + normalized_phase**2
+                * jnp.maximum(0.0, outer_contact**2 - impact**2)
+            )
+            direct_flux = light_curve_kernel(
+                u_reference, separation, radius, order=order
+            )
+            direct_mask = phase_mask & (separation < outer_contact)
+            return jnp.where(direct_mask, direct_flux, 0.0)
+
+        return jax.lax.cond(
+            jnp.abs(impact - (1.0 - radius))
+            <= float(contact_fallback_margin),
+            direct_at_cadences,
+            lambda: flux,
+        )
+    return flux
 
 
 def _power2_duration_transit_primal(
@@ -218,6 +275,7 @@ def _power2_duration_transit_primal(
     duration,
     impact,
     num_nodes: int,
+    contact_fallback_margin: float = 0.0,
     order: int = 10,
 ):
     """Ordinary reverse-mode reference for the power-2 grid transit."""
@@ -239,6 +297,7 @@ def _power2_duration_transit_primal(
         duration=duration,
         impact=impact,
         num_nodes=num_nodes,
+        contact_fallback_margin=contact_fallback_margin,
         order=order,
     )
 
@@ -253,6 +312,7 @@ def _power2_duration_transit_sensitivities(
     duration,
     impact,
     num_nodes: int,
+    contact_fallback_margin: float = 0.0,
     order: int = 10,
 ):
     """Return cadence derivatives with respect to radius, c, and alpha."""
@@ -271,6 +331,7 @@ def _power2_duration_transit_sensitivities(
         duration=duration,
         impact=impact,
         num_nodes=num_nodes,
+        contact_fallback_margin=contact_fallback_margin,
         order=order,
     )
     _, radius_tangent = jax.jvp(
@@ -303,6 +364,7 @@ def interpolate_power2_duration_transit(
     impact,
     radius_ratio,
     num_nodes: int,
+    contact_fallback_margin: float = 0.0,
     order: int = 10,
 ):
     """Evaluate a power-2 grid transit with forward-mode sensitivities.
@@ -324,6 +386,7 @@ def interpolate_power2_duration_transit(
             duration=transit_duration,
             impact=b,
             num_nodes=num_nodes,
+            contact_fallback_margin=contact_fallback_margin,
             order=order,
         )
 
@@ -344,6 +407,7 @@ def interpolate_power2_duration_transit(
             duration=transit_duration,
             impact=b,
             num_nodes=num_nodes,
+            contact_fallback_margin=contact_fallback_margin,
             order=order,
         )
         flux = jax.lax.optimization_barrier(flux)
@@ -362,6 +426,7 @@ def interpolate_power2_duration_transit(
             duration=transit_duration,
             impact=b,
             num_nodes=num_nodes,
+            contact_fallback_margin=contact_fallback_margin,
             order=order,
         )
         return (
@@ -385,14 +450,134 @@ def interpolate_power2_duration_transit(
     )
 
 
-def power2_grid_reduced_log_likelihood(
+def _quadratic_duration_transit_sensitivities(
+    light_curve_kernel,
+    theta,
+    phase_offsets,
+    phase_mask,
+    *,
+    duration,
+    impact,
+    num_nodes: int,
+    contact_fallback_margin: float = 0.0,
+    order: int = 10,
+):
+    """Return cadence derivatives with respect to radius, u1, and u2."""
+    radius = theta[0]
+    coefficients = theta[1:3]
+    base = lambda trial_radius, trial_u: _duration_transit_from_radius_u(
+        light_curve_kernel,
+        trial_radius,
+        trial_u,
+        phase_offsets,
+        phase_mask,
+        duration=duration,
+        impact=impact,
+        num_nodes=num_nodes,
+        contact_fallback_margin=contact_fallback_margin,
+        order=order,
+    )
+    _, radius_tangent = jax.jvp(
+        lambda value: base(value, coefficients),
+        (radius,),
+        (jnp.ones_like(radius),),
+    )
+    identity = jnp.eye(2, dtype=jnp.float64)
+    coefficient_tangents = jax.vmap(
+        lambda tangent: jax.jvp(
+            lambda value: base(radius, value),
+            (coefficients,),
+            (tangent,),
+        )[1]
+    )(identity)
+    return jnp.concatenate(
+        (radius_tangent[:, None], coefficient_tangents.T), axis=1
+    )
+
+
+def interpolate_quadratic_duration_transit(
+    light_curve_kernel,
+    coefficients,
+    phase_offsets,
+    phase_mask,
+    *,
+    duration,
+    impact,
+    radius_ratio,
+    num_nodes: int,
+    contact_fallback_margin: float = 0.0,
+    order: int = 10,
+):
+    """Evaluate a quadratic-LD grid transit without a gather transpose."""
+    theta = jnp.concatenate((
+        jnp.atleast_1d(jnp.asarray(radius_ratio, dtype=jnp.float64)),
+        jnp.asarray(coefficients, dtype=jnp.float64),
+    ))
+
+    @jax.custom_vjp
+    def evaluate(parameters, phases, masks, transit_duration, b):
+        return _duration_transit_from_radius_u(
+            light_curve_kernel,
+            parameters[0],
+            parameters[1:3],
+            phases,
+            masks,
+            duration=transit_duration,
+            impact=b,
+            num_nodes=num_nodes,
+            contact_fallback_margin=contact_fallback_margin,
+            order=order,
+        )
+
+    def evaluate_fwd(parameters, phases, masks, transit_duration, b):
+        flux = _duration_transit_from_radius_u(
+            light_curve_kernel,
+            jax.lax.optimization_barrier(parameters[0]),
+            jax.lax.optimization_barrier(parameters[1:3]),
+            phases,
+            masks,
+            duration=transit_duration,
+            impact=b,
+            num_nodes=num_nodes,
+            contact_fallback_margin=contact_fallback_margin,
+            order=order,
+        )
+        return jax.lax.optimization_barrier(flux), (
+            parameters, phases, masks, transit_duration, b
+        )
+
+    def evaluate_bwd(residual, cotangent):
+        parameters, phases, masks, transit_duration, b = residual
+        jacobian = _quadratic_duration_transit_sensitivities(
+            light_curve_kernel,
+            parameters,
+            phases,
+            masks,
+            duration=transit_duration,
+            impact=b,
+            num_nodes=num_nodes,
+            contact_fallback_margin=contact_fallback_margin,
+            order=order,
+        )
+        return (
+            jnp.einsum("ip,i->p", jacobian, cotangent),
+            None,
+            None,
+            None,
+            None,
+        )
+
+    evaluate.defvjp(evaluate_fwd, evaluate_bwd)
+    return evaluate(theta, phase_offsets, phase_mask, duration, impact)
+
+
+def grid_reduced_log_likelihood(
     light_curve_kernel,
     theta,
     u_reference,
     phase_offsets,
     phase_mask,
-    time_basis,
-    exp_basis,
+    trend_design,
     observed,
     reported_error,
     active_mask,
@@ -405,12 +590,19 @@ def power2_grid_reduced_log_likelihood(
     *,
     duration,
     impact,
+    ld_profile,
     num_nodes: int,
+    contact_fallback_margin: float = 0.0,
     order: int = 10,
 ):
     """Return active/OOT log likelihoods with a fused analytic reverse rule.
 
-    ``theta`` is ``(radius, c, alpha, trend_c, trend_v, trend_A, jitter)``.
+    ``theta`` contains three transit parameters (radius and the two native LD
+    coordinates), followed by the linear trend coefficients and jitter.  For
+    power-2 the native coordinates are ``(c, alpha)``; for quadratic they are
+    ``(u1, u2)``.  Differentiating quadratic coefficients here lets JAX apply
+    the outer chain rule for every sampled basis (coefficient, u+/u-, Sing,
+    latent/decorrelated, or fixed).
     The forward result is algebraically identical to the separate Normal and
     grouped-statistics likelihoods. Backward recomputes the three transit JVP
     columns and contracts them with the residual immediately, avoiding both a
@@ -421,8 +613,7 @@ def power2_grid_reduced_log_likelihood(
     )
     phase_offsets = jnp.asarray(phase_offsets, dtype=jnp.float64)
     phase_mask = jnp.asarray(phase_mask, dtype=bool)
-    time_basis = jnp.asarray(time_basis, dtype=jnp.float64)
-    exp_basis = jnp.asarray(exp_basis, dtype=jnp.float64)
+    trend_design = jnp.asarray(trend_design, dtype=jnp.float64)
     observed = jnp.asarray(observed, dtype=jnp.float64)
     reported_error = jnp.asarray(reported_error, dtype=jnp.float64)
     active_mask = jnp.asarray(active_mask, dtype=bool)
@@ -434,8 +625,7 @@ def power2_grid_reduced_log_likelihood(
         reference_u,
         phases,
         transit_mask,
-        linear_time,
-        exponential,
+        design,
         y,
         yerr,
         likelihood_mask,
@@ -449,8 +639,8 @@ def power2_grid_reduced_log_likelihood(
         b,
     ):
         radius = parameters[0]
-        beta = parameters[3:6]
-        jitter = parameters[6]
+        beta = parameters[3:-1]
+        jitter = parameters[-1]
         transit = _duration_transit_from_radius_u(
             light_curve_kernel,
             radius,
@@ -460,14 +650,10 @@ def power2_grid_reduced_log_likelihood(
             duration=transit_duration,
             impact=b,
             num_nodes=num_nodes,
+            contact_fallback_margin=contact_fallback_margin,
             order=order,
         )
-        model = (
-            transit
-            + beta[0]
-            + beta[1] * linear_time
-            + beta[2] * exponential
-        )
+        model = transit + design @ beta
         error = jnp.sqrt(yerr**2 + jitter**2)
         active_log_prob = dist.Normal(model, error).log_prob(y)
         active_log_prob = jnp.where(
@@ -500,8 +686,7 @@ def power2_grid_reduced_log_likelihood(
             reference_u,
             phases,
             transit_mask,
-            linear_time,
-            exponential,
+            design,
             y,
             yerr,
             likelihood_mask,
@@ -515,8 +700,8 @@ def power2_grid_reduced_log_likelihood(
             b,
         ) = residual
         radius = parameters[0]
-        beta = parameters[3:6]
-        jitter = parameters[6]
+        beta = parameters[3:-1]
+        jitter = parameters[-1]
         transit = _duration_transit_from_radius_u(
             light_curve_kernel,
             radius,
@@ -526,42 +711,48 @@ def power2_grid_reduced_log_likelihood(
             duration=transit_duration,
             impact=b,
             num_nodes=num_nodes,
+            contact_fallback_margin=contact_fallback_margin,
             order=order,
         )
-        transit_jacobian = _power2_duration_transit_sensitivities(
-            light_curve_kernel,
-            parameters,
-            reference_u,
-            phases,
-            transit_mask,
-            duration=transit_duration,
-            impact=b,
-            num_nodes=num_nodes,
-            order=order,
-        )
-        model = (
-            transit
-            + beta[0]
-            + beta[1] * linear_time
-            + beta[2] * exponential
-        )
+        if ld_profile == "power2":
+            transit_jacobian = _power2_duration_transit_sensitivities(
+                light_curve_kernel,
+                parameters,
+                reference_u,
+                phases,
+                transit_mask,
+                duration=transit_duration,
+                impact=b,
+                num_nodes=num_nodes,
+                contact_fallback_margin=contact_fallback_margin,
+                order=order,
+            )
+        elif ld_profile == "quadratic":
+            transit_jacobian = _quadratic_duration_transit_sensitivities(
+                light_curve_kernel,
+                parameters,
+                phases,
+                transit_mask,
+                duration=transit_duration,
+                impact=b,
+                num_nodes=num_nodes,
+                contact_fallback_margin=contact_fallback_margin,
+                order=order,
+            )
+        else:
+            raise ValueError(f"Unsupported transit-grid LD profile: {ld_profile}")
+        model = transit + design @ beta
         residual_flux = y - model
         variance = yerr**2 + jitter**2
         model_cotangent = jnp.where(
             likelihood_mask, residual_flux / variance, 0.0
         )
-        active_gradient = jnp.zeros((7,), dtype=jnp.float64)
+        active_gradient = jnp.zeros_like(parameters)
         active_gradient = active_gradient.at[:3].set(
             jnp.einsum("ip,i->p", transit_jacobian, model_cotangent)
         )
-        active_gradient = active_gradient.at[3].set(
-            jnp.sum(model_cotangent)
-        )
-        active_gradient = active_gradient.at[4].set(
-            jnp.sum(model_cotangent * linear_time)
-        )
-        active_gradient = active_gradient.at[5].set(
-            jnp.sum(model_cotangent * exponential)
+        active_gradient = active_gradient.at[3:-1].set(
+            design.T @ model_cotangent
         )
         active_jitter = jnp.where(
             likelihood_mask,
@@ -570,7 +761,7 @@ def power2_grid_reduced_log_likelihood(
             ),
             0.0,
         )
-        active_gradient = active_gradient.at[6].set(jnp.sum(active_jitter))
+        active_gradient = active_gradient.at[-1].set(jnp.sum(active_jitter))
 
         delta = beta - reference_beta
         group_sse = (
@@ -583,14 +774,14 @@ def power2_grid_reduced_log_likelihood(
             -2.0 * group_xr
             + 2.0 * jnp.einsum("gpq,q->gp", group_xx, delta)
         )
-        oot_gradient = jnp.zeros((7,), dtype=jnp.float64)
-        oot_gradient = oot_gradient.at[3:6].set(
+        oot_gradient = jnp.zeros_like(parameters)
+        oot_gradient = oot_gradient.at[3:-1].set(
             jnp.sum(
                 -0.5 * group_sse_gradient / group_variance[:, None],
                 axis=0,
             )
         )
-        oot_gradient = oot_gradient.at[6].set(
+        oot_gradient = oot_gradient.at[-1].set(
             jnp.sum(
                 jitter
                 * (
@@ -603,7 +794,7 @@ def power2_grid_reduced_log_likelihood(
             cotangent[0] * active_gradient
             + cotangent[1] * oot_gradient
         )
-        return (parameter_cotangent,) + (None,) * 16
+        return (parameter_cotangent,) + (None,) * 15
 
     evaluate.defvjp(evaluate_fwd, evaluate_bwd)
     return evaluate(
@@ -611,8 +802,7 @@ def power2_grid_reduced_log_likelihood(
         u_reference,
         phase_offsets,
         phase_mask,
-        time_basis,
-        exp_basis,
+        trend_design,
         observed,
         reported_error,
         active_mask,
@@ -637,14 +827,15 @@ def interpolate_duration_transit(
     impact,
     radius_ratio,
     num_nodes: int,
+    contact_fallback_margin: float = 0.0,
     order: int = 10,
 ):
     """Interpolate a transit on smooth regions separated at contact points.
 
     The duration geometry makes first/fourth contact occur at normalized phase
-    one for every radius ratio. The caller guarantees that the full radius
-    prior is non-grazing. The grid is split at second/third contact and each
-    segment uses Chebyshev--Lobatto nodes. A local quintic interpolant is used
+    one for every radius ratio. Non-grazing cases are split at second/third
+    contact; grazing cases use their single interval. Every existing segment
+    uses Chebyshev--Lobatto nodes and a local quintic interpolant
     within each smooth segment, so no stencil crosses a contact point.
     """
     impact = jnp.abs(jnp.asarray(impact, dtype=jnp.float64))
@@ -667,7 +858,7 @@ def interpolate_duration_transit(
     # coefficients, which would pollute the final interpolation stencil.
     flux_grid = flux_grid.at[-1].set(0.0)
 
-    return interpolate_duration_transit_grid(
+    flux = interpolate_duration_transit_grid(
         flux_grid,
         phase_offsets,
         phase_mask,
@@ -675,6 +866,31 @@ def interpolate_duration_transit(
         impact=impact,
         radius_ratio=radius_ratio,
     )
+    if float(contact_fallback_margin) > 0.0:
+        def direct_at_cadences():
+            normalized_phase = jnp.clip(
+                2.0 * jnp.abs(phase_offsets) / duration, 0.0, 1.0
+            )
+            outer_contact = 1.0 + radius_ratio
+            separation = jnp.sqrt(
+                impact**2
+                + normalized_phase**2
+                * jnp.maximum(0.0, outer_contact**2 - impact**2)
+            )
+            direct_flux = light_curve_kernel(
+                u, separation, radius_ratio, order=order
+            )
+            return jnp.where(
+                phase_mask & (separation < outer_contact), direct_flux, 0.0
+            )
+
+        return jax.lax.cond(
+            jnp.abs(impact - (1.0 - radius_ratio))
+            <= float(contact_fallback_margin),
+            direct_at_cadences,
+            lambda: flux,
+        )
+    return flux
 
 
 __all__ = [
@@ -682,5 +898,6 @@ __all__ = [
     "interpolate_duration_transit",
     "interpolate_duration_transit_grid",
     "interpolate_power2_duration_transit",
-    "power2_grid_reduced_log_likelihood",
+    "interpolate_quadratic_duration_transit",
+    "grid_reduced_log_likelihood",
 ]

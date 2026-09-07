@@ -8,6 +8,7 @@ import numpyro.distributions as dist
 import numpy as np
 
 from ..common import get_I_power2
+from ..cadence_reduction import linear_spectro_trend_coefficient_names
 from ..linear_marginalization import marginalized_log_likelihood_and_conditional
 from ..ld_parameterization import Power2MaxtedTransform
 from ..trend_marginal import build_marginalized_trend_design
@@ -952,6 +953,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                             transit_grid='off',
                             transit_grid_nodes=769,
                             transit_grid_non_grazing=False,
+                            transit_grid_outer_contact_safe=None,
                             jaxoplanet_kernel='auto',
                             surface_config=None,
                             surface_basis=None,
@@ -1027,7 +1029,18 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
     transit_grid_nodes = int(transit_grid_nodes)
     if transit_grid_nodes < 13:
         raise ValueError("transit_grid_nodes must be at least 13.")
+    # The handoff flag is conservative over the full radius-ratio prior.  A
+    # grazing or near-grazing box needs the denser audited default; an explicit
+    # larger setting is preserved.
     transit_grid_non_grazing = bool(transit_grid_non_grazing)
+    if transit_grid_outer_contact_safe is None:
+        # Backward compatibility for pre-widening stage dumps: the old
+        # conservative non-grazing proof also guarantees ample outer-contact
+        # separation over the radius prior.
+        transit_grid_outer_contact_safe = transit_grid_non_grazing
+    transit_grid_outer_contact_safe = bool(transit_grid_outer_contact_safe)
+    if not transit_grid_non_grazing and ld_profile == 'power2':
+        transit_grid_nodes = max(transit_grid_nodes, 2049)
     use_transit_window = (
         transit_window == 'auto'
         and transit_window_indices is not None
@@ -1040,16 +1053,15 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
         if transit_window_indices.ndim != 1:
             raise ValueError("transit_window_indices must be one-dimensional.")
     detrend_components = _split_components(detrend_type)
+    linear_trend_names = linear_spectro_trend_coefficient_names(detrend_type)
     cadence_reduction_eligible = (
         cadence_reduction == 'auto'
         and use_transit_window
-        and ld_profile == 'power2'
         and n_planets == 1
         and surface_config.get("model") == "transit"
         and not surface_config.get("spots")
-        and transit_grid_non_grazing
         and trend_mode == 'free'
-        and detrend_components == {'explinear_spectroscopic'}
+        and linear_trend_names is not None
     )
     transit_grid_eligible = (
         transit_grid == 'auto'
@@ -1058,9 +1070,9 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
         and param_method == 'duration'
         and surface_config.get("model") == "transit"
         and not surface_config.get("spots")
-        and ld_profile == 'power2'
+        and ld_profile in {'power2', 'quadratic'}
         and ld_mode != 'interpolated'
-        and transit_grid_non_grazing
+        and transit_grid_outer_contact_safe
     )
     unsupported_non_spectroscopic = {'spot', '2spot', 'linear_discontinuity'}
     if detrend_components & unsupported_non_spectroscopic:
@@ -1083,6 +1095,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                           mu_u_ld=None, sigma_u_ld=None, gp_trend=None, spot_trend=None,
                           spot_trend2=None, jump_trend=None,
                           exp_trend=None, fixed_tau=None,
+                          trend_design=None,
                           precomputed_yerr_per_lc=None,
                           trend_prior_mean=None, trend_prior_scale=None,
                           likelihood_mask=None, ld_center=None, ld_scale=None,
@@ -1342,10 +1355,22 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
         if use_transit_grid:
             params['_transit_grid_nodes'] = transit_grid_nodes
             in_axes['_transit_grid_nodes'] = None
-            params['_transit_grid_c1'] = c1
-            params['_transit_grid_c2'] = c2
-            in_axes['_transit_grid_c1'] = 0
-            in_axes['_transit_grid_c2'] = 0
+            params['_transit_grid_contact_fallback_margin'] = (
+                0.0
+            )
+            in_axes['_transit_grid_contact_fallback_margin'] = None
+            params['_transit_grid_force_stock_kernel'] = bool(
+                ld_profile == 'power2' and not transit_grid_non_grazing
+            )
+            in_axes['_transit_grid_force_stock_kernel'] = None
+            if ld_profile == 'power2':
+                params['_transit_grid_c1'] = c1
+                params['_transit_grid_c2'] = c2
+                in_axes['_transit_grid_c1'] = 0
+                in_axes['_transit_grid_c2'] = 0
+            else:
+                params['_transit_grid_quadratic'] = True
+                in_axes['_transit_grid_quadratic'] = None
 
         surface_params = _sample_surface_parameters(
             surface_config, n_planets, num_lcs=num_lcs
@@ -1527,6 +1552,55 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
             else:
                 raise ValueError(f"Unknown trend_mode: {trend_mode}")
 
+        # Fixed-shape spectroscopic amplitudes are part of the linear trend
+        # basis, so they must exist before the reduced-likelihood early return.
+        if trend_mode == 'free':
+            if '2spot_spectroscopic' in detrend_components:
+                params['A_spot'] = numpyro.sample(
+                    'A_spot', dist.Uniform(0.5, 2).expand([num_lcs])
+                )
+                params['A_spot2'] = numpyro.sample(
+                    'A_spot2', dist.Uniform(0.5, 2).expand([num_lcs])
+                )
+                in_axes['A_spot'] = 0
+                in_axes['A_spot2'] = 0
+            elif 'spot_spectroscopic' in detrend_components:
+                params['A_spot'] = numpyro.sample(
+                    'A_spot', dist.Uniform(0.5, 2).expand([num_lcs])
+                )
+                in_axes['A_spot'] = 0
+            if 'linear_discontinuity_spectroscopic' in detrend_components:
+                params['A_jump'] = numpyro.sample(
+                    'A_jump', dist.Uniform(0.5, 2).expand([num_lcs])
+                )
+                in_axes['A_jump'] = 0
+
+        resolved_trend_design = trend_design
+        if use_cadence_reduction and resolved_trend_design is None:
+            centered_time = t - jnp.min(t)
+            external_bases = {
+                'A': exp_trend,
+                'A_spot': spot_trend,
+                'A_spot2': spot_trend2,
+                'A_jump': jump_trend,
+            }
+            columns = []
+            for name in linear_trend_names:
+                if name == 'c':
+                    column = jnp.ones_like(t, dtype=jnp.float64)
+                elif name == 'v':
+                    column = centered_time
+                elif name.startswith('v') and name[1:].isdigit():
+                    column = centered_time ** int(name[1:])
+                else:
+                    column = external_bases[name]
+                    if column is None:
+                        raise ValueError(
+                            f"cadence reduction requires the fixed {name} basis."
+                        )
+                columns.append(jnp.asarray(column, dtype=jnp.float64))
+            resolved_trend_design = jnp.stack(columns, axis=1)
+
         if use_cadence_reduction:
             statistics = (
                 oot_reference_beta,
@@ -1550,7 +1624,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                     light_curve as streamed_light_curve,
                 )
                 from .transit_grid import (
-                    power2_grid_reduced_log_likelihood,
+                    grid_reduced_log_likelihood,
                 )
 
                 selected_kernel = resolve_jaxoplanet_kernel(
@@ -1561,7 +1635,10 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                 )
                 grid_kernel = (
                     streamed_light_curve
-                    if selected_kernel == 'streamed'
+                    if (
+                        selected_kernel == 'streamed'
+                        and transit_grid_non_grazing
+                    )
                     else stock_light_curve
                 )
                 active_y = jnp.atleast_2d(
@@ -1594,19 +1671,23 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                 if group_xr.ndim == 2:
                     group_xr = group_xr[None, ...]
                     group_xx = group_xx[None, ...]
-                theta = jnp.stack((
-                    rors[:, 0],
-                    c1,
-                    c2,
-                    params['c'],
-                    params['v'],
-                    params['A'],
-                    jitter,
-                ), axis=1)
+                design_active = jnp.asarray(
+                    resolved_trend_design, dtype=jnp.float64
+                )[indices]
+                beta = jnp.stack(
+                    tuple(params[name] for name in linear_trend_names), axis=1
+                )
+                if ld_profile == 'power2':
+                    transit_theta = jnp.stack(
+                        (rors[:, 0], c1, c2), axis=1
+                    )
+                else:
+                    transit_theta = jnp.column_stack((rors[:, 0], u))
+                theta = jnp.concatenate(
+                    (transit_theta, beta, jitter[:, None]), axis=1
+                )
                 phase_active = params['_transit_phase_offsets'][0, indices]
                 phase_mask_active = params['_transit_phase_mask'][0, indices]
-                time_basis = t[indices] - jnp.min(t)
-                exp_basis = jnp.asarray(exp_trend)[indices]
 
                 def lane_log_likelihood(
                     lane_theta,
@@ -1621,14 +1702,13 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                     lane_group_xr,
                     lane_group_xx,
                 ):
-                    return power2_grid_reduced_log_likelihood(
+                    return grid_reduced_log_likelihood(
                         grid_kernel,
                         lane_theta,
                         lane_u,
                         phase_active,
                         phase_mask_active,
-                        time_basis,
-                        exp_basis,
+                        design_active,
                         lane_y,
                         lane_yerr,
                         lane_mask,
@@ -1640,7 +1720,11 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                         lane_group_xx,
                         duration=mu_duration[0],
                         impact=bs[0],
+                        ld_profile=ld_profile,
                         num_nodes=transit_grid_nodes,
+                        contact_fallback_margin=(
+                            0.0
+                        ),
                         order=10,
                     )
 
@@ -1667,12 +1751,13 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                 compute_transit_model_window,
                 in_axes=(in_axes, None),
             )(params, t)
-            time_active = t[indices]
-            trend_active = (
-                params['c'][:, None]
-                + params['v'][:, None] * (time_active - jnp.min(t))
-                + params['A'][:, None] * jnp.asarray(exp_trend)[indices]
+            beta = jnp.stack(
+                tuple(params[name] for name in linear_trend_names), axis=1
             )
+            design_active = jnp.asarray(
+                resolved_trend_design, dtype=jnp.float64
+            )[indices]
+            trend_active = beta @ design_active.T
             active_model = transit_active + trend_active
             active_error = error_broadcast[:, indices]
             active_y = jnp.atleast_2d(
@@ -1694,9 +1779,6 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
             reference_beta = jnp.atleast_2d(jnp.asarray(
                 oot_reference_beta, dtype=jnp.float64
             ))
-            beta = jnp.stack(
-                (params['c'], params['v'], params['A']), axis=1
-            )
             delta = beta - reference_beta
             group_xr = jnp.asarray(
                 oot_group_x_reference_residual, dtype=jnp.float64
@@ -1765,23 +1847,13 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
             y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, gp_trend)
 
         elif '2spot_spectroscopic' in detrend_components:
-            params['A_spot'] = numpyro.sample('A_spot', dist.Uniform(0.5, 2).expand([num_lcs]))
-            params['A_spot2'] = numpyro.sample('A_spot2', dist.Uniform(0.5, 2).expand([num_lcs]))
-            in_axes['A_spot'] = 0
-            in_axes['A_spot2'] = 0
             y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None, None))(params, t, spot_trend, spot_trend2)
         elif 'spot_spectroscopic' in detrend_components:
-            params['A_spot'] = numpyro.sample('A_spot', dist.Uniform(0.5, 2).expand([num_lcs]))
-            in_axes['A_spot'] = 0
             if 'linear_discontinuity_spectroscopic' in detrend_components:
-                params['A_jump'] = numpyro.sample('A_jump', dist.Uniform(0.5, 2).expand([num_lcs]))
-                in_axes['A_jump'] = 0
                 y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None, None))(params, t, spot_trend, jump_trend)
             else:
                 y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, spot_trend)
         elif 'linear_discontinuity_spectroscopic' in detrend_components:
-            params['A_jump'] = numpyro.sample('A_jump', dist.Uniform(0.5, 2).expand([num_lcs]))
-            in_axes['A_jump'] = 0
             y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, jump_trend)
         else:
             y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)

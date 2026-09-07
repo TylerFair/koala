@@ -78,7 +78,11 @@ from models.gp import (
     compute_lc_cubic_gp_mean, compute_lc_quartic_gp_mean, compute_lc_explinear_gp_mean
 )
 from models.detrend import resolve_detrend_kernel
-from models.cadence_reduction import build_explinear_oot_statistics
+from models.cadence_reduction import (
+    build_linear_oot_statistics,
+    build_linear_spectro_trend_design,
+    linear_spectro_trend_coefficient_names,
+)
 from models.trend_marginal import (
     marginalized_trend_coefficient_names,
     materialize_marginalized_trend_samples,
@@ -518,6 +522,10 @@ def _run_low_resolution_stage_hook(
                         np.max(np.abs(np.asarray(B_BASE)))
                         < 1.0 - np.sqrt(0.5)
                     ),
+                    'transit_grid_outer_contact_safe': bool(
+                        np.max(np.abs(np.asarray(B_BASE)))
+                        < 1.0 + np.sqrt(1.0e-5) - 1.0e-5
+                    ),
                 }
                 if transit_engine == 'jaxoplanet' else {}
             ),
@@ -639,20 +647,34 @@ def _run_low_resolution_stage_hook(
             and _engine_spectro_kw.get('cadence_reduction') == 'auto'
             and int(time_lr.size) > 5000
             and lr_trend_mode == 'free'
-            and detrend_type_multiwave == 'explinear_spectroscopic'
             and lr_transit_window_indices is not None
+            and linear_spectro_trend_coefficient_names(
+                detrend_type_multiwave
+            ) is not None
         ):
-            reference_beta_lr = np.column_stack((
-                np.asarray(init_params_lr['c']),
-                np.asarray(init_params_lr['v']),
-                np.asarray(init_params_lr['A']),
-            ))
-            model_run_args_lr.update(build_explinear_oot_statistics(
+            trend_names_lr, trend_design_lr = (
+                build_linear_spectro_trend_design(
+                    detrend_type_multiwave,
+                    time_lr,
+                    exp_trend=model_run_args_lr.get('exp_trend'),
+                    spot_trend=model_run_args_lr.get('spot_trend'),
+                    spot_trend2=model_run_args_lr.get('spot_trend2'),
+                    jump_trend=model_run_args_lr.get('jump_trend'),
+                )
+            )
+            reference_beta_lr = np.column_stack([
+                np.asarray(init_params_lr.get(
+                    name, np.zeros(num_lcs_lr, dtype=np.float64)
+                ))
+                for name in trend_names_lr
+            ])
+            model_run_args_lr['trend_design'] = trend_design_lr
+            model_run_args_lr.update(build_linear_oot_statistics(
                 time_lr,
                 flux_lr,
                 flux_err_lr,
                 lr_transit_window_indices,
-                exp_trend_lr,
+                trend_design_lr,
                 reference_beta_lr,
             ))
 
@@ -878,6 +900,9 @@ def _run_low_resolution_stage_hook(
             transit_window=transit_window_optimization,
             transit_grid_non_grazing=lr_model_builder_kwargs.get(
                 'transit_grid_non_grazing', False
+            ),
+            transit_grid_outer_contact_safe=lr_model_builder_kwargs.get(
+                'transit_grid_outer_contact_safe', False
             ),
         )
 
@@ -1480,6 +1505,10 @@ def _run_high_resolution_stage_hook(
                     np.max(np.abs(np.asarray(B_BASE)))
                     < 1.0 - np.sqrt(0.5)
                 ),
+                'transit_grid_outer_contact_safe': bool(
+                    np.max(np.abs(np.asarray(B_BASE)))
+                    < 1.0 + np.sqrt(1.0e-5) - 1.0e-5
+                ),
             }
             if transit_engine == 'jaxoplanet' else {}
         ),
@@ -1568,20 +1597,32 @@ def _run_high_resolution_stage_hook(
         and _engine_spectro_kw.get('cadence_reduction') == 'auto'
         and int(time_hr.size) > 5000
         and hr_trend_mode == 'free'
-        and detrend_type_multiwave == 'explinear_spectroscopic'
         and hr_transit_window_indices is not None
+        and linear_spectro_trend_coefficient_names(
+            detrend_type_multiwave
+        ) is not None
     ):
-        reference_beta_hr = np.column_stack((
-            np.asarray(init_params_hr['c']),
-            np.asarray(init_params_hr['v']),
-            np.asarray(init_params_hr['A']),
-        ))
-        model_run_args_hr.update(build_explinear_oot_statistics(
+        trend_names_hr, trend_design_hr = build_linear_spectro_trend_design(
+            detrend_type_multiwave,
+            time_hr,
+            exp_trend=model_run_args_hr.get('exp_trend'),
+            spot_trend=model_run_args_hr.get('spot_trend'),
+            spot_trend2=model_run_args_hr.get('spot_trend2'),
+            jump_trend=model_run_args_hr.get('jump_trend'),
+        )
+        reference_beta_hr = np.column_stack([
+            np.asarray(init_params_hr.get(
+                name, np.zeros(num_lcs_hr, dtype=np.float64)
+            ))
+            for name in trend_names_hr
+        ])
+        model_run_args_hr['trend_design'] = trend_design_hr
+        model_run_args_hr.update(build_linear_oot_statistics(
             time_hr,
             flux_hr,
             flux_err_hr,
             hr_transit_window_indices,
-            exp_trend_hr,
+            trend_design_hr,
             reference_beta_hr,
         ))
 
@@ -1636,6 +1677,9 @@ def _run_high_resolution_stage_hook(
         transit_window=transit_window_optimization,
         transit_grid_non_grazing=hr_model_builder_kwargs.get(
             'transit_grid_non_grazing', False
+        ),
+        transit_grid_outer_contact_safe=hr_model_builder_kwargs.get(
+            'transit_grid_outer_contact_safe', False
         ),
     )
 

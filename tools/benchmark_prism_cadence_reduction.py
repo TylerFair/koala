@@ -23,8 +23,14 @@ from numpyro.infer.util import initialize_model
 from tools.spectro_stage_inputs import load_stage_inputs
 from models.cadence_reduction import (
     STATISTIC_KEYS,
-    build_explinear_oot_statistics,
+    build_linear_oot_statistics,
+    build_linear_spectro_trend_design,
+    linear_spectro_trend_coefficient_names,
 )
+from models.common import get_I_power2
+from models.detrend import _prepare_power2_poly
+from models.jaxoplanet.core import build_transit_phase_offsets
+from models.jaxoplanet.limb_dark_streamed import light_curve as streamed_light_curve
 
 
 jax.config.update("jax_enable_x64", True)
@@ -78,9 +84,76 @@ def _memory(executable):
     return result
 
 
-def _prepare(path, start, width, kernel, candidate_kind, grid_nodes):
+def _replace_with_synthetic_impact(stage, original_impact, new_impact):
+    """Move the real-data transit while preserving its noise/systematics."""
+    builder = stage.model_builder['kwargs']
+    if builder.get('ld_profile') != 'power2':
+        raise ValueError("The synthetic grazing transform currently requires power-2 LD.")
+    mus, projection = _prepare_power2_poly(degree=12)
+    c1 = jnp.asarray(stage.init_params['c1'])
+    c2 = jnp.asarray(stage.init_params['c2'])
+    profiles = get_I_power2(c1[:, None], c2[:, None], mus[None, :])
+    u = (projection @ (1.0 - profiles).T).T
+    radius = jnp.asarray(stage.init_params['rors'])[:, 0]
+    duration = jnp.asarray(stage.model_kwargs['mu_duration'])[0]
+    period = jnp.asarray(stage.model_kwargs['PERIOD'])
+    t0 = jnp.asarray(stage.model_kwargs['mu_t0'])
+    phase, phase_mask = build_transit_phase_offsets(
+        stage.t, period, t0, jnp.atleast_1d(duration)
+    )
+    dt = phase[0]
+    mask = phase_mask[0]
+
+    def transit(lane_u, lane_radius, impact):
+        speed = 2.0 * jnp.sqrt(jnp.maximum(
+            0.0, (1.0 + lane_radius) ** 2 - impact**2
+        )) / duration
+        separation = jnp.sqrt((speed * dt) ** 2 + impact**2)
+        flux = streamed_light_curve(
+            lane_u, separation, lane_radius, order=10
+        )
+        return jnp.where(mask & (separation < 1.0 + lane_radius), flux, 0.0)
+
+    old_transit = jax.vmap(
+        lambda lane_u, lane_radius: transit(
+            lane_u, lane_radius, jnp.float64(original_impact)
+        )
+    )(u, radius)
+    new_transit = jax.vmap(
+        lambda lane_u, lane_radius: transit(
+            lane_u, lane_radius, jnp.float64(new_impact)
+        )
+    )(u, radius)
+    model_kwargs = dict(stage.model_kwargs)
+    model_kwargs['mu_b'] = jnp.full_like(
+        jnp.asarray(model_kwargs['mu_b']), new_impact
+    )
+    return replace(
+        stage,
+        y=jnp.asarray(stage.y) - old_transit + new_transit,
+        model_kwargs=model_kwargs,
+    )
+
+
+def _prepare(
+    path, start, width, kernel, candidate_kind, grid_nodes,
+    impact_override=None,
+):
     use_cadence = candidate_kind in {"cadence", "combined"}
     use_grid = candidate_kind in {"grid", "combined"}
+    source = load_stage_inputs(path, validate_potential=False)
+    original_impact = float(
+        np.max(np.abs(np.asarray(source.model_kwargs['mu_b'])))
+    )
+    impact = (
+        original_impact if impact_override is None else float(impact_override)
+    )
+    geometry_overrides = {
+        "transit_grid_non_grazing": impact < 1.0 - np.sqrt(0.5),
+        "transit_grid_outer_contact_safe": (
+            impact < 1.0 + np.sqrt(1.0e-5) - 1.0e-5
+        ),
+    }
     baseline = load_stage_inputs(
         path,
         validate_potential=False,
@@ -88,8 +161,8 @@ def _prepare(path, start, width, kernel, candidate_kind, grid_nodes):
             "cadence_reduction": "off",
             "transit_grid": "off",
             "transit_grid_nodes": grid_nodes,
-            "transit_grid_non_grazing": True,
             "jaxoplanet_kernel": kernel,
+            **geometry_overrides,
         },
     ).select(start, start + width)
     candidate = load_stage_inputs(
@@ -99,28 +172,51 @@ def _prepare(path, start, width, kernel, candidate_kind, grid_nodes):
             "cadence_reduction": "auto" if use_cadence else "off",
             "transit_grid": "auto" if use_grid else "off",
             "transit_grid_nodes": grid_nodes,
-            "transit_grid_non_grazing": True,
             "jaxoplanet_kernel": kernel,
+            **geometry_overrides,
         },
     ).select(start, start + width)
+    if impact_override is not None:
+        baseline = _replace_with_synthetic_impact(
+            baseline, original_impact, impact
+        )
+        candidate = _replace_with_synthetic_impact(
+            candidate, original_impact, impact
+        )
     if use_cadence:
-        reference_beta = np.column_stack((
-            np.asarray(candidate.init_params['c']),
-            np.asarray(candidate.init_params['v']),
-            np.asarray(candidate.init_params['A']),
-        ))
-        statistics = build_explinear_oot_statistics(
+        detrend_type = candidate.model_builder['kwargs']['detrend_type']
+        trend_names = linear_spectro_trend_coefficient_names(detrend_type)
+        if trend_names is None:
+            raise ValueError(
+                f"Trend {detrend_type!r} is not eligible for cadence reduction."
+            )
+        _, trend_design = build_linear_spectro_trend_design(
+            detrend_type,
+            candidate.t,
+            exp_trend=candidate.model_kwargs.get('exp_trend'),
+            spot_trend=candidate.model_kwargs.get('spot_trend'),
+            spot_trend2=candidate.model_kwargs.get('spot_trend2'),
+            jump_trend=candidate.model_kwargs.get('jump_trend'),
+        )
+        reference_beta = np.column_stack([
+            np.asarray(candidate.init_params[name]) for name in trend_names
+        ])
+        statistics = build_linear_oot_statistics(
             candidate.t,
             candidate.y,
             candidate.yerr,
             candidate.model_builder['kwargs']['transit_window_indices'],
-            candidate.model_kwargs['exp_trend'],
+            trend_design,
             reference_beta,
-            candidate.model_kwargs.get('likelihood_mask'),
+            likelihood_mask=candidate.model_kwargs.get('likelihood_mask'),
         )
         candidate = replace(
             candidate,
-            model_kwargs={**dict(candidate.model_kwargs), **statistics},
+            model_kwargs={
+                **dict(candidate.model_kwargs),
+                "trend_design": trend_design,
+                **statistics,
+            },
             channel_varying_kwargs=tuple(dict.fromkeys(
                 (*candidate.channel_varying_kwargs, *STATISTIC_KEYS)
             )),

@@ -29,9 +29,21 @@ COMPARISON_SITES = {
     "rors": "depth",
     "c1": "limb_darkening",
     "c2": "limb_darkening",
+    "u": "limb_darkening",
+    "u1": "limb_darkening",
+    "u2": "limb_darkening",
+    "ld_uplus_uminus": "limb_darkening",
+    "limb_l": "limb_darkening",
+    "limb_delta": "limb_darkening",
     "c": "trend",
     "v": "trend",
+    "v2": "trend",
+    "v3": "trend",
+    "v4": "trend",
     "A": "trend",
+    "A_spot": "trend",
+    "A_spot2": "trend",
+    "A_jump": "trend",
     "log_jitter": "noise",
     "total_error": "noise",
 }
@@ -45,6 +57,7 @@ def _parser():
     parser.add_argument("--warmup", type=int, default=1000)
     parser.add_argument("--samples", type=int, default=1000)
     parser.add_argument("--grid-nodes", type=int, default=769)
+    parser.add_argument("--impact-override", type=float)
     parser.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -237,6 +250,7 @@ def main():
         "auto",
         "combined",
         args.grid_nodes,
+        impact_override=args.impact_override,
     )
     compilation = _CompilationEvents()
     try:
@@ -253,6 +267,7 @@ def main():
         "warmup": args.warmup,
         "samples": args.samples,
         "grid_nodes": args.grid_nodes,
+        "impact_override": args.impact_override,
         "out_of_window_groups": groups,
         "nuts_kwargs": {
             key: value for key, value in baseline.nuts_kwargs.items()

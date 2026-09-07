@@ -98,21 +98,30 @@ The default is 40 for the independent samplers; lower it after an out-of-memory
 error. It does not change the wavelength bins. The older spelling `vmap_chunk`
 is still accepted.
 
-`spectro_cadence_reduction` can be `auto` (the default) or `off`. For the
-fixed-timescale spectroscopic exponential-linear trend with more than 5,000
-cadences, `auto` evaluates the likelihood directly in the transit windows and
-uses exact, reported-error-grouped sufficient statistics outside them. Masked
-cadences are excluded from both pieces.
+`spectro_cadence_reduction` can be `auto` (the default) or `off`. For a
+compatible additive trend with more than 5,000 cadences, `auto` evaluates the
+likelihood directly in the transit windows and uses exact, reported-error-
+grouped sufficient statistics outside them. Eligible sampled trends are
+linear through quartic polynomials, fixed-timescale exponential-linear,
+fixed-shape one- and two-spot templates, quadratic plus a fixed spot, a
+fixed-shape linear discontinuity, and fixed spot plus discontinuity. Masked
+cadences are excluded from both pieces. Free-timescale exponential trends,
+GP likelihoods, Gaussian-marginalized trend inference, and surface models use
+the direct path.
 
-`spectro_transit_grid` can also be `auto` (the default) or `off`. On ordinary
-duration-parameterized transit stages with more than 5,000 cadences, `auto`
-evaluates the limb-darkened model on a contact-aware Chebyshev grid and
-interpolates a separate model value for every transit-window cadence. It is
-not time binning: all observed fluxes, errors, and likelihood residuals remain
-separate. `spectro_transit_grid_nodes` sets the total nodes (default `769`);
-the default has a measured full-prior maximum interpolation error below 0.01
-ppm for the PRISM validation geometry. Short light curves, Keplerian geometry,
-and surface models retain the original path.
+`spectro_transit_grid` can also be `auto` (the default) or `off`. On compatible
+duration-parameterized power-2 or quadratic-LD transit stages with more than
+5,000 cadences, `auto` evaluates the limb-darkened model on a contact-aware
+Chebyshev grid and interpolates a separate model value for every transit-
+window cadence. It is not time binning: all observed fluxes, errors, and
+likelihood residuals remain separate. The grid splits at second/third contact
+when those contacts exist and uses one segment for a grazing transit.
+`spectro_transit_grid_nodes` sets the total nodes (default `769`); conservative
+power-2 grazing/near-grazing handoffs are automatically raised to the audited
+`2049` nodes. A handoff close enough to outer contact that the full radius-
+ratio prior is not covered safely stays on the direct kernel. Short light
+curves, Keplerian geometry, interpolated LD, and surface models also retain the
+original path.
 
 `analysis_stage` can be `all`, `whitelight`, `prep`, or `highres`. A normal
 run uses `all`; staged cluster runs are described in [GPUs and clusters](gpu_and_clusters.md).

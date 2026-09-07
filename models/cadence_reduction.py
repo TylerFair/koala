@@ -15,12 +15,93 @@ STATISTIC_KEYS = (
 )
 
 
-def build_explinear_oot_statistics(
+_LINEAR_SPECTRO_TREND_NAMES = {
+    frozenset({"linear"}): ("c", "v"),
+    frozenset({"quadratic"}): ("c", "v", "v2"),
+    frozenset({"cubic"}): ("c", "v", "v2", "v3"),
+    frozenset({"quartic"}): ("c", "v", "v2", "v3", "v4"),
+    frozenset({"explinear_spectroscopic"}): ("c", "v", "A"),
+    frozenset({"spot_spectroscopic"}): ("c", "A_spot"),
+    frozenset({"quadratic", "spot_spectroscopic"}): (
+        "c", "v", "v2", "A_spot"
+    ),
+    frozenset({"2spot_spectroscopic"}): (
+        "c", "A_spot", "A_spot2"
+    ),
+    frozenset({"linear_discontinuity_spectroscopic"}): ("c", "A_jump"),
+    frozenset({
+        "spot_spectroscopic", "linear_discontinuity_spectroscopic"
+    }): ("c", "A_spot", "A_jump"),
+}
+
+
+def linear_spectro_trend_coefficient_names(detrend_type):
+    """Return sampled coefficients when a spectroscopic trend is linear.
+
+    ``None`` deliberately excludes GP trends, free-timescale exponentials,
+    Gaussian-marginalized inference, and any unrecognized composition.
+    """
+    canonical = {
+        "quadratic_spot_spectroscopic": "quadratic+spot_spectroscopic",
+    }.get(str(detrend_type), str(detrend_type))
+    return _LINEAR_SPECTRO_TREND_NAMES.get(
+        frozenset(canonical.split("+"))
+    )
+
+
+def build_linear_spectro_trend_design(
+    detrend_type,
+    time,
+    *,
+    exp_trend=None,
+    spot_trend=None,
+    spot_trend2=None,
+    jump_trend=None,
+):
+    """Build the fixed basis matrix for an eligible additive trend."""
+    names = linear_spectro_trend_coefficient_names(detrend_type)
+    if names is None:
+        raise ValueError(
+            f"Trend {detrend_type!r} is not an eligible linear spectroscopic "
+            "trend."
+        )
+    time = np.asarray(time, dtype=np.float64)
+    centered = time - np.min(time)
+    external = {
+        "A": exp_trend,
+        "A_spot": spot_trend,
+        "A_spot2": spot_trend2,
+        "A_jump": jump_trend,
+    }
+    columns = []
+    for name in names:
+        if name == "c":
+            column = np.ones_like(time)
+        elif name == "v":
+            column = centered
+        elif name.startswith("v") and name[1:].isdigit():
+            column = centered ** int(name[1:])
+        else:
+            column = external[name]
+            if column is None:
+                raise ValueError(
+                    f"Trend {detrend_type!r} requires the fixed {name} basis."
+                )
+            column = np.asarray(column, dtype=np.float64)
+            if column.shape != time.shape:
+                raise ValueError(
+                    f"The fixed {name} basis must have the same shape as time."
+                )
+        columns.append(column)
+    return names, np.column_stack(columns)
+
+
+def build_linear_oot_statistics(
     time,
     flux,
     error,
     transit_window_indices,
-    exp_trend,
+    design,
     reference_beta,
     likelihood_mask=None,
 ):
@@ -37,12 +118,15 @@ def build_explinear_oot_statistics(
         error = np.broadcast_to(error, flux.shape)
     if flux.shape != error.shape or flux.shape[1] != time.size:
         raise ValueError("flux/error must have shape [channel, time].")
-    exp_trend = np.asarray(exp_trend, dtype=np.float64)
-    if exp_trend.shape != time.shape:
-        raise ValueError("exp_trend must have the same shape as time.")
+    design = np.asarray(design, dtype=np.float64)
+    if design.ndim != 2 or design.shape[0] != time.size:
+        raise ValueError("design must have shape [time, coefficient].")
     reference_beta = np.asarray(reference_beta, dtype=np.float64)
-    if reference_beta.shape != (flux.shape[0], 3):
-        raise ValueError("reference_beta must have shape [channel, 3].")
+    expected_beta_shape = (flux.shape[0], design.shape[1])
+    if reference_beta.shape != expected_beta_shape:
+        raise ValueError(
+            f"reference_beta must have shape {expected_beta_shape}."
+        )
 
     if likelihood_mask is None:
         valid = np.ones(flux.shape, dtype=bool)
@@ -55,12 +139,8 @@ def build_explinear_oot_statistics(
     valid &= np.isfinite(flux) & np.isfinite(error)
 
     extended = np.longdouble
-    centered_time = np.asarray(time - np.min(time), dtype=extended)
-    design = np.stack((
-        np.ones(time.size, dtype=extended),
-        centered_time,
-        np.asarray(exp_trend, dtype=extended),
-    ), axis=1)
+    design = np.asarray(design, dtype=extended)
+    num_coefficients = design.shape[1]
 
     lane_payloads = []
     maximum_groups = 0
@@ -76,8 +156,12 @@ def build_explinear_oot_statistics(
         residual = np.asarray(flux[lane, lane_indices], dtype=extended) - x @ beta
         counts = np.zeros(group_count, dtype=np.int64)
         reference_sse = np.zeros(group_count, dtype=extended)
-        x_residual = np.zeros((group_count, 3), dtype=extended)
-        xx = np.zeros((group_count, 3, 3), dtype=extended)
+        x_residual = np.zeros(
+            (group_count, num_coefficients), dtype=extended
+        )
+        xx = np.zeros(
+            (group_count, num_coefficients, num_coefficients), dtype=extended
+        )
         for group in range(group_count):
             selected = group_ids == group
             group_x = x[selected]
@@ -86,11 +170,11 @@ def build_explinear_oot_statistics(
             reference_sse[group] = np.sum(
                 group_residual * group_residual, dtype=extended
             )
-            for left in range(3):
+            for left in range(num_coefficients):
                 x_residual[group, left] = np.sum(
                     group_x[:, left] * group_residual, dtype=extended
                 )
-                for right in range(3):
+                for right in range(num_coefficients):
                     xx[group, left, right] = np.sum(
                         group_x[:, left] * group_x[:, right], dtype=extended
                     )
@@ -106,10 +190,13 @@ def build_explinear_oot_statistics(
             (flux.shape[0], maximum_groups)
         ),
         "oot_group_x_reference_residual": np.zeros(
-            (flux.shape[0], maximum_groups, 3)
+            (flux.shape[0], maximum_groups, num_coefficients)
         ),
         "oot_group_xx": np.zeros(
-            (flux.shape[0], maximum_groups, 3, 3)
+            (
+                flux.shape[0], maximum_groups,
+                num_coefficients, num_coefficients,
+            )
         ),
     }
     for lane, payload in enumerate(lane_payloads):
@@ -123,4 +210,34 @@ def build_explinear_oot_statistics(
     return result
 
 
-__all__ = ["STATISTIC_KEYS", "build_explinear_oot_statistics"]
+def build_explinear_oot_statistics(
+    time,
+    flux,
+    error,
+    transit_window_indices,
+    exp_trend,
+    reference_beta,
+    likelihood_mask=None,
+):
+    """Compatibility wrapper for the original fixed-timescale path."""
+    _, design = build_linear_spectro_trend_design(
+        "explinear_spectroscopic", time, exp_trend=exp_trend
+    )
+    return build_linear_oot_statistics(
+        time,
+        flux,
+        error,
+        transit_window_indices,
+        design,
+        reference_beta,
+        likelihood_mask=likelihood_mask,
+    )
+
+
+__all__ = [
+    "STATISTIC_KEYS",
+    "build_explinear_oot_statistics",
+    "build_linear_oot_statistics",
+    "build_linear_spectro_trend_design",
+    "linear_spectro_trend_coefficient_names",
+]
