@@ -39,15 +39,15 @@ should import a helper from its owning `koala` module.
 
 ## Model builders
 
-[models.jaxoplanet.builder](https://github.com/TylerFair/jwst-lightcurves/blob/main/models/jaxoplanet/builder.py): `create_whitelight_model`, `create_vectorized_model`.
+[models.jaxoplanet.builder](https://github.com/TylerFair/koala/blob/main/models/jaxoplanet/builder.py): `create_whitelight_model`, `create_vectorized_model`.
 
-[models.harmonica.builder](https://github.com/TylerFair/jwst-lightcurves/blob/main/models/harmonica/builder.py): `create_whitelight_model`, `create_vectorized_model`.
+[models.harmonica.builder](https://github.com/TylerFair/koala/blob/main/models/harmonica/builder.py): `create_whitelight_model`, `create_vectorized_model`.
 
 ## Sampler backends
 
-[models.independent_nuts](https://github.com/TylerFair/jwst-lightcurves/blob/main/models/independent_nuts.py): `build_independent_nuts_runner`.
+[models.independent_nuts](https://github.com/TylerFair/koala/blob/main/models/independent_nuts.py): `build_independent_nuts_runner`.
 
-[models.independent_hmc](https://github.com/TylerFair/jwst-lightcurves/blob/main/models/independent_hmc.py): `get_samples_independent_hmc`.
+[models.independent_hmc](https://github.com/TylerFair/koala/blob/main/models/independent_hmc.py): `get_samples_independent_hmc`.
 
 `koala.sampling` supplies the pipeline-level chunking, checkpoint, fallback,
 and diagnostics orchestration around these backends. It also owns the
@@ -61,9 +61,9 @@ those safeguards.
 
 ## Limb-darkening and trend utilities
 
-[models.sing_ld](https://github.com/TylerFair/jwst-lightcurves/blob/main/models/sing_ld.py): `quadratic_to_sing`, `sing_to_quadratic`, `estimate_gray_offset`.
+[models.sing_ld](https://github.com/TylerFair/koala/blob/main/models/sing_ld.py): `quadratic_to_sing`, `sing_to_quadratic`, `estimate_gray_offset`.
 
-[models.trends](https://github.com/TylerFair/jwst-lightcurves/blob/main/models/trends.py): `spot_crossing`.
+[models.trends](https://github.com/TylerFair/koala/blob/main/models/trends.py): `spot_crossing`.
 
 `koala.limb_darkening` supplies the pipeline prior builders, including
 `get_or_build_power2_ld_prior`. Harmonica product readers and transformations

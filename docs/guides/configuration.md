@@ -1,7 +1,7 @@
 # Configuration
 
 A fit is described by one YAML file. Start from the nearest file in the
-[`examples` directory](https://github.com/TylerFair/jwst-lightcurves/tree/main/examples),
+[`examples` directory](https://github.com/TylerFair/koala/tree/main/examples),
 change the target and file paths, and keep the rest small. The sampler and
 convergence checks already have production defaults.
 

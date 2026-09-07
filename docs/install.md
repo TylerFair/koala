@@ -6,8 +6,8 @@ keeps JAX and its compiled dependencies separate from other analysis code.
 ## 1. Clone and create an environment
 
 ```bash
-git clone https://github.com/TylerFair/jwst-lightcurves.git
-cd jwst-lightcurves
+git clone https://github.com/TylerFair/koala.git
+cd koala
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip

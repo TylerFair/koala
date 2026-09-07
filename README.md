@@ -31,8 +31,8 @@ Clone the repository, create an environment, and install the scientific
 dependencies:
 
 ```bash
-git clone https://github.com/TylerFair/jwst-lightcurves.git
-cd jwst-lightcurves
+git clone https://github.com/TylerFair/koala.git
+cd koala
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
