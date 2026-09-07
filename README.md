@@ -37,8 +37,7 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install jax numpy numpyro numpyro-ext jaxopt jaxoplanet \
-  astropy pandas scipy matplotlib arviz pyyaml tinygp exotic-ld \
-  'exotedrf[stage4]'
+  astropy pandas scipy matplotlib arviz pyyaml tinygp exotic-ld
 ```
 
 The SOSS example points to a compact real WASP-39 extraction included in the

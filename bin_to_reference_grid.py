@@ -19,7 +19,7 @@ Usage:
 
 import numpy as np
 import pandas as pd
-from exotedrf.stage4 import bin_at_bins
+from koala.binning import bin_at_bins
 
 
 def load_reference_grid(reference_params_csv):
@@ -55,7 +55,7 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
     """
     Bin input spectroscopy data to match a reference wavelength grid.
 
-    This function uses exotedrf.stage4.bin_at_bins to bin the input data to the exact
+    This function uses koala.binning.bin_at_bins to bin the input data to the exact
     wavelength bins defined by the reference grid.
 
     Parameters
@@ -127,7 +127,7 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
     if len(ref_wavelengths) == 0:
         raise ValueError("No overlap between input and reference wavelength ranges!")
 
-    # Use bin_at_bins from exotedrf
+    # Use Koala's local bin_at_bins
     # Note: bin_at_bins expects flux shape (n_times, n_wavelengths) for the input
     # and returns shape (n_times, n_output_wavelengths)
 

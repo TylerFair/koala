@@ -4,7 +4,7 @@ import pandas as pd
 import jax
 import jax.numpy as jnp
 import pickle
-from exotedrf.stage4 import bin_at_resolution, bin_at_pixel
+from koala.binning import bin_at_resolution, bin_at_pixel
 from astropy.io import fits
 import matplotlib.pyplot as plt
 jax.config.update('jax_enable_x64', True)

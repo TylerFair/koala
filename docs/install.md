@@ -21,12 +21,11 @@ For a CPU environment:
 
 ```bash
 python -m pip install jax numpy numpyro numpyro-ext jaxopt jaxoplanet \
-  astropy pandas scipy matplotlib arviz pyyaml tinygp exotic-ld \
-  'exotedrf[stage4]'
+  astropy pandas scipy matplotlib arviz pyyaml tinygp exotic-ld
 ```
 
-The ExoTEDRF `stage4` extra supplies the box-spectrum reader and binning
-utilities used by the input pipeline.
+Koala reads ExoTEDRF box-spectrum FITS files directly with Astropy and includes
+its own NumPy binning utilities; installing ExoTEDRF is not required.
 
 CPU is useful for checking a configuration, running the bundled example
 (about two hours on eight cores), and building the documentation. A full
