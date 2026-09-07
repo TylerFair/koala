@@ -17,12 +17,21 @@ Python 3.11 is the recommended version.
 
 ## 2. Install the scientific dependencies
 
+The root `requirements.txt` includes JAX, JAXlib, JAXoplanet, NumPyro,
+Harmonica, and the scientific and plotting dependencies used by Koala.
+
 For a CPU environment:
 
 ```bash
-python -m pip install jax numpy numpyro numpyro-ext jaxopt jaxoplanet \
-  astropy pandas scipy matplotlib arviz pyyaml tinygp exotic-ld
+python -m pip install -r requirements.txt
 ```
+
+Harmonica is bundled in `harmonica_modified/` and installed locally as
+`planet-harmonica`. It provides `harmonica.jax.harmonica_transit_power2_ld` and
+`harmonica_transit_quad_ld`. Its source build requires a C++ compiler
+(Xcode Command Line Tools on macOS, or GCC/Clang on Linux). Pip installs the
+Python build dependencies automatically; the required Eigen headers are
+included in the repository, with no submodule checkout needed.
 
 Koala reads ExoTEDRF box-spectrum FITS files directly with Astropy and includes
 its own NumPy binning utilities; installing ExoTEDRF is not required.
@@ -32,7 +41,9 @@ CPU is useful for checking a configuration, running the bundled example
 spectroscopic fit at native or high resolution is designed for an NVIDIA GPU. Install the CUDA-enabled
 JAX wheel using the command for your driver and CUDA installation in the
 [JAX installation guide](https://docs.jax.dev/en/latest/installation.html),
-then install the remaining packages above.
+then run `python -m pip install -r requirements.txt`. The requirements do not
+force a CPU-only JAX extra. Harmonica GPU builds additionally require the CUDA
+toolkit and `HARMONICA_ENABLE_CUDA=1` when installing the requirements.
 
 Check what JAX can see:
 
@@ -71,7 +82,7 @@ You should see the required `-c/--config` option. Then check the numerical
 environment:
 
 ```bash
-python -c "import jax, numpyro, jaxoplanet; print(jax.devices())"
+python -c "import jax, numpyro, jaxoplanet; from harmonica.jax import harmonica_transit_power2_ld, harmonica_transit_quad_ld; print(jax.devices())"
 ```
 
 Koala enables JAX 64-bit calculations itself. Set the platform before
@@ -95,6 +106,3 @@ ExoTiC-LD grids from step 3.
 python -m pip install -r docs/requirements.txt
 sphinx-build -W -b html docs docs/_build/html
 ```
-
-The repository's `setup.sh` contains a developer-specific environment path;
-it is not an installer and is not needed for the steps above.

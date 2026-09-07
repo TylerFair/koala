@@ -1,0 +1,35 @@
+# Koala runtime dependencies. Install from the repository root:
+#   python -m pip install -r requirements.txt
+# JAX selects the CPU backend by default. For NVIDIA GPUs, install the
+# appropriate JAX CUDA extra as described in docs/install.md.
+
+# JAX computation, inference, optimization, and transit models
+jax>=0.5.3
+jaxlib>=0.5.3
+jaxoplanet>=0.1.0
+numpyro>=0.15.3
+numpyro-ext>=0.0.4
+jaxopt>=0.8.3
+tinygp>=0.3.0
+
+# Bundled Harmonica JAX backend; build requires a C++ compiler.
+./harmonica_modified
+
+# Scientific arrays, FITS/CSV input, configuration, and limb darkening
+numpy
+scipy
+astropy
+pandas
+PyYAML
+exotic-ld>=3.2.0
+# ExoTiC-LD 3.2 uses pkg_resources, removed in setuptools 81.
+setuptools<81
+
+# Diagnostics and publication-style plots
+matplotlib
+arviz
+SciencePlots
+cmcrameri
+
+# ExoTEDRF is not required; spectral binning is included in koala.binning.
+# Test tools and Sphinx dependencies are separate from runtime requirements.

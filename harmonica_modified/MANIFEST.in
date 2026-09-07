@@ -1,0 +1,3 @@
+include LICENSE README.md
+recursive-include harmonica *.py *.cpp *.hpp *.cu
+recursive-include vendor/eigen *

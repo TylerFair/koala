@@ -36,9 +36,12 @@ cd koala
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install jax numpy numpyro numpyro-ext jaxopt jaxoplanet \
-  astropy pandas scipy matplotlib arviz pyyaml tinygp exotic-ld
+python -m pip install -r requirements.txt
 ```
+
+The requirements include JAX, JAXoplanet, NumPyro, and the Harmonica JAX
+backend bundled in `harmonica_modified/`. Building Harmonica
+requires a C++ compiler; see the [installation guide](docs/install.md).
 
 The SOSS example points to a compact real WASP-39 extraction included in the
 repository. Set its `stellar.ld_data_path`, then run it from the repository
