@@ -24,11 +24,13 @@ The implementation is organized under `koala`:
 - `koala.config` and `koala.constants`: YAML/flag resolution and stable schema
   constants.
 - `koala.data` and `koala.artifacts`: data preparation, identities, atomic
-  writes, and artifact manifests.
+  writes, and the shared `ArtifactSet` load/compute/manifest protocol.
 - `koala.sampling` and `koala.geometry`: MCMC/chunk orchestration and the
   validated white-light geometry handoff.
 - `koala.limb_darkening`: stellar, uniform, and Sing limb-darkening priors.
-- `koala.white_light` and `koala.spectroscopy`: the inference stages.
+- `koala.white_light` and `koala.spectroscopy`: the inference stages;
+  `run_spectroscopic_stage` dispatches the low- and high-resolution stage
+  hooks while the legacy stage names remain compatibility wrappers.
 - `koala.outputs`, `koala.harmonica_products`, and `koala.surface`: result
   products and surface/eclipse/phase-curve support.
 
@@ -48,7 +50,9 @@ should import a helper from its owning `koala` module.
 [models.independent_hmc](https://github.com/TylerFair/jwst-lightcurves/blob/main/models/independent_hmc.py): `get_samples_independent_hmc`.
 
 `koala.sampling` supplies the pipeline-level chunking, checkpoint, fallback,
-and diagnostics orchestration around these backends.
+and diagnostics orchestration around these backends. It also owns the
+bounded-memory sequential channel evaluator shared by both spectroscopic
+stages.
 
 
 The CLI adds checkpoint fingerprints, convergence gates, retries, and output

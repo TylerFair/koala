@@ -112,6 +112,7 @@ from .artifacts import (
     _file_content_identity, _optional_file_content_identity,
     _directory_metadata_identity, _atomic_save_npy, _atomic_savez,
     _atomic_savez_compressed, _atomic_dataframe_csv,
+    ArtifactSet,
 )
 from .outputs import (
     _param_at, _poly_trend_np, _soft_step_np, _trend_from_params_np,
@@ -138,7 +139,7 @@ from .sampling import (
     _chunk_checkpoint_path, _SamplerSamples, _load_chunk_samples,
     _concatenate_chunk_samples, _spectro_failed_lanes,
     _spectro_sampler_swap_order, _resolve_parallel_chunk_job,
-    get_samples_chunked, _run_sampling_stage,
+    get_samples_chunked, _run_sampling_stage, evaluate_channels_sequentially,
 )
 from .limb_darkening import (
     _power2_ld_initial_sites, _power2_ld_optimization_sites,
@@ -184,7 +185,7 @@ for _module in (artifacts, config, constants, data, geometry, harmonica_products
     globals().update({name: value for name, value in vars(_module).items()
                       if not name.startswith("__")})
 
-def run_low_resolution_stage(
+def _run_low_resolution_stage_hook(
     A_RS_BASE,
     B_BASE,
     COSI_BASE,
@@ -351,17 +352,16 @@ def run_low_resolution_stage(
                 and os.path.exists(lr_limb_samples_path)
             )
         )
-        lr_cache_valid = bool(
-            required_lr_limb_products_exist
-            and _science_artifact_manifest_matches(
-                lr_manifest_path, lr_artifact_fingerprint
-            )
+        lr_artifact_set = ArtifactSet(
+            stage="low_resolution",
+            manifest_path=lr_manifest_path,
+            fingerprint=lr_artifact_fingerprint,
+            required_paths=(lr_mask_path, lr_params_path),
         )
-        if (
-            os.path.exists(lr_mask_path)
-            and os.path.exists(lr_params_path)
-            and lr_cache_valid
-        ):
+        lr_cache_valid = lr_artifact_set.is_reusable(
+            extra_condition=required_lr_limb_products_exist
+        )
+        if lr_cache_valid:
             print(
                 f"Reusing low-res results from {lr_bin_str}; "
                 "skipping low-res fit."
@@ -1032,51 +1032,26 @@ def run_low_resolution_stage(
         
         final_in_axes = {k: in_axes_map.get(k, None) for k in map_params_lr.keys()}
 
-        # Evaluate channels sequentially to prevent Out-Of-Memory (OOM) errors.
-        @jax.jit
-        def eval_channel_lr(channel_params, t_val, *extra_args):
-            if transit_engine == 'jaxoplanet':
-                channel_params = _attach_surface_eval_metadata(
-                    channel_params, surface_config
-                )
-                channel_params = {
-                    **channel_params,
-                    "_jaxoplanet_kernel": jaxoplanet_kernel,
-                    "_ld_profile": ld_profile,
-                }
-            return selected_kernel(channel_params, t_val, *extra_args)
-
-        model_all_list = []
         num_lcs_lr = flux_lr.shape[0]
-        for i in range(num_lcs_lr):
-            channel_params = {}
-            for k, v in map_params_lr.items():
-                if k in _JAXOPLANET_STATIC_EVAL_KEYS or k in _SURFACE_STATIC_EVAL_KEYS:
-                    continue
-                if final_in_axes[k] == 0:
-                    channel_params[k] = v[i]
-                else:
-                    channel_params[k] = v
-            
-            if 'gp_spectroscopic' in detrend_type_multiwave:
-                ch_model = eval_channel_lr(channel_params, time_lr, gp_trend)
-            elif '2spot_spectroscopic' in detrend_type_multiwave:
-                ch_model = eval_channel_lr(channel_params, time_lr, spot_trend, spot_trend2)
-            elif _has_single_spot_spectroscopic(detrend_type_multiwave):
-                if 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
-                    ch_model = eval_channel_lr(channel_params, time_lr, spot_trend, jump_trend)
-                else:
-                    ch_model = eval_channel_lr(channel_params, time_lr, spot_trend)
-            elif 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
-                ch_model = eval_channel_lr(channel_params, time_lr, jump_trend)
-            elif 'explinear_spectroscopic' in detrend_type_multiwave:
-                ch_model = eval_channel_lr(channel_params, time_lr, exp_trend_lr)
-            else:
-                ch_model = eval_channel_lr(channel_params, time_lr)
-                
-            model_all_list.append(ch_model)
-            
-        model_all = jnp.stack(model_all_list, axis=0)
+        model_all = evaluate_channels_sequentially(
+            map_params_lr,
+            final_in_axes,
+            time_lr,
+            num_lcs_lr,
+            detrend_type_multiwave,
+            selected_kernel,
+            transit_engine,
+            surface_config,
+            jaxoplanet_kernel,
+            ld_profile,
+            gp_trend,
+            spot_trend,
+            spot_trend2,
+            jump_trend,
+            locals().get('exp_trend_lr'),
+            _attach_surface_eval_metadata,
+            _has_single_spot_spectroscopic,
+        )
 
         residuals = flux_lr - model_all
         _lr_dt_sec = float(np.nanmedian(np.diff(np.array(time_lr)))) * 86400.0
@@ -1169,13 +1144,11 @@ def run_low_resolution_stage(
                 posterior_samples_path=lr_limb_samples_path,
                 title_prefix=f"{planet_str} - {lr_bin_str}",
             )
-        _write_science_artifact_manifest(
-            lr_manifest_path, "low_resolution", lr_artifact_fingerprint
-        )
+        lr_artifact_set.write_manifest()
     return (valid, spot_trend, spot_trend2, jump_trend,)
 
 
-def run_high_resolution_stage(
+def _run_high_resolution_stage_hook(
     A_RS_BASE,
     B_BASE,
     COSI_BASE,
@@ -1767,52 +1740,26 @@ def run_high_resolution_stage(
     final_in_axes_hr = {k: in_axes_map_hr.get(k, None) for k in map_params_hr.keys()}
     selected_kernel_hr = resolve_detrend_kernel(detrend_type_multiwave)
     
-    # Evaluate channels sequentially to prevent XLA Out-Of-Memory (OOM) on large channel/time dimensions.
-    # By running sequentially, the peak memory usage is flat w.r.t. the number of channels.
-    @jax.jit
-    def eval_channel_hr(channel_params, t_val, *extra_args):
-        if transit_engine == 'jaxoplanet':
-            channel_params = _attach_surface_eval_metadata(
-                channel_params, surface_config
-            )
-            channel_params = {
-                **channel_params,
-                "_jaxoplanet_kernel": jaxoplanet_kernel,
-                "_ld_profile": ld_profile,
-            }
-        return selected_kernel_hr(channel_params, t_val, *extra_args)
-
-    model_all_hr_list = []
     num_lcs_hr = flux_err_hr.shape[0]
-    for i in range(num_lcs_hr):
-        channel_params = {}
-        for k, v in map_params_hr.items():
-            if k in _JAXOPLANET_STATIC_EVAL_KEYS or k in _SURFACE_STATIC_EVAL_KEYS:
-                continue
-            if final_in_axes_hr[k] == 0:
-                channel_params[k] = v[i]
-            else:
-                channel_params[k] = v
-        
-        if 'gp_spectroscopic' in detrend_type_multiwave:
-            ch_model = eval_channel_hr(channel_params, time_hr, gp_trend)
-        elif '2spot_spectroscopic' in detrend_type_multiwave:
-            ch_model = eval_channel_hr(channel_params, time_hr, spot_trend, spot_trend2)
-        elif _has_single_spot_spectroscopic(detrend_type_multiwave):
-            if 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
-                ch_model = eval_channel_hr(channel_params, time_hr, spot_trend, jump_trend)
-            else:
-                ch_model = eval_channel_hr(channel_params, time_hr, spot_trend)
-        elif 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
-            ch_model = eval_channel_hr(channel_params, time_hr, jump_trend)
-        elif 'explinear_spectroscopic' in detrend_type_multiwave:
-            ch_model = eval_channel_hr(channel_params, time_hr, exp_trend_hr)
-        else:
-            ch_model = eval_channel_hr(channel_params, time_hr)
-            
-        model_all_hr_list.append(ch_model)
-        
-    model_all_hr = jnp.stack(model_all_hr_list, axis=0)
+    model_all_hr = evaluate_channels_sequentially(
+        map_params_hr,
+        final_in_axes_hr,
+        time_hr,
+        num_lcs_hr,
+        detrend_type_multiwave,
+        selected_kernel_hr,
+        transit_engine,
+        surface_config,
+        jaxoplanet_kernel,
+        ld_profile,
+        gp_trend,
+        spot_trend,
+        spot_trend2,
+        jump_trend,
+        locals().get('exp_trend_hr'),
+        _attach_surface_eval_metadata,
+        _has_single_spot_spectroscopic,
+    )
 
     residuals_hr = np.array(flux_hr - model_all_hr)
     _hr_dt_sec = float(np.nanmedian(np.diff(np.array(time_hr)))) * 86400.0
@@ -1873,3 +1820,30 @@ def run_high_resolution_stage(
             title_prefix=f"{planet_str} - {hr_bin_str}",
         )
     return True
+
+
+_SPECTROSCOPIC_STAGE_HOOKS = {
+    "lowres": _run_low_resolution_stage_hook,
+    "highres": _run_high_resolution_stage_hook,
+}
+
+
+def run_spectroscopic_stage(stage, *args, **kwargs):
+    """Run one literal spectroscopic stage through the shared dispatch seam."""
+    try:
+        stage_hook = _SPECTROSCOPIC_STAGE_HOOKS[stage]
+    except KeyError as error:
+        raise ValueError(
+            f"Unknown spectroscopic stage {stage!r}; expected 'lowres' or 'highres'."
+        ) from error
+    return stage_hook(*args, **kwargs)
+
+
+def run_low_resolution_stage(*args, **kwargs):
+    """Compatibility wrapper for the low-resolution stage."""
+    return run_spectroscopic_stage("lowres", *args, **kwargs)
+
+
+def run_high_resolution_stage(*args, **kwargs):
+    """Compatibility wrapper for the high-resolution stage."""
+    return run_spectroscopic_stage("highres", *args, **kwargs)

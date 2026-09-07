@@ -139,6 +139,7 @@ from .artifacts import (
     _file_content_identity, _optional_file_content_identity,
     _directory_metadata_identity, _atomic_save_npy, _atomic_savez,
     _atomic_savez_compressed, _atomic_dataframe_csv,
+    ArtifactSet, load_or_compute_artifact_set,
 )
 
 
@@ -1028,33 +1029,40 @@ def run(cfg, config_path=None):
             "reference_grids": reference_grid_identities,
         },
     )
-    reuse_spectro_data = bool(
-        os.path.exists(spectro_data_file)
-        and _science_artifact_manifest_matches(
-            spectro_data_manifest, spectro_data_fingerprint
-        )
+    spectro_artifact_set = ArtifactSet(
+        stage="spectro_data",
+        manifest_path=spectro_data_manifest,
+        fingerprint=spectro_data_fingerprint,
+        required_paths=(spectro_data_file,),
     )
-    data = None
-    if reuse_spectro_data:
-        try:
-            data = SpectroData.load(spectro_data_file)
-            print("Reusing fingerprinted spectroscopy data cache.")
-        except (OSError, EOFError, pickle.UnpicklingError, ValueError, TypeError):
-            print("Spectroscopy data cache is unreadable; rebuilding atomically.")
-    if data is None:
-        data = process_spectroscopy_data(
+
+    def _compute_spectro_data():
+        return process_spectroscopy_data(
             instrument, input_dir, output_dir, planet_str, cfg, fits_file,
             mask_start, mask_end, mask_integrations_start,
             mask_integrations_end,
         )
+
+    def _save_spectro_data(data_to_save):
         temporary_data = (
             f"{spectro_data_file}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
         )
-        data.save(temporary_data)
+        data_to_save.save(temporary_data)
         os.replace(temporary_data, spectro_data_file)
-        _write_science_artifact_manifest(
-            spectro_data_manifest, "spectro_data", spectro_data_fingerprint
-        )
+
+    data = load_or_compute_artifact_set(
+        spectro_artifact_set,
+        lambda: SpectroData.load(spectro_data_file),
+        _compute_spectro_data,
+        _save_spectro_data,
+        load_errors=(
+            OSError, EOFError, pickle.UnpicklingError, ValueError, TypeError,
+        ),
+        on_loaded=lambda: print("Reusing fingerprinted spectroscopy data cache."),
+        on_load_error=lambda: print(
+            "Spectroscopy data cache is unreadable; rebuilding atomically."
+        ),
+    )
     
     print("Data loaded.")
     print(f"Data length: {data.time.shape}")

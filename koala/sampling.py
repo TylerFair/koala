@@ -1692,3 +1692,72 @@ def _run_sampling_stage(
         mcmc_kwargs=mcmc_kwargs,
         **model_kwargs,
     )
+
+
+def evaluate_channels_sequentially(
+    map_params,
+    final_in_axes,
+    time_values,
+    num_lcs,
+    detrend_type_multiwave,
+    selected_kernel,
+    transit_engine,
+    surface_config,
+    jaxoplanet_kernel,
+    ld_profile,
+    gp_trend,
+    spot_trend,
+    spot_trend2,
+    jump_trend,
+    exp_trend,
+    attach_surface_eval_metadata,
+    has_single_spot_spectroscopic,
+):
+    """Evaluate channels in the original bounded-memory sequential order."""
+    @jax.jit
+    def eval_channel(channel_params, t_val, *extra_args):
+        if transit_engine == 'jaxoplanet':
+            channel_params = attach_surface_eval_metadata(
+                channel_params, surface_config
+            )
+            channel_params = {
+                **channel_params,
+                "_jaxoplanet_kernel": jaxoplanet_kernel,
+                "_ld_profile": ld_profile,
+            }
+        return selected_kernel(channel_params, t_val, *extra_args)
+
+    model_all_list = []
+    for i in range(num_lcs):
+        channel_params = {}
+        for k, v in map_params.items():
+            if k in _JAXOPLANET_STATIC_EVAL_KEYS or k in _SURFACE_STATIC_EVAL_KEYS:
+                continue
+            if final_in_axes[k] == 0:
+                channel_params[k] = v[i]
+            else:
+                channel_params[k] = v
+
+        if 'gp_spectroscopic' in detrend_type_multiwave:
+            ch_model = eval_channel(channel_params, time_values, gp_trend)
+        elif '2spot_spectroscopic' in detrend_type_multiwave:
+            ch_model = eval_channel(
+                channel_params, time_values, spot_trend, spot_trend2
+            )
+        elif has_single_spot_spectroscopic(detrend_type_multiwave):
+            if 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
+                ch_model = eval_channel(
+                    channel_params, time_values, spot_trend, jump_trend
+                )
+            else:
+                ch_model = eval_channel(channel_params, time_values, spot_trend)
+        elif 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
+            ch_model = eval_channel(channel_params, time_values, jump_trend)
+        elif 'explinear_spectroscopic' in detrend_type_multiwave:
+            ch_model = eval_channel(channel_params, time_values, exp_trend)
+        else:
+            ch_model = eval_channel(channel_params, time_values)
+
+        model_all_list.append(ch_model)
+
+    return jnp.stack(model_all_list, axis=0)

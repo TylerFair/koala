@@ -48,7 +48,7 @@ This prepares a coarse $R=20$ grid and fits SOSS order 1 in final $R=100$ bins. 
 python fit_jwst.py -c wasp39.yaml
 ```
 
-The example defaults to CPU so it can start on a laptop, although a full spectroscopic fit can be slow. For a GPU run, set `host_device: gpu` in the YAML and make JAX's device choice explicit:
+The example defaults to CPU so it can start on a laptop; the complete fit then takes about two hours on eight cores (a few minutes for the white-light stage, the rest in the $R=100$ channels), against ten to twenty minutes on one GPU. For a GPU run, set `host_device: gpu` in the YAML and make JAX's device choice explicit:
 
 ```bash
 export JAX_ENABLE_X64=1

@@ -9,7 +9,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "docs" / "_static"
 plt.rcParams["svg.fonttype"] = "none"
-plt.rcParams["svg.hashsalt"] = "penumbra-tutorial-figures"
+plt.rcParams["svg.hashsalt"] = "koala-tutorial-figures"
 
 
 def finish(fig, name):

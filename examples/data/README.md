@@ -1,7 +1,7 @@
 # Example data
 
 `WASP-39_soss_binned8.fits` is a compact, real NIRISS/SOSS time-series
-extraction for trying penumbra. It contains all 537 integrations and both
+extraction for trying Koala. It contains all 537 integrations and both
 spectral orders from the source extraction. Every group of eight adjacent
 detector columns was combined to reduce the file from 35.3 MB to about 4.4 MB:
 

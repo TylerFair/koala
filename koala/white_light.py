@@ -112,6 +112,7 @@ from .artifacts import (
     _file_content_identity, _optional_file_content_identity,
     _directory_metadata_identity, _atomic_save_npy, _atomic_savez,
     _atomic_savez_compressed, _atomic_dataframe_csv,
+    ArtifactSet,
 )
 from .outputs import (
     _param_at, _poly_trend_np, _soft_step_np, _trend_from_params_np,
@@ -310,14 +311,20 @@ def run_white_light_stage(
             and os.path.exists(wl_limb_samples_path)
         )
     )
-    stringcheck = bool(
-        os.path.exists(wl_mask_path)
-        and os.path.exists(wl_params_path)
-        and ('gp' not in detrending_type or os.path.exists(wl_gp_path))
-        and required_wl_limb_products_exist
-        and wl_geometry_handoff is not None
-        and _science_artifact_manifest_matches(
-            wl_manifest_path, wl_artifact_fingerprint
+    wl_artifact_set = ArtifactSet(
+        stage="whitelight",
+        manifest_path=wl_manifest_path,
+        fingerprint=wl_artifact_fingerprint,
+        required_paths=(
+            wl_mask_path,
+            wl_params_path,
+            *((wl_gp_path,) if 'gp' in detrending_type else ()),
+        ),
+    )
+    stringcheck = wl_artifact_set.is_reusable(
+        extra_condition=(
+            required_wl_limb_products_exist
+            and wl_geometry_handoff is not None
         )
     )
     if not stringcheck and (
@@ -1757,9 +1764,7 @@ def run_white_light_stage(
                 "Saved white-light fixed-geometry handoff to "
                 f"{wl_geometry_handoff_path}."
             )
-            _write_science_artifact_manifest(
-                wl_manifest_path, "whitelight", wl_artifact_fingerprint
-            )
+            wl_artifact_set.write_manifest()
         else:
             print(f'GP trends already exist...')
             wl_mad_mask = np.load(wl_mask_path)

@@ -61,8 +61,11 @@ spectrum.
 ## 3. Run the fit
 
 The supplied SOSS example uses `host_device: cpu`, so it can start on any
-machine. A complete CPU fit will be slow. For an installed CUDA-enabled JAX
-environment inside a GPU allocation, change that line to `host_device: gpu`.
+machine. Expect roughly two hours on eight CPU cores: the white-light fit
+takes a few minutes, the coarse $R=20$ bridge about a quarter of an hour, and
+the 115 channels of the $R=100$ spectrum the rest. On one NVIDIA GPU the same
+fit takes ten to twenty minutes. For an installed CUDA-enabled JAX environment
+inside a GPU allocation, change that line to `host_device: gpu`.
 
 ```bash
 python fit_jwst.py -c config.yaml

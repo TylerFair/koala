@@ -28,8 +28,9 @@ python -m pip install jax numpy numpyro numpyro-ext jaxopt jaxoplanet \
 The ExoTEDRF `stage4` extra supplies the box-spectrum reader and binning
 utilities used by the input pipeline.
 
-CPU is useful for checking a configuration and building the documentation. A
-full spectroscopic fit is designed for an NVIDIA GPU. Install the CUDA-enabled
+CPU is useful for checking a configuration, running the bundled example
+(about two hours on eight cores), and building the documentation. A full
+spectroscopic fit at native or high resolution is designed for an NVIDIA GPU. Install the CUDA-enabled
 JAX wheel using the command for your driver and CUDA installation in the
 [JAX installation guide](https://docs.jax.dev/en/latest/installation.html),
 then install the remaining packages above.

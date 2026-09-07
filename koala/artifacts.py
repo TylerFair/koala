@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import uuid
+from dataclasses import dataclass
 import jax
 import numpy as np
 from .constants import *
@@ -103,6 +104,60 @@ def _write_science_artifact_manifest(path, stage, fingerprint):
     with open(temporary, "w", encoding="utf-8") as stream:
         json.dump(payload, stream, indent=2, sort_keys=True)
     os.replace(temporary, path)
+
+
+@dataclass(frozen=True)
+class ArtifactSet:
+    """The unchanged required-file and manifest contract for one cache."""
+
+    stage: str
+    manifest_path: str
+    fingerprint: str
+    required_paths: tuple = ()
+
+    def manifest_matches(self):
+        return _science_artifact_manifest_matches(
+            self.manifest_path, self.fingerprint
+        )
+
+    def is_reusable(self, *, extra_condition=True):
+        return bool(
+            all(os.path.exists(path) for path in self.required_paths)
+            and extra_condition
+            and self.manifest_matches()
+        )
+
+    def write_manifest(self):
+        _write_science_artifact_manifest(
+            self.manifest_path, self.stage, self.fingerprint
+        )
+
+
+def load_or_compute_artifact_set(
+    artifact_set,
+    load,
+    compute,
+    save,
+    *,
+    load_errors=(OSError, EOFError, ValueError, TypeError),
+    on_loaded=None,
+    on_load_error=None,
+):
+    """Load a reusable artifact set or compute/save it manifest-last."""
+    value = None
+    if artifact_set.is_reusable():
+        try:
+            value = load()
+            if on_loaded is not None:
+                on_loaded()
+        except load_errors:
+            if on_load_error is not None:
+                on_load_error()
+    if value is None:
+        value = compute()
+        save(value)
+        artifact_set.write_manifest()
+    return value
 
 
 def _file_content_identity(path, block_size=8 * 1024 * 1024):
