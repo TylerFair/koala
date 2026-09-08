@@ -2,7 +2,7 @@
 
 This tutorial turns an extracted NIRISS/SOSS time series into a transmission spectrum. It uses WASP-39 b, a linear baseline, and power-2 limb darkening with `stellarprior`. The same workflow applies to the other supported JWST modes.
 
-The repository includes a compact real WASP-39 box-spectrum FITS file for this tutorial. You only need to install the environment and download the ExoTiC-LD stellar grids. Koala fits light curves; it does not run the JWST detector calibration or spectral extraction.
+The repository includes a compact real WASP-39 box-spectrum FITS file for this tutorial. After extracting the source ZIP, run `python -m pip install -e .` from its root. ExoTiC-LD downloads the required stellar-atmosphere and instrument files automatically on the first run. Koala fits light curves; it does not run the JWST detector calibration or spectral extraction.
 
 ## 1. Start from the example
 
@@ -12,11 +12,11 @@ Copy the small, annotated configuration:
 cp examples/niriss_soss_order1.yaml wasp39.yaml
 ```
 
-Then point the configuration at your ExoTiC-LD grids:
+No YAML edits are needed. The example stores automatically downloaded model data here:
 
 ```yaml
 stellar:
-  ld_data_path: /data/exotic_ld_data
+  ld_data_path: exotic_ld_data
 ```
 
 The example already reads `examples/data/WASP-39_soss_binned8.fits` and writes figures, tables, and resumable checkpoints to `results/WASP-39_SOSS_ORDER1`. The teaching FITS retains the complete observation and both SOSS orders, but combines groups of eight adjacent detector columns. Use your original extraction for a scientific analysis.

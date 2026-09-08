@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 .venv/
+.koala_cache/
 build/
 dist/
 *.so

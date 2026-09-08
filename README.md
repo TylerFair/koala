@@ -27,17 +27,16 @@ recovery, corner plots, and residual diagnostics, with PNG/PDF downloads.
 
 ## Get started
 
-Clone the repository, create an environment, and install the scientific
-dependencies:
+Download and extract the GitHub source ZIP, open a terminal in the extracted
+`koala-main` folder, and install Koala:
 
 ```bash
-git clone https://github.com/TylerFair/koala.git
-cd koala
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
 python -m pip install -e .
+python fit_jwst.py -c examples/niriss_soss_order1.yaml
 ```
+
+Use Python 3.10 or newer in a dedicated environment. If your pip is old, run
+`python -m pip install --upgrade pip` first.
 
 The editable install includes JAX, JAXoplanet, NumPyro, and the Harmonica JAX
 backend bundled in `harmonica_modified/`. Building Harmonica
@@ -52,19 +51,13 @@ python -m pip install "git+https://github.com/TylerFair/koala.git"
 The distribution is named `koala-jwst`; these commands install from source.
 These source installation commands do not require a PyPI release.
 
-The SOSS example points to a compact real WASP-39 extraction included in the
-repository. Set its `stellar.ld_data_path`, then run it from the repository
-root:
-
-```bash
-cp examples/niriss_soss_order1.yaml config.yaml
-# Edit stellar.ld_data_path in config.yaml.
-python fit_jwst.py -c config.yaml
-```
+The SOSS example uses the included real WASP-39 extraction with no YAML edits
+needed. On first use, ExoTiC-LD downloads the required stellar-atmosphere and
+instrument files into `exotic_ld_data/`; keep an internet connection for that
+first run. Results are written to `results/WASP-39_SOSS_ORDER1/`.
 
 For an NVIDIA GPU, install the JAX CUDA build appropriate for your system
-before running the fit. The `stellarprior` limb-darkening choice also needs the
-ExoTiC-LD model-data directory.
+before running the fit. ExoTiC-LD reuses its downloaded model data on later runs.
 
 The bundled FITS file retains the complete observation but combines adjacent
 detector columns to keep the download small. It is intended for learning the

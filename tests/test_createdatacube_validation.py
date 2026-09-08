@@ -4,6 +4,33 @@ import pytest
 import createdatacube
 
 
+@pytest.mark.parametrize('instrument', ['NIRISS/SOSS', 'NIRSPEC/G395H', 'MIRI/LRS'])
+def test_fits_readers_return_native_endian_arrays_for_jax(tmp_path, instrument):
+    from astropy.io import fits
+    import jax.numpy as jnp
+
+    lower, upper = (6., 10.) if instrument == 'MIRI/LRS' else (3., 4.)
+    wave = np.linspace(lower, upper, 30)
+    flux = np.full((4, 30), 100.)
+    hdus = [fits.PrimaryHDU()] + [fits.ImageHDU(a) for a in (
+        wave, np.full(30, .01), flux, flux * .01)]
+    if instrument == 'NIRISS/SOSS':
+        hdus += [fits.ImageHDU(np.zeros(1)) for _ in range(4)]
+    hdus.append(fits.ImageHDU(np.arange(4.) + 60000.))
+    path = tmp_path / 'spectrum.fits'
+    fits.HDUList(hdus).writeto(path)
+    assert not fits.getdata(path, 1).dtype.isnative
+    if instrument == 'NIRISS/SOSS':
+        result = createdatacube.unpack_niriss_exotedrf(path, 1, None, None)
+    elif instrument == 'MIRI/LRS':
+        result = createdatacube.unpack_miri_exotedrf(path, None, None)
+    else:
+        result = createdatacube.unpack_nirspec_exotedrf(path, instrument, None, None)
+    for values in result:
+        assert values.dtype.isnative
+        np.testing.assert_array_equal(np.asarray(jnp.asarray(values)), values)
+
+
 def test_process_filters_invalid_integrations_globally_before_binning(monkeypatch):
     time = np.arange(8, dtype=float) + 100.0
     wavelengths = np.array([np.nan, 1.0, 2.0, 3.0])

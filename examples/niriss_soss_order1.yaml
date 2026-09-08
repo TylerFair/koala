@@ -17,7 +17,7 @@ stellar:
   logg_sigma: 0.07
   feh_sigma: 0.02
   ld_model: "stagger"
-  ld_data_path: "/path/to/exotic_ld_data"
+  ld_data_path: "exotic_ld_data"  # downloaded automatically on first use
 
 instrument: 'NIRISS/SOSS'
 order: 1

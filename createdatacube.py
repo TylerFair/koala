@@ -108,11 +108,12 @@ def unpack_niriss_exotedrf(infile, order, trim_start, trim_end, wl_min_o1=None, 
             wave, wave_err, fluxcube, fluxcube_err, wavelength_masks
         )
 
-    wavelength = wave
-    wavelength_err = wave_err
-    t = np.array(bjd)
-    fluxcube = np.array(fluxcube)
-    fluxcube_err = np.array(fluxcube_err)
+    # FITS stores big-endian arrays; JAX requires native-endian numeric input.
+    wavelength = np.asarray(wave, dtype=np.float64)
+    wavelength_err = np.asarray(wave_err, dtype=np.float64)
+    t = np.asarray(bjd, dtype=np.float64)
+    fluxcube = np.asarray(fluxcube, dtype=np.float64)
+    fluxcube_err = np.asarray(fluxcube_err, dtype=np.float64)
 
     return wavelength,wavelength_err, t, fluxcube, fluxcube_err
 
@@ -160,11 +161,12 @@ def unpack_nirspec_exotedrf(infile, instrument, trim_start, trim_end, wl_min=Non
             wave, wave_err, fluxcube, fluxcube_err, wavelength_masks
         )
 
-    wavelength = wave
-    wavelength_err = wave_err
-    t = np.array(bjd)
-    fluxcube = np.array(fluxcube)
-    fluxcube_err = np.array(fluxcube_err)
+    # FITS stores big-endian arrays; JAX requires native-endian numeric input.
+    wavelength = np.asarray(wave, dtype=np.float64)
+    wavelength_err = np.asarray(wave_err, dtype=np.float64)
+    t = np.asarray(bjd, dtype=np.float64)
+    fluxcube = np.asarray(fluxcube, dtype=np.float64)
+    fluxcube_err = np.asarray(fluxcube_err, dtype=np.float64)
     return wavelength, wavelength_err,  t, fluxcube, fluxcube_err
 
 def unpack_miri_exotedrf(infile, trim_start, trim_end, wl_min=None, wl_max=None, wavelength_masks=None):
@@ -207,11 +209,12 @@ def unpack_miri_exotedrf(infile, trim_start, trim_end, wl_min=None, wl_max=None,
             wave, wave_err, fluxcube, fluxcube_err, wavelength_masks
         )
 
-    wavelength = wave
-    wavelength_err = wave_err
-    t = np.array(bjd)
-    fluxcube = np.array(fluxcube)
-    fluxcube_err = np.array(fluxcube_err)
+    # FITS stores big-endian arrays; JAX requires native-endian numeric input.
+    wavelength = np.asarray(wave, dtype=np.float64)
+    wavelength_err = np.asarray(wave_err, dtype=np.float64)
+    t = np.asarray(bjd, dtype=np.float64)
+    fluxcube = np.asarray(fluxcube, dtype=np.float64)
+    fluxcube_err = np.asarray(fluxcube_err, dtype=np.float64)
     return wavelength, wavelength_err, t, fluxcube, fluxcube_err
 
 class SpectroData:

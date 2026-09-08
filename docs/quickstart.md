@@ -3,8 +3,8 @@
 This walkthrough fits one extracted JWST transit. It uses NIRISS/SOSS as the
 example, but NIRSpec follows the same three steps.
 
-You need an [installed environment](install.md) and the ExoTiC-LD stellar
-grids. The repository includes a compact real WASP-39 box-spectrum FITS file,
+Download and extract the GitHub source ZIP, open a terminal in `koala-main`,
+and run `python -m pip install -e .` (see [installation](install.md)). The repository includes a compact real WASP-39 box-spectrum FITS file,
 so this first run needs no separate light-curve download.
 
 ## 1. Copy an example
@@ -18,14 +18,18 @@ cp examples/niriss_soss_order1.yaml config.yaml
 Use `examples/nirspec_g395m.yaml` or `examples/nirspec_prism.yaml` instead for
 those modes.
 
-## 2. Point it at the limb-darkening grids
+## 2. Use the bundled data and automatic model downloads
 
-Open `config.yaml` and change this path:
+No configuration edits are needed. The example uses a writable local cache:
 
 ```yaml
 stellar:
-  ld_data_path: /path/to/exotic_ld_data
+  ld_data_path: exotic_ld_data
 ```
+
+ExoTiC-LD downloads only the required stellar-atmosphere and instrument files
+on first use, then reuses them. Keep an internet connection for the first run;
+there is no separate grid download or path setup.
 
 The example already reads `examples/data/WASP-39_soss_binned8.fits` and writes
 to `results/WASP-39_SOSS_ORDER1`. The FITS file retains every integration and

@@ -3,11 +3,12 @@
 Koala supports editable installs, regular installs, and installation from GitHub. A dedicated environment
 keeps JAX and its compiled dependencies separate from other analysis code.
 
-## 1. Clone and create an environment
+## 1. Download the source and create an environment
+
+Download the source ZIP from GitHub and extract it. In a terminal:
 
 ```bash
-git clone https://github.com/TylerFair/koala.git
-cd koala
+cd koala-main
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -55,21 +56,22 @@ python -c "import jax; print(jax.devices())"
 Run this check inside a GPU allocation on a cluster. Seeing only `CpuDevice`
 there means the JAX build, driver, or allocation needs attention.
 
-## 3. Add the limb-darkening data
+## 3. Run the bundled example
 
-The `exotic-ld` Python package and its stellar-atmosphere grids are separate.
-Download the grids following the
-[ExoTiC-LD installation guide](https://exotic-ld.readthedocs.io/en/latest/views/installation.html),
-then point each `stellarprior` configuration to the data directory:
+From the extracted repository root, no configuration edits are needed:
 
-```yaml
-stellar:
-  ld_model: stagger
-  ld_data_path: /path/to/exotic_ld_data
+```bash
+python fit_jwst.py -c examples/niriss_soss_order1.yaml
 ```
 
-Use an absolute path on a cluster. The compute node must be able to read the
-directory.
+The real WASP-39 FITS file is included. ExoTiC-LD 3.2 or newer downloads the
+required stellar-atmosphere and instrument files automatically into the
+example's `exotic_ld_data/` directory. Keep an internet connection during the
+first run; subsequent runs reuse that cache. Results go to
+`results/WASP-39_SOSS_ORDER1/`.
+
+For an offline cluster, populate the cache on an internet-connected machine
+first and copy it over. Set `stellar.ld_data_path` to that copied directory.
 
 ## 4. Verify the command-line program
 
@@ -104,8 +106,8 @@ You are ready for the [Quickstart](quickstart.md).
 
 The repository includes a 4.45 MB teaching extraction at
 `examples/data/WASP-39_soss_binned8.fits`, so the quickstart needs no separate
-light-curve download. The `stellarprior` choice still requires the
-ExoTiC-LD grids from step 3.
+light-curve download. The `stellarprior` model data is fetched automatically
+as described in step 3.
 
 ## Documentation dependencies
 

@@ -65,7 +65,7 @@ def test_persistent_compile_cache_is_off_unless_path_is_set():
     }) == {"cache_dir": "/tmp/compile-cache"}
     assert fit_jwst._resolve_ld_prior_cache_options({}) == {
         "enabled": True,
-        "cache_dir": "/scratch/midway3/tfairnington/ld_prior_cache",
+        "cache_dir": ".koala_cache/ld_prior",
     }
 
 

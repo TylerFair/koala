@@ -285,7 +285,7 @@ def _resolve_ld_prior_cache_options(stellar_cfg):
         "enabled": bool(stellar_cfg.get("ld_prior_cache", True)),
         "cache_dir": str(stellar_cfg.get(
             "ld_prior_cache_dir",
-            "/scratch/midway3/tfairnington/ld_prior_cache",
+            ".koala_cache/ld_prior",
         )),
     }
 
