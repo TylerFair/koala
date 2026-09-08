@@ -129,6 +129,16 @@ run uses `all`; staged cluster runs are described in [GPUs and clusters](gpu_and
 The default spectroscopic sampler is `independent_nuts`. Leave it unchanged
 unless you have a reason to compare backends; see [Samplers](samplers.md).
 
+Gaussian-process white-light trends have one process-level execution control,
+`KOALA_GP_SOLVER`. It accepts `auto`, `serial`, or `parallel`. The default
+`auto` selects parallel on a GPU or TPU when the installed tinygp supports it,
+and serial on a CPU. The optional top-level configuration key `gp_solver`
+takes the same values and overrides the environment variable for one run. `serial` is useful for matched validation; explicitly
+requesting unavailable parallel support fails with installation guidance.
+Library callers can make the same choice with `gp_solver=` and can pass
+`gp_assume_sorted=True` only after validating that timestamps are
+nondecreasing. See [Gaussian processes](gaussian_processes.md).
+
 Advanced execution controls are `chunk_mode`, `chunk_parallel_job_count`,
 `chunk_parallel_job_index`, `spectro_sampler`, `spectro_min_depth_ess`,
 `spectro_max_divergences`, `spectro_cadence_reduction`,

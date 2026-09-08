@@ -38,6 +38,25 @@ included in the repository, with no submodule checkout needed.
 Koala reads ExoTEDRF box-spectrum FITS files directly with Astropy and includes
 its own NumPy binning utilities; installing ExoTEDRF is not required.
 
+tinygp is installed from the Koala fork at a validated commit rather than
+from PyPI, because no PyPI release yet contains the parallel associative-scan
+quasiseparable solver that Koala uses for Gaussian-process trends on GPUs.
+The requirement line is:
+
+```
+tinygp @ git+https://github.com/TylerFair/tinygp.git@96d110c8fb4350b0daf50f7f1f86a9196b82fcd4
+```
+
+This needs `git` on the machine and network access to GitHub. The fork's
+`main` tracks upstream `dfm/tinygp` with one packaging change (installation
+on Python 3.10); the pinned commit is also the fork's `koala-stable` branch,
+which is advanced only after the Koala GP test suites pass against the new
+revision. An existing environment that still has tinygp 0.3.x from PyPI keeps
+working with the serial solver; requesting the parallel solver there raises
+an error with the install line above. See
+[Gaussian processes](guides/gaussian_processes.md) for solver selection.
+
+
 CPU is useful for checking a configuration, running the bundled example
 (about two hours on eight cores), and building the documentation. A full
 spectroscopic fit at native or high resolution is designed for an NVIDIA GPU. Install the CUDA-enabled

@@ -18,10 +18,7 @@ from ..detrend import (
     _split_components,
     _prepare_power2_poly,
 )
-from ..gp import (
-    build_gp, build_gp_linear, build_gp_quadratic, build_gp_cubic,
-    build_gp_quartic, build_gp_explinear,
-)
+from ..gp import GP_HYPERPARAMETER_BOUNDS, resolve_gp_builder, resolve_gp_solver
 from ..trends import (
     resolve_whitelight_trend_parameterization,
     sample_step_width,
@@ -548,7 +545,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                             step_width_mode='free',
                             trend_parameterization='physical',
                             two_spot_ordering='legacy',
-                            ld_variant_as_data=False):
+                            ld_variant_as_data=False,
+                            gp_solver=None,
+                            gp_assume_sorted=False):
     """Jaxoplanet white-light model with duration- or a_rs-based geometry."""
     if param_method not in ('duration', 'a_rs'):
         raise ValueError(f"Unknown param_method: {param_method}")
@@ -591,6 +590,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
         jaxoplanet_kernel, ld_profile, param_method, ld_mode=ld_mode
     )
     detrend_components = _split_components(detrend_type)
+    # Resolve once at factory time, and only when a GP is actually built, so
+    # non-GP trends never touch the solver policy (or its install check).
+    resolved_gp_solver = resolve_gp_solver(gp_solver) if 'gp' in detrend_type else None
     if ld_profile == "power2":
         MUS, P = _prepare_power2_poly()
 
@@ -915,25 +917,18 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     'spot_sigma2', dist.Uniform(1e-4, 0.1)
                 )
         if 'gp' in detrend_components:
-            params['GP_log_sigma'] = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-5), jnp.log(1e3)))
-            params['GP_log_rho'] = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(0.007), jnp.log(0.3)))
+            params['GP_log_sigma'] = numpyro.sample('GP_log_sigma', dist.Uniform(*GP_HYPERPARAMETER_BOUNDS['GP_log_sigma']))
+            params['GP_log_rho'] = numpyro.sample('GP_log_rho', dist.Uniform(*GP_HYPERPARAMETER_BOUNDS['GP_log_rho']))
 
         if 'gp' in detrend_type:
-            if detrend_type == 'gp':
-                gp_builder = build_gp
-            elif detrend_type == 'linear+gp':
-                gp_builder = build_gp_linear
-            elif detrend_type == 'quadratic+gp':
-                gp_builder = build_gp_quadratic
-            elif detrend_type == 'cubic+gp':
-                gp_builder = build_gp_cubic
-            elif detrend_type == 'quartic+gp':
-                gp_builder = build_gp_quartic
-            elif detrend_type == 'explinear+gp':
-                gp_builder = build_gp_explinear
-            else:
-                raise ValueError(f"Unknown GP detrend_type: {detrend_type}")
-            gp = gp_builder(params, t, error)
+            gp_builder = resolve_gp_builder(detrend_type)
+            gp = gp_builder(
+                params,
+                t,
+                error,
+                gp_solver=resolved_gp_solver,
+                assume_sorted=gp_assume_sorted,
+            )
             numpyro.sample('obs', gp.numpyro_dist(), obs=y)
         else:
             try:

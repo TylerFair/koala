@@ -15,7 +15,6 @@ import difflib
 import warnings
 import logging
 import inspect
-from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -48,7 +47,6 @@ import arviz as az
 from createdatacube import SpectroData, process_spectroscopy_data
 from matplotlib.widgets import Slider, Button, TextBox
 from jaxoplanet.experimental import calc_poly_coeffs
-import tinygp
 from models.common import _to_f64, _tree_to_f64, get_I_power2, compute_transit_model_auto
 from models.ld_parameterization import Power2MaxtedTransform
 from models.sing_ld import (
@@ -74,8 +72,12 @@ from models.trends import (
     compute_lc_spot, compute_lc_2spot, compute_lc_none
 )
 from models.gp import (
-    compute_lc_gp_mean, compute_lc_linear_gp_mean, compute_lc_quadratic_gp_mean,
-    compute_lc_cubic_gp_mean, compute_lc_quartic_gp_mean, compute_lc_explinear_gp_mean
+    GP_HYPERPARAMETER_BOUNDS,
+    GP_MODEL_REVISION,
+    compute_gp_training_prediction,
+    resolve_gp_mean_function,
+    resolve_gp_solver,
+    validate_gp_times,
 )
 from models.detrend import resolve_detrend_kernel
 from models.trend_marginal import (
@@ -179,6 +181,84 @@ from models.harmonica.core import (
     harmonica_half_area_area_radius_and_q,
 )
 
+
+def _compute_whitelight_gp_products(
+    params, t, error, y, *, detrend_type, gp_solver
+):
+    """Return aligned training-point GP products for white-light output."""
+    mu, var = compute_gp_training_prediction(
+        params,
+        t,
+        error,
+        y,
+        detrend_type=detrend_type,
+        gp_solver=gp_solver,
+        assume_sorted=True,
+        include_mean=True,
+    )
+    t_ref = jnp.min(t)
+    parametric_mean = resolve_gp_mean_function(detrend_type)(
+        params, t, t_ref=t_ref
+    )
+    planet_model = compute_transit_model_auto(params, t)
+    return {
+        "mu": mu,
+        "var": var,
+        "planet_model_only": planet_model,
+        "trend_flux_total": mu - planet_model - 1.0,
+        "parametric_mean": parametric_mean,
+        "gp_stochastic_component": mu - parametric_mean,
+    }
+
+
+
+def _repair_gp_support_edges(soln, *, margin_fraction=0.01, edge_tolerance=1.0e-8):
+    """Move GP hyperparameter starts strictly inside their Uniform supports.
+
+    A constrained optimizer can return ``GP_log_sigma`` or ``GP_log_rho`` on
+    (or, through roundoff, marginally outside) a prior edge; there the
+    unconstrained coordinate is infinite and NumPyro cannot initialize.  The
+    repaired value sits ``margin_fraction`` of the support width inside the
+    offending edge so the Laplace MAP refinement can still move it.
+    """
+    repaired = dict(soln)
+    for site, (lower, upper) in GP_HYPERPARAMETER_BOUNDS.items():
+        if site not in repaired:
+            continue
+        width = upper - lower
+        value = float(np.asarray(repaired[site]))
+        tolerance = edge_tolerance * max(1.0, width)
+        if not np.isfinite(value):
+            reset = 0.5 * (lower + upper)
+        elif value <= lower + tolerance:
+            reset = lower + margin_fraction * width
+        elif value >= upper - tolerance:
+            reset = upper - margin_fraction * width
+        else:
+            continue
+        print(
+            f"WARNING: white-light optimizer placed {site} on or outside its "
+            f"support edge ({value:.6g}); resetting it to {reset:.6g} before "
+            "Laplace preparation."
+        )
+        repaired[site] = jnp.asarray(reset, dtype=jnp.asarray(repaired[site]).dtype)
+    return repaired
+
+def _white_light_fingerprint_config(cfg):
+    """Exclude execution-only GP solver selection from scientific identity."""
+    return {key: value for key, value in cfg.items() if key != "gp_solver"}
+
+
+def _save_whitelight_gp_database(path, wl_flux, products):
+    """Write the legacy GP handoff schema consumed by spectroscopy."""
+    frame = pd.DataFrame({
+        'wl_flux': wl_flux,
+        'gp_flux': products["mu"],
+        'gp_err': jnp.sqrt(products["var"]),
+        'gp_trend': products["gp_stochastic_component"],
+    })
+    _atomic_dataframe_csv(frame, path, index=True)
+
 from . import artifacts, config, constants, data, geometry, harmonica_products
 from . import limb_darkening, outputs, sampling, surface
 for _module in (artifacts, config, constants, data, geometry, harmonica_products,
@@ -249,6 +329,18 @@ def run_white_light_stage(
     whitelight_trend_parameterization,
     whitelight_two_spot_ordering,
 ):
+    is_gp_detrending = 'gp' in detrending_type
+    gp_solver = None
+    if is_gp_detrending:
+        validate_gp_times(data.wl_time)
+        gp_solver = resolve_gp_solver(cfg.get('gp_solver'))
+        print(f"White-light GP solver: {gp_solver}")
+    _engine_wl_kw = dict(_engine_wl_kw)
+    _engine_wl_kw.update(
+        gp_solver=gp_solver,
+        gp_assume_sorted=True,
+    )
+
     if explicit_ld is not None:
         U_mu_wl, U_sigma_wl = _explicit_ld_grid(), None
     elif ld_prior_mode == 'stellarprior':
@@ -277,7 +369,7 @@ def run_white_light_stage(
     wl_artifact_fingerprint = _science_artifact_fingerprint(
         "whitelight",
         {
-            "config": cfg,
+            "config": _white_light_fingerprint_config(cfg),
             "time": data.wl_time,
             "flux": data.wl_flux,
             "flux_err": data.wl_flux_err,
@@ -296,6 +388,10 @@ def run_white_light_stage(
             "ld_uncertainties": U_sigma_wl,
             "step_width_mode": step_width_mode,
             "step_width_days": step_width_days,
+            **(
+                {"gp_model_revision": GP_MODEL_REVISION}
+                if is_gp_detrending else {}
+            ),
         },
     )
     wl_geometry_handoff = _load_whitelight_geometry_handoff(
@@ -972,6 +1068,8 @@ def run_white_light_stage(
                         )
                         soln = dict(soln)
                         soln['log_width'] = jnp.asarray(reset_log_width)
+                if is_gp_detrending:
+                    soln = _repair_gp_support_edges(soln)
 
                 optimized_start_valid, optimized_start_reasons = (
                     _validate_whitelight_optimized_start(
@@ -1420,38 +1518,21 @@ def run_white_light_stage(
             )
 
             if 'gp' in detrending_type:
-                if 'quartic' in detrending_type:
-                    gp_mean_func = compute_lc_quartic_gp_mean
-                elif 'cubic' in detrending_type:
-                    gp_mean_func = compute_lc_cubic_gp_mean
-                elif 'quadratic' in detrending_type:
-                    gp_mean_func = compute_lc_quadratic_gp_mean
-                elif 'explinear' in detrending_type:
-                    gp_mean_func = compute_lc_explinear_gp_mean
-                elif 'linear' in detrending_type:
-                    gp_mean_func = compute_lc_linear_gp_mean
-                else:
-                    gp_mean_func = compute_lc_gp_mean
-
-                wl_kernel = tinygp.kernels.quasisep.Matern32(
-                    scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
-                    sigma=jnp.exp(bestfit_params_wl['GP_log_sigma']),
-                )
-                wl_gp = tinygp.GaussianProcess(
-                    wl_kernel,
+                gp_products = _compute_whitelight_gp_products(
+                    model_eval_params_wl,
                     data.wl_time,
-                    diag=bestfit_params_wl['error']**2,
-                    mean=partial(gp_mean_func, model_eval_params_wl),
+                    bestfit_params_wl['error'],
+                    data.wl_flux,
+                    detrend_type=detrending_type,
+                    gp_solver=gp_solver,
                 )
-                cond_gp = wl_gp.condition(data.wl_flux, data.wl_time).gp
-                mu, var = cond_gp.loc, cond_gp.variance
+                mu = gp_products["mu"]
+                var = gp_products["var"]
                 wl_transit_model = mu
-                
-                planet_model_only = compute_transit_model_auto(model_eval_params_wl, data.wl_time)
-                trend_flux_total = mu - planet_model_only - 1.0
-                
-                parametric_mean_val = gp_mean_func(model_eval_params_wl, data.wl_time)
-                gp_stochastic_component = mu - parametric_mean_val
+                planet_model_only = gp_products["planet_model_only"]
+                trend_flux_total = gp_products["trend_flux_total"]
+                parametric_mean_val = gp_products["parametric_mean"]
+                gp_stochastic_component = gp_products["gp_stochastic_component"]
 
             else:
                 try:
@@ -1580,13 +1661,9 @@ def run_white_light_stage(
             _atomic_save_npy(wl_mask_path, wl_mad_mask)
             
             if 'gp' in detrending_type:
-                df = pd.DataFrame({
-                    'wl_flux': data.wl_flux, 
-                    'gp_flux': mu,
-                    'gp_err': jnp.sqrt(var), 
-                    'gp_trend': gp_stochastic_component
-                }) 
-                _atomic_dataframe_csv(df, wl_gp_path, index=True)
+                _save_whitelight_gp_database(
+                    wl_gp_path, data.wl_flux, gp_products
+                )
             
             rows = []
             for i in range(n_planets):

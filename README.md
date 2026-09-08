@@ -50,6 +50,9 @@ python -m pip install "git+https://github.com/TylerFair/koala.git"
 
 The distribution is named `koala-jwst`; these commands install from source.
 These source installation commands do not require a PyPI release.
+tinygp is pulled from the Koala fork (`TylerFair/tinygp`) at a pinned commit so
+that every installation has the parallel-associative-scan GP solver; this
+needs `git` and access to GitHub during installation.
 
 The SOSS example uses the included real WASP-39 extraction with no YAML edits
 needed. On first use, ExoTiC-LD downloads the required stellar-atmosphere and
@@ -72,6 +75,7 @@ for those two steps, then follow **[Fit your first transit](https://jwst-lightcu
 - [Choose a systematics trend](https://jwst-lightcurves.readthedocs.io/en/latest/guides/trends.html)
 - [Choose limb darkening](https://jwst-lightcurves.readthedocs.io/en/latest/guides/limb_darkening.html)
 - [Marginalize over models](https://jwst-lightcurves.readthedocs.io/en/latest/guides/model_stacking.html)
+- [Run Gaussian-process trends](docs/guides/gaussian_processes.md)
 
 The [documentation](https://jwst-lightcurves.readthedocs.io/) also covers
 NIRSpec, output files, cluster runs, and the optional Harmonica asymmetric-

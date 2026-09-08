@@ -120,6 +120,7 @@ tools/*
 !tools/profile_prism_cadence.py
 !tools/profile_prism_candidate_gpu.py
 !tools/benchmark_prism_cadence_reduction.py
+!tools/benchmark_gp.py
 !tools/audit_prism_transit_grid.py
 !tools/audit_prism_transit_grid_widening.py
 !tools/run_prism_sampler_ab.py

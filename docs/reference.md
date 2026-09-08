@@ -8,6 +8,8 @@ Use these pages after the first successful fit.
 - [Output files](guides/outputs.md) documents spectra, light curves, and
   diagnostics.
 - [Samplers](guides/samplers.md) explains convergence gates and retries.
+- [Gaussian processes](guides/gaussian_processes.md) explains solver selection,
+  validation, and benchmarking.
 - [Eclipses, phase curves, and stellar spots](guides/phase_curves.md) covers
   the JAXoplanet surface models and repeatable synthetic examples.
 
@@ -26,6 +28,7 @@ See [Citing](citing.md) before publishing results.
 guides/configuration
 guides/outputs
 guides/samplers
+guides/gaussian_processes
 guides/phase_curves
 guides/gpu_and_clusters
 guides/loop_mode

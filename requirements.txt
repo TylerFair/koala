@@ -10,7 +10,9 @@ jaxoplanet>=0.1.0
 numpyro>=0.15.3
 numpyro-ext>=0.0.4
 jaxopt>=0.8.3
-tinygp>=0.3.0
+# tinygp comes from the Koala fork (upstream dfm/tinygp main with the parallel
+# associative-scan quasiseparable solver; branch koala-stable, pinned by commit).
+tinygp @ git+https://github.com/TylerFair/tinygp.git@96d110c8fb4350b0daf50f7f1f86a9196b82fcd4
 
 # Harmonica is compiled into the Koala distribution from harmonica_modified/.
 # These requirements are also read by pyproject.toml during pip installation.

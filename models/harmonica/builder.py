@@ -187,7 +187,8 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
                             max_harmonic_order=1, param_method='duration',
                             ld_profile='power2', step_width_mode='free',
                             trend_parameterization='physical',
-                            two_spot_ordering='legacy'):
+                            two_spot_ordering='legacy', gp_solver=None,
+                            gp_assume_sorted=False):
     """Harmonica white-light model with power-2 or fixed quadratic LD.
 
     param_method='duration' samples (logD, _b) and derives a_rs/inc.
@@ -205,6 +206,10 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
         )
     odd_specs = harmonica_odd_coeff_specs(max_harmonic_order)
     detrend_components = _split_components(detrend_type)
+    from ..gp import GP_HYPERPARAMETER_BOUNDS, resolve_gp_builder, resolve_gp_solver
+    # Resolve once at factory time, and only when a GP is actually built, so
+    # non-GP trends never touch the solver policy (or its install check).
+    resolved_gp_solver = resolve_gp_solver(gp_solver) if 'gp' in detrend_type else None
     configured_trend_parameterization = trend_parameterization
     two_spot_ordering = str(two_spot_ordering).strip().lower()
     if two_spot_ordering not in {'legacy', 'ordered'}:
@@ -457,8 +462,8 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
                 )
 
         if 'gp' in detrend_components:
-            params['GP_log_sigma'] = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-5), jnp.log(1e3)))
-            params['GP_log_rho'] = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(0.007), jnp.log(0.3)))
+            params['GP_log_sigma'] = numpyro.sample('GP_log_sigma', dist.Uniform(*GP_HYPERPARAMETER_BOUNDS['GP_log_sigma']))
+            params['GP_log_rho'] = numpyro.sample('GP_log_rho', dist.Uniform(*GP_HYPERPARAMETER_BOUNDS['GP_log_rho']))
 
         transit_signal = compute_transit_model_harmonica(params, t)
         t_norm = t - jnp.min(t)
@@ -492,18 +497,14 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
             numpyro.sample('obs', dist.Normal(lc_model, error), obs=y)
 
         if 'gp' in detrend_type:
-            from ..gp import (
-                build_gp, build_gp_linear, build_gp_quadratic,
-                build_gp_cubic, build_gp_quartic, build_gp_explinear,
+            gp_builder = resolve_gp_builder(detrend_type)
+            gp = gp_builder(
+                params,
+                t,
+                error,
+                gp_solver=resolved_gp_solver,
+                assume_sorted=gp_assume_sorted,
             )
-            gp_builders = {
-                'gp': build_gp, 'linear+gp': build_gp_linear,
-                'quadratic+gp': build_gp_quadratic, 'cubic+gp': build_gp_cubic,
-                'quartic+gp': build_gp_quartic, 'explinear+gp': build_gp_explinear,
-            }
-            if detrend_type not in gp_builders:
-                raise ValueError(f"Unknown GP detrend_type: {detrend_type}")
-            gp = gp_builders[detrend_type](params, t, error)
             numpyro.sample('obs', gp.numpyro_dist(), obs=y)
 
     return _whitelight_model
