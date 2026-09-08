@@ -1,6 +1,6 @@
 # Installation
 
-Koala currently runs directly from its repository. A dedicated environment
+Koala supports editable installs, regular installs, and installation from GitHub. A dedicated environment
 keeps JAX and its compiled dependencies separate from other analysis code.
 
 ## 1. Clone and create an environment
@@ -17,17 +17,18 @@ Python 3.11 is the recommended version.
 
 ## 2. Install the scientific dependencies
 
-The root `requirements.txt` includes JAX, JAXlib, JAXoplanet, NumPyro,
-Harmonica, and the scientific and plotting dependencies used by Koala.
+The package metadata in `pyproject.toml` reads runtime dependencies from the
+root `requirements.txt`, including JAX, JAXlib, JAXoplanet, NumPyro, and the
+scientific and plotting libraries. Harmonica is built into the same distribution.
 
 For a CPU environment:
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
-Harmonica is bundled in `harmonica_modified/` and installed locally as
-`planet-harmonica`. It provides `harmonica.jax.harmonica_transit_power2_ld` and
+Harmonica is bundled in `harmonica_modified/` and compiled into `koala-jwst`.
+There is no separate Harmonica installation step. It provides `harmonica.jax.harmonica_transit_power2_ld` and
 `harmonica_transit_quad_ld`. Its source build requires a C++ compiler
 (Xcode Command Line Tools on macOS, or GCC/Clang on Linux). Pip installs the
 Python build dependencies automatically; the required Eigen headers are
@@ -41,9 +42,9 @@ CPU is useful for checking a configuration, running the bundled example
 spectroscopic fit at native or high resolution is designed for an NVIDIA GPU. Install the CUDA-enabled
 JAX wheel using the command for your driver and CUDA installation in the
 [JAX installation guide](https://docs.jax.dev/en/latest/installation.html),
-then run `python -m pip install -r requirements.txt`. The requirements do not
+then run `python -m pip install -e .`. The requirements do not
 force a CPU-only JAX extra. Harmonica GPU builds additionally require the CUDA
-toolkit and `HARMONICA_ENABLE_CUDA=1` when installing the requirements.
+toolkit and `HARMONICA_ENABLE_CUDA=1` when installing Koala.
 
 Check what JAX can see:
 
@@ -72,11 +73,17 @@ directory.
 
 ## 4. Verify the command-line program
 
-Run from the repository root:
+Run from any directory after installation:
 
 ```bash
-python fit_jwst.py --help
+koala --help
 ```
+
+From the repository root, `python fit_jwst.py --help` also remains supported.
+Use `python -m pip install .` for a regular installation, or
+`python -m pip install "git+https://github.com/TylerFair/koala.git"` to install
+directly from GitHub. The distribution name is `koala-jwst`; these commands
+install from source without requiring a PyPI release.
 
 You should see the required `-c/--config` option. Then check the numerical
 environment:
@@ -100,9 +107,13 @@ The repository includes a 4.45 MB teaching extraction at
 light-curve download. The `stellarprior` choice still requires the
 ExoTiC-LD grids from step 3.
 
-## Documentation only
+## Documentation dependencies
 
 ```bash
-python -m pip install -r docs/requirements.txt
+python -m pip install -e ".[docs]"
 sphinx-build -W -b html docs docs/_build/html
 ```
+
+The `docs` extra adds Sphinx and its extensions to the runtime install.
+Read the Docs uses this same extra. There is no separate docs requirements file.
+To install test tools, use `python -m pip install -e ".[test]"`.

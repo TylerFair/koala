@@ -1,6 +1,51 @@
 [build-system]
 requires = [
-    "setuptools>=42",
+    "setuptools>=77",
     "pybind11>=2.10.0",
 ]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "koala-jwst"
+version = "0.1.0"
+description = "JAX and NumPyro analysis of JWST transit light curves and spectra"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Tyler Fairnington"}]
+license = "BSD-3-Clause AND MIT AND MPL-2.0"
+license-files = [
+    "LICENSE",
+    "licenses/*.txt",
+    "models/jaxoplanet/JAXOPLANET_LICENSE",
+    "models/harmonica/HARMONICA_LICENSE",
+    "harmonica_modified/LICENSE",
+    "harmonica_modified/vendor/eigen/COPYING*",
+]
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+docs = [
+    "sphinx>=8,<9",
+    "myst-parser>=4,<5",
+    "furo",
+    "sphinx-copybutton",
+    "sphinx-design",
+]
+test = ["pytest"]
+
+[project.scripts]
+koala = "koala.cli:main"
+
+[project.urls]
+Repository = "https://github.com/TylerFair/koala"
+Documentation = "https://jwst-lightcurves.readthedocs.io/"
+
+[tool.setuptools]
+include-package-data = false
+py-modules = [
+    "fit_jwst", "createdatacube", "bin_to_reference_grid", "plotting",
+    "plotting_style", "surface_outputs",
+]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}

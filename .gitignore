@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 *.egg-info/
+.venv/
+build/
+dist/
+*.so
+*.pyd
 *.swp
 .DS_Store
 .codex/

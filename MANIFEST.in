@@ -1,0 +1,8 @@
+include README.md LICENSE requirements.txt
+recursive-include licenses *.txt
+include harmonica_modified/setup.py harmonica_modified/README.md
+include harmonica_modified/LICENSE
+recursive-include harmonica_modified/harmonica *.py *.cpp *.hpp *.cu
+recursive-include harmonica_modified/vendor/eigen *
+global-exclude .DS_Store *.pyc
+prune harmonica_modified/build

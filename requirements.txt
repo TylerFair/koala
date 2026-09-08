@@ -1,5 +1,5 @@
 # Koala runtime dependencies. Install from the repository root:
-#   python -m pip install -r requirements.txt
+#   python -m pip install -e .
 # JAX selects the CPU backend by default. For NVIDIA GPUs, install the
 # appropriate JAX CUDA extra as described in docs/install.md.
 
@@ -12,8 +12,8 @@ numpyro-ext>=0.0.4
 jaxopt>=0.8.3
 tinygp>=0.3.0
 
-# Bundled Harmonica JAX backend; build requires a C++ compiler.
-./harmonica_modified
+# Harmonica is compiled into the Koala distribution from harmonica_modified/.
+# These requirements are also read by pyproject.toml during pip installation.
 
 # Scientific arrays, FITS/CSV input, configuration, and limb darkening
 numpy

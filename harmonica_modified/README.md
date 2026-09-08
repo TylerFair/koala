@@ -2,14 +2,15 @@
 
 This directory contains the Harmonica source used by Koala, including its
 quadratic and power-2 JAX models and optional CUDA kernel. It is installed by
-the repository-root `requirements.txt`:
+the repository-root package build:
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
-The Python import remains `harmonica`; the distribution remains
-`planet-harmonica` for compatibility. The local source directory is named
+The Python import remains `harmonica`; the root distribution is `koala-jwst`.
+The standalone build in this directory retains the `planet-harmonica` name
+for compatibility, but is not needed when installing Koala. The local source directory is named
 `harmonica_modified`.
 
 A C++ compiler is required. Pip supplies setuptools and pybind11 in its isolated

@@ -173,7 +173,7 @@ def _compile_cuda_kernels(build_temp):
             raise FileNotFoundError(f"CUDA source not found: {cu_path}")
 
         obj_name = cu_path.stem + ".o"
-        obj_dir = Path(build_temp) / cu_path.parent
+        obj_dir = Path(build_temp) / "harmonica_cuda"
         obj_dir.mkdir(parents=True, exist_ok=True)
         obj_path = obj_dir / obj_name
 
@@ -240,29 +240,30 @@ ext_modules = [
     ),
 ]
 
-setup(
-    name="planet-harmonica",
-    version="0.2.1",
-    author="David Grant",
-    author_email="david.grant@bristol.ac.uk",
-    url="https://github.com/DavoGrant/harmonica",
-    license="MIT",
-    license_files=["LICENSE", "vendor/eigen/COPYING*"],
-    packages=find_packages(where="."),
-    include_package_data=True,
-    description="Light curves for exoplanet transmission mapping.",
-    long_description="Light curves for exoplanet transmission mapping.",
-    python_requires=">=3.6",
-    install_requires=["numpy", "jax>=0.5.3", "jaxlib>=0.5.3"],
-    cmdclass={"build_ext": build_ext_with_openmp},
-    ext_modules=ext_modules,
-    classifiers=[
-        "Intended Audience :: Science/Research",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
-        "Programming Language :: Python",
-        "Programming Language :: Python :: 3",
-        "Topic :: Scientific/Engineering :: Astronomy",
-        "Topic :: Software Development :: Libraries :: Python Modules"
-    ],
-)
+if __name__ == "__main__":
+    setup(
+        name="planet-harmonica",
+        version="0.2.1",
+        author="David Grant",
+        author_email="david.grant@bristol.ac.uk",
+        url="https://github.com/DavoGrant/harmonica",
+        license="MIT",
+        license_files=["LICENSE", "vendor/eigen/COPYING*"],
+        packages=find_packages(where="."),
+        include_package_data=True,
+        description="Light curves for exoplanet transmission mapping.",
+        long_description="Light curves for exoplanet transmission mapping.",
+        python_requires=">=3.6",
+        install_requires=["numpy", "jax>=0.5.3", "jaxlib>=0.5.3"],
+        cmdclass={"build_ext": build_ext_with_openmp},
+        ext_modules=ext_modules,
+        classifiers=[
+            "Intended Audience :: Science/Research",
+            "License :: OSI Approved :: MIT License",
+            "Operating System :: OS Independent",
+            "Programming Language :: Python",
+            "Programming Language :: Python :: 3",
+            "Topic :: Scientific/Engineering :: Astronomy",
+            "Topic :: Software Development :: Libraries :: Python Modules"
+        ],
+    )

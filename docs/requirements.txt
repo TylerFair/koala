@@ -1,8 +1,0 @@
-sphinx>=8,<9
-myst-parser>=4,<5
-furo
-sphinx-copybutton
-sphinx-design
-# Optional at runtime; installed for the publication-style documentation figures.
-scienceplots
-cmcrameri

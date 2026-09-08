@@ -36,12 +36,21 @@ cd koala
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
-The requirements include JAX, JAXoplanet, NumPyro, and the Harmonica JAX
+The editable install includes JAX, JAXoplanet, NumPyro, and the Harmonica JAX
 backend bundled in `harmonica_modified/`. Building Harmonica
 requires a C++ compiler; see the [installation guide](docs/install.md).
+Run `koala -c config.yaml` from any directory after installation. For a regular
+installation, use `python -m pip install .`, or install directly from GitHub:
+
+```bash
+python -m pip install "git+https://github.com/TylerFair/koala.git"
+```
+
+The distribution is named `koala-jwst`; these commands install from source.
+These source installation commands do not require a PyPI release.
 
 The SOSS example points to a compact real WASP-39 extraction included in the
 repository. Set its `stellar.ld_data_path`, then run it from the repository
