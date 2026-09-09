@@ -15,8 +15,11 @@ myst_substitutions = {"project": project}
 html_theme = "furo"
 html_title = "Koala: Kool exOplAnet Lightcurve Analysis"
 html_static_path = ["_static"]
+html_logo = "_static/koala_logo.png"
+html_favicon = "_static/koala_favicon.png"
 html_css_files = ["custom.css"]
 html_theme_options = {
+    "sidebar_hide_name": True,
     "light_css_variables": {
         "color-brand-primary": "#76538e",
         "color-brand-content": "#76538e",

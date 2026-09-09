@@ -1,6 +1,8 @@
-# Koala
+<p align="center">
+  <img src="docs/_static/koala_logo.png" width="480" alt="Koala">
+</p>
 
-**Kool exOplAnet Lightcurve Analysis**
+<h1 align="center">Kool exOplAnet Lightcurve Analysis</h1>
 
 **Transit light curves in, transmission spectra out.**
 
