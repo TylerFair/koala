@@ -1,0 +1,7 @@
+# Documentation build dependencies (Read the Docs installs from this file).
+# Kept in sync with the "docs" extra in pyproject.toml.
+sphinx>=8,<9
+myst-parser>=4,<5
+furo
+sphinx-copybutton
+sphinx-design

@@ -1,13 +1,21 @@
+# Read the Docs configuration for Koala.
+# The docs are static Markdown (no autodoc), so the build only needs Sphinx
+# and its extensions; Koala itself and its compiled Harmonica extension are
+# not installed on the docs builder.
 version: 2
-sphinx:
-  configuration: docs/conf.py
+
 build:
   os: ubuntu-22.04
   tools:
     python: "3.11"
+
+sphinx:
+  configuration: docs/conf.py
+  fail_on_warning: false
+
+formats:
+  - htmlzip
+
 python:
   install:
-    - method: pip
-      path: .
-      extra_requirements:
-        - docs
+    - requirements: docs/requirements.txt

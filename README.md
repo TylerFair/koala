@@ -4,6 +4,8 @@
 
 **Transit light curves in, transmission spectra out.**
 
+[![Documentation Status](https://readthedocs.org/projects/koala-jwst/badge/?version=latest)](https://koala-jwst.readthedocs.io/en/latest/)
+
 Koala fits extracted JWST time-series spectra with JAX and NumPyro. It
 first learns the transit geometry and visit-wide systematics from the
 white-light curve, then fits the wavelength channels in parallel and writes a
@@ -66,23 +68,23 @@ The bundled FITS file retains the complete observation but combines adjacent
 detector columns to keep the download small. It is intended for learning the
 workflow; use your original extraction for science.
 
-Read the **[installation guide](https://jwst-lightcurves.readthedocs.io/en/latest/install.html)**
-for those two steps, then follow **[Fit your first transit](https://jwst-lightcurves.readthedocs.io/en/latest/tutorials/soss_order1.html)**.
+Read the **[installation guide](https://koala-jwst.readthedocs.io/en/latest/install.html)**
+for those two steps, then follow **[Fit your first transit](https://koala-jwst.readthedocs.io/en/latest/tutorials/soss_order1.html)**.
 
 ## Learn by doing
 
-- [Fit your first transit](https://jwst-lightcurves.readthedocs.io/en/latest/tutorials/soss_order1.html)
-- [Choose a systematics trend](https://jwst-lightcurves.readthedocs.io/en/latest/guides/trends.html)
-- [Choose limb darkening](https://jwst-lightcurves.readthedocs.io/en/latest/guides/limb_darkening.html)
-- [Marginalize over models](https://jwst-lightcurves.readthedocs.io/en/latest/guides/model_stacking.html)
+- [Fit your first transit](https://koala-jwst.readthedocs.io/en/latest/tutorials/soss_order1.html)
+- [Choose a systematics trend](https://koala-jwst.readthedocs.io/en/latest/guides/trends.html)
+- [Choose limb darkening](https://koala-jwst.readthedocs.io/en/latest/guides/limb_darkening.html)
+- [Marginalize over models](https://koala-jwst.readthedocs.io/en/latest/guides/model_stacking.html)
 - [Run Gaussian-process trends](docs/guides/gaussian_processes.md)
 
-The [documentation](https://jwst-lightcurves.readthedocs.io/) also covers
+The [documentation](https://koala-jwst.readthedocs.io/) also covers
 NIRSpec, output files, cluster runs, and the optional Harmonica asymmetric-
 transit model.
 
 ## Citation and license
 
-See the [citation guide](https://jwst-lightcurves.readthedocs.io/en/latest/citing.html)
+See the [citation guide](https://koala-jwst.readthedocs.io/en/latest/citing.html)
 for the methods used by your configuration. Koala is distributed under the
 [BSD 3-Clause License](LICENSE); vendored components retain their own licenses.

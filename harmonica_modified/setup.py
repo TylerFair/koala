@@ -13,7 +13,9 @@ from pybind11.setup_helpers import Pybind11Extension, build_ext
 
 
 def get_compile_args():
-    args = ["-O3", "-DNDEBUG"]
+    # EIGEN_MPL2_ONLY makes the build fail if any LGPL-licensed Eigen header
+    # is included, so the compiled extension only contains MPL-2.0 Eigen code.
+    args = ["-O3", "-DNDEBUG", "-DEIGEN_MPL2_ONLY"]
     if os.environ.get("HARMONICA_MARCH_NATIVE", "").lower() in {"1", "true", "yes", "on"}:
         args.append("-march=native")
     extra = os.environ.get("HARMONICA_EXTRA_COMPILE_ARGS", "").strip()

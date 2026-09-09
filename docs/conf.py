@@ -1,5 +1,6 @@
 project = "Koala"
-author = "Koala contributors"
+author = "Tyler Fairnington and Koala contributors"
+copyright = "2026, Tyler Fairnington. BSD 3-Clause License"
 
 extensions = [
     "myst_parser",

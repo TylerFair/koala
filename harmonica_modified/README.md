@@ -27,7 +27,9 @@ needed. For CUDA builds, install the CUDA toolkit and set
 - Eigen version: 3.4.0
 - Eigen licenses: [COPYING.README](vendor/eigen/COPYING.README) and accompanying
   `COPYING.*` files. Only the `Eigen/` header tree needed by the extension is
-  included.
+  included. The extension is compiled with `-DEIGEN_MPL2_ONLY`, so only
+  MPL-2.0 Eigen code is built into the binary; the few LGPL-licensed Eigen
+  headers are shipped unmodified in source form only.
 
 Koala vendors the runtime Python/C++/CUDA sources and build inputs. Upstream
 experiment outputs, old implementations, and build artifacts are excluded.

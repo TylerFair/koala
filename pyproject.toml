@@ -38,7 +38,7 @@ koala = "koala.cli:main"
 
 [project.urls]
 Repository = "https://github.com/TylerFair/koala"
-Documentation = "https://jwst-lightcurves.readthedocs.io/"
+Documentation = "https://koala-jwst.readthedocs.io/"
 
 [tool.setuptools]
 include-package-data = false
