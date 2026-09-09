@@ -7,12 +7,11 @@
 Koala fits extracted JWST time-series spectra with [JAX](https://jax.readthedocs.io/)
 and [NumPyro](https://num.pyro.ai/). Give it a FITS extraction and a short
 YAML file; it fits the white-light transit, carries the shared geometry into
-every wavelength channel, and produces a transmission spectrum with
-diagnostics you can inspect. JAXoplanet fits also support
-[eclipses, thermal phase curves, and stellar spots](guides/phase_curves.md).
+every wavelength channel, and writes a transmission spectrum. JAXoplanet fits
+also support [eclipses, phase curves, and stellar spots](guides/phase_curves.md).
 
-Koala supports NIRISS/SOSS, NIRSpec, and MIRI/LRS observations, with GPU-parallel inference,
-resumable runs, and predictive model stacking.
+Koala supports NIRISS/SOSS, NIRSpec, and MIRI/LRS observations, with
+GPU-parallel inference, resumable runs, and predictive model stacking.
 
 ```{image} _static/soss_wasp39_spectrum.png
 :alt: NIRISS/SOSS transmission spectrum of WASP-39 b fitted with Koala
@@ -23,7 +22,7 @@ resumable runs, and predictive model stacking.
 
 ## Installation
 
-Install JAX for your hardware (CPU by default, or the CUDA extra for NVIDIA
+Install JAX for your hardware (CPU by default, or the CUDA build for NVIDIA
 GPUs), then install Koala from the repository:
 
 ```bash
@@ -39,12 +38,10 @@ data, and cluster environments.
 :class: tip
 
 - After [installing](install.md) Koala, head to the [Quickstart](quickstart.md)
-  to fit the bundled WASP-39 b example in a few minutes.
-- The [Introduction](concepts.md) explains what each stage of a fit does
-  before you make scientific choices.
-- The [Tutorials](tutorials/index.md) follow real observations for each
-  instrument mode; the [Guides](reference.md) go deeper on trends, limb
-  darkening, samplers, and outputs.
+  to fit the bundled WASP-39 b example.
+- The [Introduction](concepts.md) explains what each stage of a fit does.
+- The [Tutorials](tutorials/index.md) follow real observations; the guides
+  cover configuration, limb darkening, surface models, and model stacking.
 - Check the [FAQ](faq.md) if a fit does not behave as expected.
 :::
 
@@ -65,21 +62,21 @@ data, and cluster environments.
 :link: tutorials/soss_order1
 :link-type: doc
 
-Run a NIRISS/SOSS example and learn which output plots matter first.
+Run the bundled NIRISS/SOSS example from configuration to spectrum.
 :::
 
-:::{grid-item-card} Choose a systematics trend
-:link: guides/trends
+:::{grid-item-card} Model a starspot crossing
+:link: tutorials/hatp18_starspot
 :link-type: doc
 
-Compare linear, polynomial, ramp, step, spot, and GP descriptions.
+Put a spot on the stellar surface and fit the HAT-P-18 b SOSS transit.
 :::
 
 :::{grid-item-card} Choose limb darkening
 :link: guides/limb_darkening
 :link-type: doc
 
-Understand the five `ld_prior` choices and when each applies.
+The two intensity laws and the five `ld_prior` choices.
 :::
 
 :::{grid-item-card} Marginalize over models
@@ -112,29 +109,20 @@ faq
 
 Overview <tutorials/index>
 tutorials/soss_order1
-tutorials/nirspec_g395h
-tutorials/prism
+tutorials/hatp18_starspot
 tutorials/wasp39_eclipse
 tutorials/harmonica
-tutorials/synthetic_surfaces
-tutorials/executed_notebooks
 ```
 
 ```{toctree}
 :hidden:
 :caption: Guides
 
-Overview <reference>
-guides/trends
-guides/limb_darkening
-guides/model_stacking
 guides/configuration
-guides/outputs
-guides/samplers
-guides/gaussian_processes
+guides/limb_darkening
 guides/phase_curves
-guides/gpu_and_clusters
-guides/loop_mode
+guides/model_stacking
+guides/gaussian_processes
 ```
 
 ```{toctree}

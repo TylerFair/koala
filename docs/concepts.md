@@ -1,9 +1,11 @@
 # Introduction
 
 Koala turns an extracted JWST time series into a transmission spectrum. It
-models the transit and the instrument together, while keeping the workflow
-simple: learn what is shared from white light, then measure one transit depth
-per wavelength channel.
+first fits the **white-light curve**, the sum over wavelength, to learn the
+transit time, duration, impact parameter, and visit-wide systematics. It then
+fixes that geometry and fits every **wavelength channel** for its own radius
+ratio, limb darkening, noise term, and trend coefficients. The squared radius
+ratios form the transmission spectrum.
 
 ```{image} _static/soss_wasp39_whitelight.png
 :alt: White-light transit and fitted model for a JWST NIRISS/SOSS observation
@@ -11,81 +13,33 @@ per wavelength channel.
 :align: center
 ```
 
-## One observation, two scales
+Each channel model is a transit plus a systematics trend plus white noise
+with a fitted jitter term. The trend is set by `flags.detrending_type`:
 
-The **white-light curve** is the sum over wavelength. Its high signal-to-noise
-constrains the transit time, duration, impact parameter, and visit-wide
-systematics. Koala saves this fit, then passes its median orbital geometry
-to the spectroscopic stage.
+- `none`
+- `linear`
+- `quadratic`
+- `cubic`
+- `quartic`
+- `explinear`
+- `linear_discontinuity`
+- `spot`
+- `2spot`
+- `quadratic+spot`
+- `spot+linear_discontinuity`
+- `spot+explinear`
+- `2spot+explinear`
 
-A **spectroscopic channel** is one wavelength-bin light curve. With the shared
-geometry fixed, each channel measures its own planet-to-star radius ratio,
-limb profile, noise term, and trend coefficients. The squared radius ratio is
-the transit depth plotted in the final transmission spectrum.
+A Gaussian process can be added to a polynomial or `explinear` trend by
+appending `+gp` (for example `linear+gp`), or used alone as `gp`. It absorbs
+correlated residual structure that the mean trend does not describe.
 
-This division keeps weak channels from confusing a change in orbital geometry
-with a change in depth. It also means the channel posteriors condition on the
-chosen white-light geometry; they do not independently propagate its full
-uncertainty. The exact handoff is recorded in
-`*_whitelight_geometry_handoff.json`.
+Channels are independent once the geometry is fixed, so Koala fits them in
+parallel batches on the GPU and checkpoints each completed batch; re-running
+the same configuration resumes from the checkpoints. `resolution.high` sets
+the final wavelength grid (a resolving power, `native`, or `reference`). An
+optional coarse `resolution.low` stage can run first; leave it out and the
+pipeline goes straight from white light to the final grid.
 
-## What the model describes
-
-Each channel combines three ingredients:
-
-$$
-\mathrm{flux}(t) = \mathrm{transit}(t) + \mathrm{systematics}(t)
-                  + \mathrm{noise}(t).
-$$
-
-The transit model contains the wavelength-dependent depth and limb darkening.
-The systematics model can be a smooth polynomial, an exponential ramp, a
-detector step, a spot-crossing template, or a Gaussian process. The likelihood
-uses the input uncertainty with an additional fitted jitter term.
-
-These choices can trade against transit depth, so they are scientific
-assumptions rather than cosmetic settings. Begin with the simplest trend that
-describes the out-of-transit baseline and inspect the residuals. Use a
-`stellarprior` limb prior when its assumptions and atmosphere grid are
-appropriate; compare plausible alternatives when the spectrum is sensitive to
-the choice.
-
-- [Choose a systematics trend](guides/trends.md)
-- [Choose limb darkening](guides/limb_darkening.md)
-
-## From one channel to a spectrum
-
-Channels are independent once the shared geometry is fixed. Koala therefore
-runs several chains together on the GPU. `flags.vmap_chunk` controls how many
-channels live on the device at once; it changes memory use and throughput, not
-the wavelength bins or model.
-
-Each completed group is checkpointed. Re-running the same configuration loads
-compatible checkpoints and computes only missing work. The final spectrum
-collects the accepted depth posteriors in wavelength order.
-
-An optional low-resolution stage can act as a bridge before the final grid. It
-is used when a model needs a smooth wavelength-dependent calibration, including
-some limb-darkening treatments. It runs only when `resolution.low` is set;
-leave the key out and the pipeline moves directly from the white-light fit to
-the final grid. `resolution.high` selects the final grid:
-
-- a number requests constant resolving power;
-- `native` keeps the extraction's channelization;
-- `reference` uses `resolution.reference_grid`.
-
-## When a fit is trustworthy
-
-Sampling finishing is not the same as sampling succeeding. Koala checks the
-effective sample size of the depth posterior and counts divergent transitions.
-A failing channel is retried with an alternate exact sampler. The log and the
-JSON files under `chunks/` record what was accepted.
-
-Your scientific check is equally important. Inspect the white-light residuals,
-look for wavelength-localized failures, and ask whether the trend and limb
-model are plausible for the observation. When several plausible models remain,
-[model stacking](guides/model_stacking.md) can carry their predictive
-disagreement into the reported spectrum.
-
-The [Quickstart](quickstart.md) walks through this workflow on a supplied
-configuration.
+The [Quickstart](quickstart.md) walks through this workflow on the bundled
+WASP-39 b example.

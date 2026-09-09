@@ -6,8 +6,7 @@ The supported user interface is the command line:
 python fit_jwst.py -c config.yaml
 ```
 
-Use the [configuration guide](guides/configuration.md) for YAML options and
-[reading the results](guides/outputs.md) for output schemas.
+Use the [configuration guide](guides/configuration.md) for YAML options.
 
 The modules below are useful for extending the fitter. They are internal
 building blocks rather than a versioned Python library API, so direct callers

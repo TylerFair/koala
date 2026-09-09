@@ -24,10 +24,9 @@ than building a model from scratch.
 
 The JAXoplanet backend also supports eclipses, smooth phase curves, and
 rotating stellar spots. See the [surface-model guide](docs/guides/phase_curves.md)
-for configuration, physical assumptions, and repeatable synthetic examples.
-The [executed surface tutorial](docs/tutorials/synthetic_surfaces.md) includes
-eclipse and day/night spectra, a thermal map with uncertainty, stellar-spot
-recovery, corner plots, and residual diagnostics, with PNG/PDF downloads.
+for the configuration keys and the
+[HAT-P-18 b starspot tutorial](docs/tutorials/hatp18_starspot.md) for a
+spot-crossing fit on real data.
 
 ## Get started
 
@@ -76,14 +75,14 @@ for those two steps, then follow **[Fit your first transit](https://koala-jwst.r
 ## Learn by doing
 
 - [Fit your first transit](https://koala-jwst.readthedocs.io/en/latest/tutorials/soss_order1.html)
-- [Choose a systematics trend](https://koala-jwst.readthedocs.io/en/latest/guides/trends.html)
+- [Model a starspot crossing](https://koala-jwst.readthedocs.io/en/latest/tutorials/hatp18_starspot.html)
 - [Choose limb darkening](https://koala-jwst.readthedocs.io/en/latest/guides/limb_darkening.html)
 - [Marginalize over models](https://koala-jwst.readthedocs.io/en/latest/guides/model_stacking.html)
 - [Run Gaussian-process trends](docs/guides/gaussian_processes.md)
 
 The [documentation](https://koala-jwst.readthedocs.io/) also covers
-NIRSpec, output files, cluster runs, and the optional Harmonica asymmetric-
-transit model.
+NIRSpec and MIRI modes, secondary eclipses, and the optional Harmonica
+asymmetric-transit model.
 
 ## Citation and license
 
