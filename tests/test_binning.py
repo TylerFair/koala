@@ -96,7 +96,9 @@ import bin_to_reference_grid
 wave = np.linspace(1, 2.5, 80)
 flux = np.ones((7, 80))
 for mode in ({'resolution': {'low': 10, 'high': 20}},
-             {'pixels': {'low': 4, 'high': 2}}):
+             {'pixels': {'low': 4, 'high': 2}},
+             {'resolution': {'high': 20}},
+             {'pixels': {'high': 2}}):
     result = createdatacube.bin_spectroscopy_data(
         wave, np.full(80, .01), flux, flux * .1,
         {'instrument': 'NIRISS/SOSS', **mode}, np.ones(7, dtype=bool))
@@ -104,6 +106,9 @@ for mode in ({'resolution': {'low': 10, 'high': 20}},
         assert result['flux_' + stage].shape[1] == 7
         assert np.isfinite(result['flux_' + stage]).all()
         assert (result['flux_err_' + stage] > 0).all()
+    has_low = 'low' in next(iter(mode.values()))
+    assert (result['flux_lr'].shape[0] > 0) == has_low
+    createdatacube._validate_binned_spectroscopy(result, expected_n_time=7)
 assert 'exotedrf' not in sys.modules
 '''
     subprocess.run([sys.executable, '-c', script], check=True,

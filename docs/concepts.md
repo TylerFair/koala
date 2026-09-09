@@ -66,7 +66,9 @@ collects the accepted depth posteriors in wavelength order.
 
 An optional low-resolution stage can act as a bridge before the final grid. It
 is used when a model needs a smooth wavelength-dependent calibration, including
-some limb-darkening treatments. `resolution.high` selects the final grid:
+some limb-darkening treatments. It runs only when `resolution.low` is set;
+leave the key out and the pipeline moves directly from the white-light fit to
+the final grid. `resolution.high` selects the final grid:
 
 - a number requests constant resolving power;
 - `native` keeps the extraction's channelization;

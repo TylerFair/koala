@@ -340,6 +340,18 @@ def normalize_flux(flux, flux_err, norm_range):
             flux_err_norm[i,:] /= norm 
     return flux_norm, flux_err_norm
 
+def _empty_low_resolution(n_time):
+    """Placeholder low-resolution arrays when no coarse grid is configured.
+
+    Zero channels keep every downstream shape check valid, and the pipeline
+    skips the low-resolution stage when it sees no ``low`` grid.
+    """
+    print("No low-resolution grid configured; skipping low-resolution binning.")
+    empty_axis = np.zeros(0, dtype=float)
+    empty_cube = np.zeros((0, int(n_time)), dtype=float)
+    return empty_axis, empty_axis.copy(), empty_cube, empty_cube.copy()
+
+
 def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_unbinned, cfg, oot_mask):
     """Handle all the binning logic in one place."""
     resolution = cfg.get('resolution', None)
@@ -370,9 +382,13 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             reference_grid_path_lr = resolution.get('reference_grid_lr')
             print(f"Using reference wavelength grid for LOW resolution from: {reference_grid_path_lr}")
 
-    # Low resolution binning
+    # Low resolution binning (optional: omit resolution.low to skip it)
     if resolution is not None:
-        if use_reference_grid_lr:
+        if resolution.get('low') is None:
+            wl_lr, wl_err_lr, flux_lr, flux_err_lr = _empty_low_resolution(
+                flux_transposed.shape[1]
+            )
+        elif use_reference_grid_lr:
             # Bin to reference grid for low resolution
             # flux_transposed is already (wavelength, time) format
             from bin_to_reference_grid import bin_to_reference_grid_simple
@@ -485,8 +501,12 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             reference_grid_path_lr = pixels.get('reference_grid_lr')
             print(f"Using reference wavelength grid for LOW resolution from: {reference_grid_path_lr}")
 
-        # Low resolution binning
-        if use_reference_grid_pixels_lr:
+        # Low resolution binning (optional: omit pixels.low to skip it)
+        if pixels.get('low') is None:
+            wl_lr, wl_err_lr, flux_lr, flux_err_lr = _empty_low_resolution(
+                flux_transposed.shape[1]
+            )
+        elif use_reference_grid_pixels_lr:
             from bin_to_reference_grid import bin_to_reference_grid_simple
             wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_to_reference_grid_simple(
                 wavelengths, flux_transposed, flux_err_transposed,

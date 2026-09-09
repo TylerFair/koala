@@ -466,6 +466,26 @@ from models.harmonica.core import (
 
 
 
+
+def _resolve_need_lowres(flags, low_resolution_bins):
+    """Decide whether the low-resolution bridge stage runs.
+
+    The stage needs a coarse grid (``resolution.low`` or ``pixels.low``).
+    Without one it is skipped. An explicit ``flags.need_lowres: true`` with no
+    grid is a configuration error rather than a silent no-op.
+    """
+    requested = flags.get('need_lowres', True)
+    if low_resolution_bins is not None:
+        return bool(requested)
+    if 'need_lowres' in flags and requested:
+        raise ValueError(
+            "flags.need_lowres is true but no low-resolution grid is set; "
+            "add resolution.low (or pixels.low) or remove flags.need_lowres."
+        )
+    print("No low-resolution grid configured; the low-resolution stage is skipped.")
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run transit analysis with YAML config.")
     parser.add_argument("-c", "--config", required=True, help="Path to YAML configuration file")
@@ -549,7 +569,7 @@ def run(cfg, config_path=None):
         print("Minimal plots enabled: diagnostic noise/poly/light-curve grids skipped.")
 
     detrending_type = flags.get('detrending_type', 'linear')
-    need_lowres = flags.get('need_lowres', True)
+    need_lowres = _resolve_need_lowres(flags, low_resolution_bins)
     mask_start = flags.get('mask_start', False)
     mask_end = flags.get('mask_end', False)
     spot_amp = flags.get('spot_amp', 0.0)
@@ -1004,12 +1024,16 @@ def run(cfg, config_path=None):
         mini_instrument = ''
 
     instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
+    lr_label = 'no' if low_resolution_bins is None else str(low_resolution_bins)
     if bins == resolution:
-        spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
+        spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{lr_label}LR_{high_resolution_bins}HR.pkl'
     elif bins == pixels:
-        spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}pix_{high_resolution_bins}pix.pkl'
+        spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{lr_label}pix_{high_resolution_bins}pix.pkl'
 
-    lr_bin_str = f'R{low_resolution_bins}' if bins == resolution else f'pix{low_resolution_bins}'
+    if low_resolution_bins is None:
+        lr_bin_str = 'nolr'
+    else:
+        lr_bin_str = f'R{low_resolution_bins}' if bins == resolution else f'pix{low_resolution_bins}'
     hr_bin_str = f'R{high_resolution_bins}' if bins == resolution else f'pix{high_resolution_bins}'
     lr_artifact_stem = _harmonica_spectro_artifact_stem(
         f"{instrument_full_str}_{lr_bin_str}",

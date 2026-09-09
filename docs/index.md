@@ -11,7 +11,7 @@ every wavelength channel, and produces a transmission spectrum with
 diagnostics you can inspect. JAXoplanet fits also support
 [eclipses, thermal phase curves, and stellar spots](guides/phase_curves.md).
 
-Koala is built for NIRISS/SOSS and NIRSpec, with GPU-parallel inference,
+Koala supports NIRISS/SOSS, NIRSpec, and MIRI/LRS observations, with GPU-parallel inference,
 resumable runs, and predictive model stacking.
 
 ```{image} _static/soss_wasp39_spectrum.png

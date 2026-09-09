@@ -23,7 +23,10 @@ scipy
 astropy
 pandas
 PyYAML
-exotic-ld>=3.2.0
+# ExoTiC-LD 3.2.0 on PyPI lacks compute_power2_ld_coeffs, which Koala's
+# power-2 limb darkening needs. Upstream added it in the v3.2.2 tag, which is
+# not on PyPI, so that commit is pinned (it reports itself as 3.2.1).
+exotic-ld @ git+https://github.com/Exo-TiC/ExoTiC-LD.git@ef7eba2d5ec32818b031714301858c4df7bdb16d
 # ExoTiC-LD 3.2 uses pkg_resources, removed in setuptools 81.
 setuptools<81
 

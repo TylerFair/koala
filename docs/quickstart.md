@@ -58,9 +58,9 @@ flags:
   ld_prior: stellarprior
 ```
 
-Both resolution keys are required by the current pipeline. The low-resolution
-grid is a coarse bridge and check; the high-resolution grid is the final
-spectrum.
+The high-resolution grid is the final spectrum. The low-resolution grid is an
+optional coarse bridge and check: omit `low` and Koala goes straight from the
+white-light fit to the final spectrum.
 
 ## 3. Run the fit
 

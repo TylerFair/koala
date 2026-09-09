@@ -28,7 +28,7 @@ fits_file: 'WASP-39_soss_binned8.fits'
 output_dir: 'results/WASP-39_SOSS_ORDER1'
 
 resolution:
-  low: 20                           # prepared as a coarse bridge/check
+  low: 20                           # optional coarse bridge/check; remove to skip it
   high: 100                          # constant resolving power; no grid file needed
 
 flags:

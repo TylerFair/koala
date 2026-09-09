@@ -57,7 +57,8 @@ python fit_jwst.py -c config.yaml
 ```
 
 For NIRSpec, use an instrument such as `NIRSPEC/G395H` or
-`NIRSPEC/PRISM`, remove `order`, and add `nrs: 1` or `nrs: 2`.
+`NIRSPEC/PRISM`, remove `order`, and add `nrs: 1` or `nrs: 2`. For MIRI,
+use `instrument: MIRI/LRS` and omit both `order` and `nrs`.
 
 ## The settings most users change
 
@@ -65,10 +66,10 @@ For NIRSpec, use an instrument such as `NIRSPEC/G395H` or
 |---|---|
 | `planet` | Transit ephemeris and initial geometry. Supply `period`, `t0`, `b`, `rprs`, and either `duration` or `a_rs`. |
 | `stellar` | Stellar parameters used to calculate limb darkening. The three uncertainty fields are required for `ld_prior: stellarprior`. |
-| `instrument` with `order` or `nrs` | The observing mode and SOSS order or NIRSpec detector. |
+| `instrument` with `order` or `nrs` | The observing mode (`NIRISS/SOSS`, a `NIRSPEC/*` disperser, or `MIRI/LRS`) and the SOSS order or NIRSpec detector. |
 | `path`, `input_dir`, `fits_file` | The input is read from `path/input_dir/fits_file`. Absolute paths are easiest on a cluster. |
 | `output_dir` | Result directory, interpreted relative to `path` unless absolute. Use a fresh directory for a distinct analysis. |
-| `resolution` | Required `high` and `low` wavelength grids. A grid can be an integer resolving power, `native`, or `reference`; the last also needs `reference_grid`. Keep `low` present even when a staged run will not fit that grid. |
+| `resolution` | The final `high` wavelength grid and an optional coarse `low` grid. A grid can be an integer resolving power, `native`, or `reference`; the last also needs `reference_grid`. Omit `low` to skip the low-resolution bridge stage entirely. |
 | `flags.detrending_type` | The visit baseline. Begin with `linear` and change it only when the out-of-transit data support another model. See [Trend models](trends.md). |
 | `flags.ld_profile` | `power2` or `quadratic`. |
 | `flags.ld_prior` | `uniform`, `gaussian`, `sing`, `stellarprior`, or `fixed`. `gaussian` has width 0.2, `stellarprior` requires power-2, and `sing` requires quadratic. See [Limb darkening](limb_darkening.md). |
@@ -148,7 +149,8 @@ advanced controls are `transit_engine`, `trend_inference`, `ld_uniform_basis`,
 `harmonica_max_order`, `harmonica_spectro_parameterization`,
 `harmonica_spectro_fit_jitter`, and `harmonica_spectro_odd_frac_sigma`.
 The compatibility spelling `vmap_chunk` remains accepted for
-`spectro_chunk_size`; `need_lowres` controls whether the coarse stage runs.
+`spectro_chunk_size`; `need_lowres` controls whether the coarse stage runs
+when `resolution.low` is set (omitting `resolution.low` skips it regardless).
 
 ## Dataset-specific masks
 

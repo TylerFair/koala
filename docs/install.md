@@ -83,7 +83,9 @@ From the extracted repository root, no configuration edits are needed:
 python fit_jwst.py -c examples/niriss_soss_order1.yaml
 ```
 
-The real WASP-39 FITS file is included. ExoTiC-LD 3.2 or newer downloads the
+The real WASP-39 FITS file is included. ExoTiC-LD (installed from the pinned
+upstream commit in `requirements.txt`, because the PyPI 3.2.0 release lacks
+the power-2 law) downloads the
 required stellar-atmosphere and instrument files automatically into the
 example's `exotic_ld_data/` directory. Keep an internet connection during the
 first run; subsequent runs reuse that cache. Results go to
