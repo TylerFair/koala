@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/_static/koala_logo.png" width="480" alt="Koala">
+  <img src="docs/_static/koala_logo.png" width="360" alt="Koala">
 </p>
 
 <h1 align="center">Kool exOplAnet Lightcurve Analysis</h1>

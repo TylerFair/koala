@@ -1,27 +1,96 @@
-/* A quiet scientific front page: generous spacing, restrained color. */
-.content {
-  line-height: 1.65;
+/* Koala documentation: sphinx-book-theme with Koala's purple accent. */
+
+html[data-theme="light"] {
+  --pst-color-primary: #76538e;
+  --pst-color-primary-highlight: #5d4070;
+  --pst-color-secondary: #a8781d;
+  --pst-color-link: #76538e;
+  --pst-color-link-hover: #5d4070;
+  --pst-color-inline-code: #6a4a80;
 }
 
-.article-container {
-  max-width: 52rem;
+html[data-theme="dark"] {
+  --pst-color-primary: #c8a9dc;
+  --pst-color-primary-highlight: #dcc4ea;
+  --pst-color-secondary: #e0b65b;
+  --pst-color-link: #c8a9dc;
+  --pst-color-link-hover: #dcc4ea;
+  --pst-color-inline-code: #d9bfe8;
 }
 
+/* The logo is a wide wordmark, so size it by width, not by header height. */
+.bd-sidebar-primary .navbar-brand,
+.bd-header .navbar-brand {
+  padding: 0.6rem 0 0.4rem;
+}
+
+.bd-sidebar-primary .navbar-brand img,
+.bd-header .navbar-brand img {
+  width: 11rem;
+  max-width: 100%;
+  height: auto;
+  max-height: none;
+}
+
+/* The wordmark's dark letters need a light plate on the dark theme. */
+html[data-theme="dark"] .navbar-brand img {
+  background: #f4f1f7;
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.6rem;
+}
+
+.bd-sidebar-primary .navbar-brand p.title {
+  display: none;
+}
+
+/* Readable line length and comfortable text. */
+.bd-article {
+  line-height: 1.6;
+}
+
+.bd-article p.tagline {
+  font-size: 1.15rem;
+  font-style: italic;
+  color: var(--pst-color-text-muted);
+  margin-top: -0.6rem;
+}
+
+/* Front-page figure. */
 .hero-figure {
-  margin: 2rem auto 2.8rem;
+  display: block;
+  margin: 1.5rem auto 2rem;
   border-radius: 0.35rem;
-  box-shadow: 0 0.4rem 1.5rem rgb(30 20 38 / 12%);
+  box-shadow: 0 0.3rem 1.2rem rgb(30 20 38 / 12%);
 }
 
-.sd-card {
-  border: 1px solid var(--color-background-border);
+html[data-theme="dark"] .hero-figure {
   box-shadow: none;
 }
 
+/* Cards from sphinx-design. */
+.sd-card {
+  border: 1px solid var(--pst-color-border);
+  box-shadow: none;
+  transition: border-color 0.15s ease;
+}
+
 .sd-card:hover {
-  border-color: var(--color-brand-primary);
+  border-color: var(--pst-color-primary);
 }
 
 .sd-card-title {
-  color: var(--color-brand-content);
+  color: var(--pst-color-primary);
+  font-weight: 600;
+}
+
+/* Tables: left-align, no centred jumble. */
+.bd-article table.table td,
+.bd-article table.table th {
+  text-align: left;
+}
+
+/* sphinx-book-theme keeps navigation in the sidebar; hide the pydata top
+   navbar (it only contributed a duplicate search field). */
+header.bd-header.bd-navbar {
+  display: none;
 }

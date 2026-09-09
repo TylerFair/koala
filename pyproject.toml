@@ -27,7 +27,7 @@ dynamic = ["dependencies"]
 docs = [
     "sphinx>=8,<9",
     "myst-parser>=4,<5",
-    "furo",
+    "sphinx-book-theme>=1.1",
     "sphinx-copybutton",
     "sphinx-design",
 ]

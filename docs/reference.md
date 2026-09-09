@@ -20,18 +20,3 @@ Use these pages after the first successful fit.
 - [Python API](api.md)
 
 See [Citing](citing.md) before publishing results.
-
-```{toctree}
-:hidden:
-:maxdepth: 1
-
-guides/configuration
-guides/outputs
-guides/samplers
-guides/gaussian_processes
-guides/phase_curves
-guides/gpu_and_clusters
-guides/loop_mode
-api
-citing
-```
