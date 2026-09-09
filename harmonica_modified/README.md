@@ -20,13 +20,11 @@ needed. For CUDA builds, install the CUDA toolkit and set
 
 ## Source and licenses
 
-- Harmonica fork: https://github.com/TylerFair/harmonica_bell-main
-- Vendored revision: `5ba99b99f7bbf4af47ce0a7f205e935304245de9`
+- Harmonica fork: https://github.com/taylorbell57/harmonica
 - Original project: https://github.com/DavoGrant/harmonica
 - Harmonica license: [MIT](LICENSE)
 - Eigen source: https://gitlab.com/libeigen/eigen
 - Eigen version: 3.4.0
-- Eigen revision: `3147391d946bb4b6c68edd901f2add6ac1f31f8c`
 - Eigen licenses: [COPYING.README](vendor/eigen/COPYING.README) and accompanying
   `COPYING.*` files. Only the `Eigen/` header tree needed by the extension is
   included.
