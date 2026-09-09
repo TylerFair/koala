@@ -32,6 +32,7 @@ setuptools<81
 
 # Diagnostics and publication-style plots
 matplotlib
+corner
 arviz
 SciencePlots
 cmcrameri

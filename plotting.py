@@ -6,7 +6,9 @@ from models.harmonica.core import _ALL_ODD_COEFF_SPECS
 from plotting_style import (
     DATA_MARKER_STYLE,
     ERRORBAR_COLOR,
+    LIGHTCURVE_COLOR,
     MODEL_COLOR,
+    PLOT_DPI,
     OUTLIER_MARKER_STYLE,
     ZERO_LINE_COLOR,
     _infer_half_widths,
@@ -1018,3 +1020,145 @@ def plot_harmonica_transmission_posterior(
     style_axis(ax)
     save_figure(fig, filename)
     return fig
+
+
+_CORNER_LABELS = {
+    "t0": r"$t_0$ [d]",
+    "rors": r"$R_p/R_\star$",
+    "b": r"$b$",
+    "duration": r"$T_{14}$ [d]",
+    "a_rs": r"$a/R_\star$",
+    "c1": r"$c_1$",
+    "c2": r"$c_2$",
+    "u1": r"$u_1$",
+    "u2": r"$u_2$",
+    "c": r"$c$",
+    "v": r"$v$",
+    "v2": r"$v_2$",
+    "v3": r"$v_3$",
+    "v4": r"$v_4$",
+    "A": r"$A$",
+    "tau": r"$\tau$ [d]",
+    "spot_amp": r"$A_\mathrm{spot}$",
+    "spot_mu": r"$t_\mathrm{spot}$ [d]",
+    "spot_sigma": r"$\sigma_\mathrm{spot}$ [d]",
+    "spot_amp2": r"$A_\mathrm{spot,2}$",
+    "spot_mu2": r"$t_\mathrm{spot,2}$ [d]",
+    "spot_sigma2": r"$\sigma_\mathrm{spot,2}$ [d]",
+    "t_jump": r"$t_\mathrm{jump}$ [d]",
+    "jump": r"jump",
+    "width": r"width [d]",
+    "error": r"$\sigma_\mathrm{jit}$",
+    "GP_log_sigma": r"$\ln\sigma_\mathrm{GP}$",
+    "GP_log_rho": r"$\ln\rho_\mathrm{GP}$",
+}
+_CORNER_ORDER = (
+    "t0", "rors", "b", "duration", "a_rs", "c1", "c2", "u1", "u2", "c", "v",
+    "v2", "v3", "v4", "A", "tau", "spot_amp", "spot_mu", "spot_sigma",
+    "spot_amp2", "spot_mu2", "spot_sigma2", "t_jump", "jump", "width",
+    "error", "GP_log_sigma", "GP_log_rho",
+)
+# Deterministic duplicates and bookkeeping sites that add nothing to a corner.
+_CORNER_EXCLUDE = {"width_minutes", "log_width", "total_error", "depths"}
+
+
+def _corner_columns(samples):
+    """Return (columns, labels) of scalar posterior sites for a corner plot."""
+    columns = {}
+    for name, value in samples.items():
+        if name.startswith("_") or name in _CORNER_EXCLUDE:
+            continue
+        arr = np.asarray(value, dtype=float)
+        if arr.ndim == 1:
+            columns[name] = arr
+        elif arr.ndim == 2 and arr.shape[1] <= 4 and arr.shape[0] > arr.shape[1]:
+            # Small vector sites (e.g. quadratic ``u``) become one column each.
+            base = "u" if name == "u" else name
+            for k in range(arr.shape[1]):
+                columns[f"{base}{k + 1}"] = arr[:, k]
+
+    def rank(name):
+        stem = name.rsplit("_", 1)[0] if name[-1].isdigit() and "_" in name else name
+        for key in (name, stem):
+            if key in _CORNER_ORDER:
+                return _CORNER_ORDER.index(key)
+        return len(_CORNER_ORDER)
+
+    multi_planet = sum(n.startswith("rors_") for n in columns) > 1
+    out_cols, labels = [], []
+    for name in sorted(columns, key=lambda n: (rank(n), n)):
+        arr = columns[name]
+        if not np.all(np.isfinite(arr)) or np.nanstd(arr) == 0:
+            continue
+        stem, suffix = name, ""
+        if "_" in name and name.rsplit("_", 1)[1].isdigit():
+            stem, suffix = name.rsplit("_", 1)
+        label = _CORNER_LABELS.get(stem, _CORNER_LABELS.get(name, name.replace("_", " ")))
+        if suffix and multi_planet and stem in {"t0", "rors"}:
+            planet = int(suffix) + 1
+            label = (r"$t_{0,%d}$ [d]" % planet if stem == "t0"
+                     else r"$R_{p,%d}/R_\star$" % planet)
+        if stem == "t0":
+            ref = float(np.floor(np.nanmedian(arr)))
+            arr = arr - ref
+            label = label.replace("[d]", f"$-$ {ref:.0f} [d]")
+        out_cols.append(arr)
+        labels.append(label)
+    return out_cols, labels
+
+
+def plot_whitelight_corner(samples, filename, instrument_label=None, max_draws=6000):
+    """Corner plot of the sampled white-light parameters.
+
+    Only scalar posterior sites are shown (geometry, limb darkening, trend
+    coefficients, jitter, and GP hyperparameters when present); derived
+    duplicates are dropped. Returns the path written, or ``None`` when the
+    optional :mod:`corner` package is missing or there is nothing to plot.
+    """
+    try:
+        import corner
+    except ImportError:
+        print("corner is not installed; skipping the white-light corner plot.")
+        return None
+    columns, labels = _corner_columns(samples)
+    if len(columns) < 2:
+        return None
+    data = np.column_stack(columns)
+    if data.shape[0] > max_draws:
+        rng = np.random.default_rng(0)
+        data = data[rng.choice(data.shape[0], max_draws, replace=False)]
+
+    apply_publication_style()
+    color = accent_color_for_label(instrument_label) if instrument_label else LIGHTCURVE_COLOR
+    fig = corner.corner(
+        data,
+        labels=labels,
+        color=color,
+        bins=35,
+        smooth=1.0,
+        smooth1d=1.0,
+        quantiles=(0.16, 0.5, 0.84),
+        show_titles=True,
+        title_fmt=".4g",
+        title_kwargs={"fontsize": 9},
+        label_kwargs={"fontsize": 10},
+        levels=(0.393, 0.865),
+        plot_datapoints=False,
+        plot_density=False,
+        fill_contours=True,
+        hist_kwargs={"linewidth": 1.4},
+        max_n_ticks=4,
+    )
+    for ax in fig.axes:
+        ax.tick_params(labelsize=7)
+        # Absolute tick values, never a "+1" offset legend.
+        for axis in (ax.xaxis, ax.yaxis):
+            try:
+                axis.get_major_formatter().set_useOffset(False)
+            except AttributeError:
+                pass
+    if instrument_label:
+        fig.suptitle(f"{instrument_label}: white-light posterior", fontsize=11, y=1.005)
+    fig.savefig(filename, dpi=PLOT_DPI, bbox_inches="tight")
+    plt.close(fig)
+    return filename

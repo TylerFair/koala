@@ -36,6 +36,7 @@ from plotting import (
     plot_noise_binning_from_csv,
     plot_transmission_spectrum,
     plot_wavelength_offset_summary,
+    plot_whitelight_corner,
     plot_whitelight_curve,
     plot_whitelight_residuals,
     plot_whitelight_summary,
@@ -1564,6 +1565,17 @@ def run_white_light_stage(
                 t0_reference=bestfit_params_wl['t0'][0],
                 outlier_mask=wl_mad_mask,
             )
+            try:
+                corner_path = plot_whitelight_corner(
+                    wl_samples,
+                    f"{output_dir}/13_{instrument_full_str}_whitelight_corner.png",
+                    instrument_label=instrument_full_str,
+                )
+            except Exception as error:  # A diagnostic must never abort the fit.
+                print(f"White-light corner plot skipped: {error}")
+            else:
+                if corner_path:
+                    print(f"Saved white-light corner plot to: {corner_path}")
 
             t_masked = data.wl_time[~wl_mad_mask]
             f_masked = data.wl_flux[~wl_mad_mask]
