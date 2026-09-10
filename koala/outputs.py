@@ -478,13 +478,89 @@ def save_results(wavelengths,wavelength_err,  samples, csv_filename):
     print(f"Transmission spectroscopy data saved to {csv_filename}")
 
 
+def summarize_joint_geometry(samples, joint_geometry):
+    """Summarise shared-geometry sites sampled jointly across channels.
+
+    ``joint_geometry`` maps a site name (``t0``, ``b``, ``duration``,
+    ``a_rs``) to a mapping with ``prior_center``, ``prior_sigma`` and
+    ``whitelight_std`` arrays (one entry per planet).  Returns the per-row
+    columns to broadcast into the channel table and the long-format rows of
+    the ``*_joint_geometry.csv`` product.
+    """
+    columns = {}
+    rows = []
+    for name, reference in joint_geometry.items():
+        if name not in samples:
+            raise ValueError(
+                f"Joint geometry site {name!r} is missing from the posterior samples."
+            )
+        draws = np.asarray(samples[name], dtype=float)
+        draws = draws.reshape(draws.shape[0], -1)
+        n_planets = draws.shape[1]
+        center = np.broadcast_to(
+            np.atleast_1d(np.asarray(reference['prior_center'], dtype=float)),
+            (n_planets,),
+        )
+        sigma = np.broadcast_to(
+            np.atleast_1d(np.asarray(reference['prior_sigma'], dtype=float)),
+            (n_planets,),
+        )
+        wl_std = np.broadcast_to(
+            np.atleast_1d(np.asarray(reference['whitelight_std'], dtype=float)),
+            (n_planets,),
+        )
+        for planet in range(n_planets):
+            med, low, high = get_asym_errors(draws[:, planet])
+            std = float(np.std(draws[:, planet]))
+            label = name if n_planets == 1 else f"{name}_{planet}"
+            columns.update({
+                label: med,
+                f'{label}_err': std,
+                f'{label}_err_low': low,
+                f'{label}_err_high': high,
+            })
+            rows.append({
+                'parameter': name,
+                'planet': planet,
+                'median': med,
+                'std': std,
+                'err_low': low,
+                'err_high': high,
+                'prior_center': float(center[planet]),
+                'prior_sigma': float(sigma[planet]),
+                'whitelight_median': float(center[planet]),
+                'whitelight_std': float(wl_std[planet]),
+                'shift_in_whitelight_sigma': (
+                    float((med - center[planet]) / wl_std[planet])
+                    if wl_std[planet] > 0 else np.nan
+                ),
+            })
+    return columns, rows
+
+
 def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err, samples, map_params,
                                transit_params, detrend_type, output_prefix,
-                               total_error_fit=None, gp_trend=None, spot_trend=None, jump_trend=None):
+                               total_error_fit=None, gp_trend=None, spot_trend=None, jump_trend=None,
+                               joint_geometry=None):
     n_wavelengths = len(wavelengths)
     n_times = len(time)
     print(f"Saving detailed fit results to {output_prefix}_*.csv")
     param_rows = []
+    shared_columns = {}
+    if joint_geometry:
+        shared_columns, joint_rows = summarize_joint_geometry(samples, joint_geometry)
+        joint_df = pd.DataFrame(joint_rows)
+        joint_path = f"{output_prefix}_joint_geometry.csv"
+        joint_df.to_csv(joint_path, index=False)
+        print(f"Saved joint geometry posterior to {joint_path}")
+        for entry in joint_rows:
+            print(
+                f"  joint {entry['parameter']}[{entry['planet']}] = "
+                f"{entry['median']:.6f} +/- {entry['std']:.6f} "
+                f"(white light {entry['whitelight_median']:.6f} +/- "
+                f"{entry['whitelight_std']:.6f}, shift "
+                f"{entry['shift_in_whitelight_sigma']:+.2f} sigma)"
+            )
     channel_depth_errors = np.nanstd(np.asarray(samples['rors']) ** 2, axis=0)
     if channel_depth_errors.ndim > 1:
         channel_depth_errors = np.nanmax(channel_depth_errors, axis=-1)
@@ -575,6 +651,7 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
                     f'{key}_err_high': high
                 })
             
+        row.update(shared_columns)
         param_rows.append(row)
 
     params_df = pd.DataFrame(param_rows)

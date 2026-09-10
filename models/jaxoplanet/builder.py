@@ -958,8 +958,16 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                             ld_parameterization='coefficients',
                             ld_uniform_basis='uplus_uminus',
                             ld_uniform_coefficient_bounds=(0.0, 1.0),
-                            ld_variant_as_data=False):
+                            ld_variant_as_data=False,
+                            joint_geometry=False):
     """Jaxoplanet spectroscopic model with WL-fixed duration- or a_rs-based geometry.
+
+    ``joint_geometry=True`` replaces the fixed white-light geometry with
+    shared sites ``t0``, ``b``, and ``duration`` (or ``a_rs``) sampled once
+    per draw for every channel (``in_axes=None``).  Each shared site takes a
+    ``Normal(mu_<name>, sigma_<name>)`` prior from the model keyword
+    arguments; the period stays fixed.  The static cadence-reduction and
+    transit-grid accelerations assume fixed geometry and are disabled.
 
     ``jitter_prior='lognormal'`` uses
     ``log_jitter ~ Normal(log(jitter_prior_center * median(yerr)),
@@ -1002,6 +1010,12 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
     if uniform_coefficient_low >= uniform_coefficient_high:
         raise ValueError("ld_uniform_coefficient_bounds must have low < high.")
     power2_transform = Power2MaxtedTransform()
+    joint_geometry = bool(joint_geometry)
+    if joint_geometry and not surface_config.get("fit_geometry", True):
+        raise ValueError(
+            "joint_geometry=True samples the transit geometry and therefore "
+            "requires fit_geometry=True."
+        )
     if jitter_prior != 'lognormal':
         raise ValueError("jitter_prior must be 'lognormal'.")
     jitter_prior_scale = float(jitter_prior_scale)
@@ -1057,9 +1071,11 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
         and not surface_config.get("spots")
         and trend_mode == 'free'
         and linear_trend_names is not None
+        and not joint_geometry
     )
     transit_grid_eligible = (
         transit_grid == 'auto'
+        and not joint_geometry
         and use_transit_window
         and n_planets == 1
         and param_method == 'duration'
@@ -1081,7 +1097,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
         MUS_LD, P_LD = _prepare_power2_poly()
 
     print(f"Building jaxoplanet vectorized model: detrend='{detrend_type}', "
-          f"ld='{ld_mode}', ld_profile='{ld_profile}' for {n_planets} planets")
+          f"ld='{ld_mode}', ld_profile='{ld_profile}' for {n_planets} planets"
+          + (", shared (joint) geometry sites" if joint_geometry else ""))
 
     def _vectorized_model(t, yerr, y=None, mu_duration=None, mu_t0=None, mu_b=None,
                           mu_depths=None, PERIOD=None, trend_fixed=None,
@@ -1102,7 +1119,9 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                           oot_group_count=None,
                           oot_group_reference_sse=None,
                           oot_group_x_reference_residual=None,
-                          oot_group_xx=None):
+                          oot_group_xx=None,
+                          sigma_t0=None, sigma_b=None,
+                          sigma_duration=None, sigma_a_rs=None):
 
         num_lcs = jnp.atleast_2d(yerr).shape[0]
         use_cadence_reduction = (
@@ -1113,16 +1132,42 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
             transit_grid_eligible
             and int(jnp.shape(t)[0]) > _AUTO_CADENCE_REDUCTION_THRESHOLD
         )
-        t0s = mu_t0
-        bs = mu_b
+        def _shared_geometry_site(name, center, scale):
+            # One draw per planet, shared by every channel in the fit.
+            if center is None or scale is None:
+                raise ValueError(
+                    f"joint_geometry=True requires mu_{name} and sigma_{name}."
+                )
+            center = jnp.atleast_1d(jnp.asarray(center, dtype=jnp.float64))
+            scale = jnp.broadcast_to(
+                jnp.atleast_1d(jnp.asarray(scale, dtype=jnp.float64)),
+                center.shape,
+            )
+            return numpyro.sample(name, dist.Normal(center, scale))
+
+        if joint_geometry:
+            t0s = _shared_geometry_site("t0", mu_t0, sigma_t0)
+            bs = _shared_geometry_site("b", mu_b, sigma_b)
+        else:
+            t0s = mu_t0
+            bs = mu_b
 
         if param_method == 'duration':
-            orbital_params = {"duration": mu_duration}
+            duration = (
+                _shared_geometry_site("duration", mu_duration, sigma_duration)
+                if joint_geometry else mu_duration
+            )
+            orbital_params = {"duration": duration}
         else:
             if mu_a_rs is None:
                 raise ValueError("mu_a_rs must be provided when param_method='a_rs'.")
+            a_rs = (
+                _shared_geometry_site("a_rs", mu_a_rs, sigma_a_rs)
+                if joint_geometry
+                else jnp.asarray(mu_a_rs, dtype=jnp.float64)
+            )
             orbital_params = {
-                "a_rs": jnp.asarray(mu_a_rs, dtype=jnp.float64),
+                "a_rs": a_rs,
                 "ecc": jnp.asarray(mu_ecc, dtype=jnp.float64),
                 "omega": jnp.asarray(mu_omega, dtype=jnp.float64),
             }
@@ -1334,7 +1379,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
         if param_method == 'duration':
             in_axes["duration"] = None
             phase_offsets, phase_mask = build_transit_phase_offsets(
-                t, PERIOD, t0s, mu_duration
+                t, PERIOD, t0s, orbital_params["duration"]
             )
             params["_transit_phase_offsets"] = phase_offsets
             params["_transit_phase_mask"] = phase_mask

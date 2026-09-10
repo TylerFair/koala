@@ -82,3 +82,25 @@ Other accepted `flags` keys, shown in context by the example files:
 `harmonica_max_order`, `harmonica_spectro_parameterization`,
 `harmonica_spectro_fit_jitter`, and `harmonica_spectro_odd_frac_sigma`.
 Unknown keys under `flags` produce a warning and are ignored.
+
+## Joint spectroscopic geometry
+
+By default the spectroscopic stages fix `t0`, `b`, and `duration` (or
+`a_rs`) to the white-light posterior medians. Set
+`flags.spectro_joint_geometry: true` to sample them instead as sites shared
+by every channel of a stage; the period stays fixed. Each shared site takes a
+Gaussian prior centred on the white-light posterior median whose width is the
+white-light posterior standard deviation multiplied by
+`flags.spectro_joint_geometry_prior_inflation` (default `3.0`). The joint
+posterior is written to `<stem>_joint_geometry.csv` (median, standard
+deviation, and the white-light reference) and broadcast into
+`<stem>_bestfit_params.csv`.
+
+Shared sites need the joint sampler: `spectro_sampler` is forced to
+`joint_nuts` (with a warning when `independent_nuts` or `independent_hmc`
+was requested) and every channel of the stage is fitted in one chunk, so
+`spectro_chunk_size`/`vmap_chunk` must be absent, `auto`, or at least the
+channel count. Memory therefore scales with the whole spectrum (channels
+times cadences) instead of the resident lane width, and the cadence-reduction
+and transit-grid accelerations are disabled. The `harmonica` engine does not
+support this flag.

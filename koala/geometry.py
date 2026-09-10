@@ -413,3 +413,66 @@ def _load_whitelight_geometry_handoff(
     ):
         return None
     return payload
+
+
+JOINT_GEOMETRY_SITE_NAMES = ("t0", "b", "duration", "a_rs")
+
+
+def _joint_geometry_sites(param_method):
+    """Return the shared geometry sites for a spectroscopic parameterisation."""
+    if param_method == "duration":
+        return ("t0", "b", "duration")
+    if param_method == "a_rs":
+        return ("t0", "b", "a_rs")
+    raise ValueError(f"Unknown param_method: {param_method}")
+
+
+def _whitelight_geometry_prior(
+    bestfit_params_wl_df, wl_geometry_handoff, *, param_method, prior_inflation
+):
+    """Build the shared-geometry prior from the white-light posterior.
+
+    The centres are the handoff medians consumed by the fixed-geometry path;
+    the widths are the white-light posterior standard deviations recorded in
+    the white-light bestfit table (``t0_err``, ``b_err``, ``duration_err``,
+    ``a_rs_err``) multiplied by ``prior_inflation``.  Returns a mapping with
+    ``t0``/``b``/``duration`` or ``a_rs`` centres and matching
+    ``sigma_<name>`` widths, each a float64 array with one entry per planet.
+    """
+    prior_inflation = float(prior_inflation)
+    if not np.isfinite(prior_inflation) or prior_inflation <= 0.0:
+        raise ValueError("prior_inflation must be finite and > 0.")
+    geometry = wl_geometry_handoff["geometry"]
+    num_planets = len(np.atleast_1d(np.asarray(geometry["t0"], dtype=float)))
+    columns = set(getattr(bestfit_params_wl_df, "columns", ()))
+    prior = {}
+    for name in _joint_geometry_sites(param_method):
+        center = np.atleast_1d(np.asarray(geometry[name], dtype=np.float64))
+        err_column = f"{name}_err"
+        if err_column not in columns:
+            raise ValueError(
+                "flags.spectro_joint_geometry=true requires the white-light "
+                f"posterior standard deviation column {err_column!r} in the "
+                "white-light bestfit table; it is missing (was the white-light "
+                "geometry fixed?)."
+            )
+        std = np.atleast_1d(
+            np.asarray(bestfit_params_wl_df[err_column].values, dtype=np.float64)
+        )
+        if std.shape[0] != num_planets or center.shape[0] != num_planets:
+            raise ValueError(
+                f"White-light {name} median/std have inconsistent planet "
+                f"dimensions ({center.shape[0]}, {std.shape[0]}) for "
+                f"{num_planets} planets."
+            )
+        if not np.all(np.isfinite(center)) or not np.all(np.isfinite(std)):
+            raise ValueError(f"White-light {name} median/std are not finite.")
+        if np.any(std <= 0.0):
+            raise ValueError(
+                f"White-light posterior std for {name} must be > 0 to build "
+                "the shared-geometry prior; the white-light posterior appears "
+                "degenerate."
+            )
+        prior[name] = center
+        prior[f"sigma_{name}"] = prior_inflation * std
+    return prior
