@@ -16,19 +16,24 @@ jax.config.update("jax_enable_x64", True)
 import models.gp as kgp
 from models.independent_nuts import prepare_laplace_metric
 from models.jaxoplanet.builder import create_whitelight_model
+from planet_specs import default_planet_specs
 
 
 SOLVERS = ["serial"] + (["parallel"] if kgp.gp_parallel_supported() else [])
 
 
+SPECS = default_planet_specs(period=3.0, t0=1.0, b=0.25, rprs=0.095, duration=0.12)
+
+
 def _case(n=200):
     t = jnp.linspace(0.88, 1.18, n)
     yerr = jnp.full(n, 7.5e-4)
-    prior = {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1])}
+    prior = {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1]),
+             "parameter_priors": SPECS}
     init = {
         "t0_0": jnp.array(1.0),
         "rors_0": jnp.array(0.095),
-        "_b_0": jnp.array(0.25),
+        "b_0": jnp.array(0.25),
         "logD_0": jnp.log(jnp.array(0.12)),
         "log_jitter": jnp.log(jnp.array(4e-4)),
         "c": jnp.array(0.995),
@@ -57,7 +62,7 @@ def test_gp_laplace_metric_and_nuts(solver, hessian_method):
     y = y + 3e-4 * jnp.sin(jnp.linspace(0.0, 5.0, t.size))
     model = create_whitelight_model(
         detrend_type="linear+gp", ld_mode="fixed", ld_profile="quadratic",
-        gp_solver=solver, gp_assume_sorted=True,
+        gp_solver=solver, gp_assume_sorted=True, parameter_priors=SPECS,
     )
     preparation = prepare_laplace_metric(
         model,

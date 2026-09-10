@@ -15,21 +15,32 @@ jax.config.update("jax_enable_x64", True)
 import models.gp as kgp
 from models.harmonica.builder import create_whitelight_model as harmonica_factory
 from models.jaxoplanet.builder import create_whitelight_model as jaxoplanet_factory
+from planet_specs import default_planet_specs
 
 
-FACTORIES = (jaxoplanet_factory, harmonica_factory)
+SPECS = default_planet_specs(period=3.0, t0=1.0, b=0.2, rprs=0.1, duration=0.12)
+
+
+def _jaxoplanet(**kwargs):
+    kwargs.setdefault("parameter_priors", SPECS)
+    return jaxoplanet_factory(**kwargs)
+
+
+_jaxoplanet.__name__ = "jaxoplanet_factory"
+FACTORIES = (_jaxoplanet, harmonica_factory)
 GP_TYPES = tuple(kgp.GP_BUILDERS)
 
 
 def _prior():
-    return {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1])}
+    return {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1]),
+            "parameter_priors": SPECS}
 
 
 def _substitutions(detrend_type):
     values = {
         "t0_0": jnp.array(1.0),
         "rors_0": jnp.array(0.1),
-        "_b_0": jnp.array(0.2),
+        "b_0": jnp.array(0.2),
         "logD_0": jnp.log(jnp.array(0.12)),
         "log_jitter": jnp.log(jnp.array(1e-3)),
         "c": jnp.array(0.96),
@@ -83,7 +94,7 @@ def test_factory_resolves_environment_once(monkeypatch):
     monkeypatch.setenv(kgp.GP_SOLVER_ENV, "serial")
     model = jaxoplanet_factory(
         detrend_type="linear+gp", ld_mode="fixed", ld_profile="quadratic",
-        gp_assume_sorted=True,
+        gp_assume_sorted=True, parameter_priors=SPECS,
     )
     monkeypatch.setenv(kgp.GP_SOLVER_ENV, "not-a-solver")
     t = jnp.linspace(0.9, 1.1, 8)

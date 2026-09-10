@@ -603,9 +603,6 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
     """
     if param_method not in ('duration', 'a_rs'):
         raise ValueError(f"Unknown param_method: {param_method}")
-    parameter_priors = _validate_parameter_priors(
-        parameter_priors, n_planets, param_method
-    )
     surface_config = surface_config or {"model": "transit", "spots": ()}
     if (surface_config.get("model") != "transit" or surface_config.get("spots")) and param_method != "a_rs":
         raise ValueError("Eclipses, phase curves, and stellar spots require param_method='a_rs'.")
@@ -653,6 +650,10 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
 
     print(f"Building jaxoplanet whitelight model: detrend='{detrend_type}', "
           f"ld='{ld_mode}', ld_profile='{ld_profile}' for {n_planets} planets")
+
+    parameter_priors = _validate_parameter_priors(
+        parameter_priors, n_planets, param_method
+    )
 
     def _whitelight_model(t, yerr, y=None, prior_params=None,
                           ld_center=None, ld_scale=None, ld_low=None,

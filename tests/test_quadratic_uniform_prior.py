@@ -89,11 +89,15 @@ def test_quadratic_uniform_initializer_matches_new_coordinates():
 
 
 def test_whitelight_default_emits_legacy_output_sites():
-    model = create_whitelight_model(ld_mode="uniform", ld_profile="quadratic")
+    from planet_specs import default_planet_specs
+    specs = default_planet_specs(period=3.0, t0=0.0, b=0.3, rprs=0.1, duration=0.06)
+    model = create_whitelight_model(ld_mode="uniform", ld_profile="quadratic",
+                                    parameter_priors=specs)
     trace = handlers.trace(handlers.seed(model, jax.random.PRNGKey(2))).get_trace(
         jnp.linspace(-0.03, 0.03, 13), jnp.full(13, 1e-3), y=jnp.ones(13),
         prior_params={"period": np.array([3.0]), "ecc": np.array([0.0]),
-                      "omega": np.array([0.0]), "u": np.array([0.4, 0.1])},
+                      "omega": np.array([0.0]), "u": np.array([0.4, 0.1]),
+                      "parameter_priors": specs},
     )
     for name in ("u", "u1", "u2", "l", "delta"):
         assert trace[name]["type"] == "deterministic"
