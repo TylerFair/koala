@@ -13,7 +13,6 @@ The SOSS example reads the bundled `data/WASP-39_soss_binned8.fits` and download
 | Example | Use it for |
 |---|---|
 | `niriss_soss_order1.yaml` | A first SOSS order-1 transit with a linear trend |
-| `hatp18_soss_starspot.yaml` | A SOSS transit with a starspot crossing on the stellar surface |
 | `nirspec_g395m.yaml` | NIRSpec detector selection and masking a cadence interval |
 | `nirspec_g395h.yaml` | A G395H/NRS1 fit with a quadratic baseline |
 | `nirspec_prism.yaml` | Native-grid PRISM with an exponential ramp and small GPU batches |

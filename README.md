@@ -25,8 +25,8 @@ than building a model from scratch.
 The JAXoplanet backend also supports eclipses, smooth phase curves, and
 rotating stellar spots. See the [surface-model guide](docs/guides/phase_curves.md)
 for the configuration keys and the
-[HAT-P-18 b starspot tutorial](docs/tutorials/hatp18_starspot.md) for a
-spot-crossing fit on real data.
+[phase-curve tutorial](docs/tutorials/phase_curve.md) for a worked
+day-night map recovery.
 
 ## Get started
 
@@ -75,7 +75,7 @@ for those two steps, then follow **[Fit your first transit](https://koala-jwst.r
 ## Learn by doing
 
 - [Fit your first transit](https://koala-jwst.readthedocs.io/en/latest/tutorials/soss_order1.html)
-- [Model a starspot crossing](https://koala-jwst.readthedocs.io/en/latest/tutorials/hatp18_starspot.html)
+- [Fit a thermal phase curve](https://koala-jwst.readthedocs.io/en/latest/tutorials/phase_curve.html)
 - [Choose limb darkening](https://koala-jwst.readthedocs.io/en/latest/guides/limb_darkening.html)
 - [Marginalize over models](https://koala-jwst.readthedocs.io/en/latest/guides/model_stacking.html)
 - [Run Gaussian-process trends](docs/guides/gaussian_processes.md)

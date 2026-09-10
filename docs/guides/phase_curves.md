@@ -43,7 +43,7 @@ Spots are smooth spherical-harmonic approximations, so keep them moderate in
 size and non-overlapping. Surface models are not available with the Harmonica
 engine.
 
-See the [HAT-P-18 b starspot tutorial](../tutorials/hatp18_starspot.md) and
-the [WASP-39 b eclipse tutorial](../tutorials/wasp39_eclipse.md) for complete
-configurations; `examples/eclipse.yaml` and `examples/stellar_spots.yaml` are
-small synthetic versions.
+See the [phase-curve tutorial](../tutorials/phase_curve.md) and the
+[WASP-39 b eclipse tutorial](../tutorials/wasp39_eclipse.md) for complete
+configurations; `examples/eclipse.yaml`, `examples/phase_curve.yaml`, and
+`examples/stellar_spots.yaml` are small synthetic versions.

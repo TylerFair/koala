@@ -65,11 +65,11 @@ data, and cluster environments.
 Run the bundled NIRISS/SOSS example from configuration to spectrum.
 :::
 
-:::{grid-item-card} Model a starspot crossing
-:link: tutorials/hatp18_starspot
+:::{grid-item-card} Fit a thermal phase curve
+:link: tutorials/phase_curve
 :link-type: doc
 
-Put a spot on the stellar surface and fit the HAT-P-18 b SOSS transit.
+Recover the day-night contrast and hotspot offset of a synthetic phase curve.
 :::
 
 :::{grid-item-card} Choose limb darkening
@@ -109,8 +109,8 @@ faq
 
 Overview <tutorials/index>
 tutorials/soss_order1
-tutorials/hatp18_starspot
 tutorials/wasp39_eclipse
+tutorials/phase_curve
 tutorials/harmonica
 ```
 
