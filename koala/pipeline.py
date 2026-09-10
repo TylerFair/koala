@@ -222,6 +222,71 @@ from .spectroscopy import run_low_resolution_stage, run_high_resolution_stage
 
 from .white_light import run_white_light_stage
 
+
+_GPU_BACKEND_ALIASES = {'cuda': 'gpu', 'rocm': 'gpu', 'gpu': 'gpu'}
+
+
+def _jax_backend_available(platform):
+    """Return True when JAX can initialise ``platform`` on this machine."""
+    try:
+        return len(jax.devices(platform)) > 0
+    except Exception:
+        # jax raises RuntimeError when the requested plugin is missing or
+        # fails to initialise (e.g. a CPU-only wheel on a CUDA machine).
+        return False
+
+
+def resolve_host_device(requested):
+    """Pick the JAX/numpyro platform for ``host_device``.
+
+    ``requested`` is ``'gpu'``, ``'cpu'`` or ``'auto'``. A GPU is used
+    only when JAX can actually initialise one; otherwise the run falls
+    back to CPU with a warning instead of raising. This covers the common
+    case where CUDA is installed but the CPU-only ``jax`` wheel is.
+    """
+    requested = (requested or 'auto').lower()
+    if requested not in {'gpu', 'cpu', 'auto', 'cuda'}:
+        raise ValueError(
+            f"host_device must be 'gpu', 'cpu' or 'auto', got {requested!r}"
+        )
+    if requested == 'cuda':
+        requested = 'gpu'
+    want_gpu = requested in {'gpu', 'auto'}
+    if want_gpu and _jax_backend_available('gpu'):
+        platform = 'gpu'
+    else:
+        if requested == 'gpu':
+            warnings.warn(
+                "host_device='gpu' was requested but JAX cannot initialise a "
+                "GPU backend; falling back to CPU. If this machine has a "
+                "CUDA GPU, install the CUDA build of JAX "
+                "(pip install -U 'jax[cuda12]') and check that JAX_PLATFORMS "
+                "is not set to 'cpu'.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        platform = 'cpu'
+    try:
+        jax.config.update('jax_platform_name', platform)
+    except Exception as exc:  # pragma: no cover - defensive
+        warnings.warn(
+            f"Could not set jax_platform_name={platform!r}: {exc}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    numpyro.set_platform(platform)
+    # jax.default_backend() reports the plugin name ('cuda' or 'rocm'),
+    # never the 'gpu' alias, so compare after mapping it back.
+    actual = _GPU_BACKEND_ALIASES.get(jax.default_backend(), jax.default_backend())
+    if actual != platform:
+        raise RuntimeError(
+            f"Requested JAX backend {platform!r}, but JAX selected "
+            f"{actual!r}. Available devices: {jax.devices()}. This usually "
+            "means JAX was already initialised on another backend before "
+            "koala ran; set JAX_PLATFORMS before starting Python."
+        )
+    return platform
+
 def _align_trend_to_time(trend, trend_time, target_time):
     trend = np.asarray(trend)
     target_time = np.asarray(target_time)
@@ -900,15 +965,8 @@ def run(cfg, config_path=None):
                 f"Using pure JAX harmonica GPU path "
                 f"(N_c=1 {ld_profile} LD)."
             )
-    jax.config.update('jax_platform_name', host_device)
-    numpyro.set_platform(host_device)
-    actual_backend = jax.default_backend()
-    if actual_backend != host_device:
-        raise RuntimeError(
-            f"Requested JAX backend '{host_device}', but JAX selected "
-            f"'{actual_backend}'. Available devices: {jax.devices()}"
-        )
-    print(f"JAX backend verified: {actual_backend}; devices={jax.devices()}")
+    host_device = resolve_host_device(host_device)
+    print(f"JAX backend verified: {host_device}; devices={jax.devices()}")
     master_seed = int(os.getenv("FIT_JWST_SEED", flags.get("random_seed", 555)))
     key_master = jax.random.PRNGKey(master_seed)
     print(f"Master random seed: {master_seed}")

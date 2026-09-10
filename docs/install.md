@@ -73,7 +73,22 @@ python -c "import jax; print(jax.devices())"
 ```
 
 Run this check inside a GPU allocation on a cluster. Seeing only `CpuDevice`
-there means the JAX build, driver, or allocation needs attention.
+there means the JAX build, driver, or allocation needs attention. Koala
+cannot use a GPU that JAX does not list: with `host_device: gpu` it falls
+back to CPU and prints a warning. Common causes on a desktop PC:
+
+- **Windows.** There are no CUDA JAX wheels for native Windows, so
+  `pip install "jax[cuda12]"` silently installs the CPU build even though
+  `nvidia-smi` works. Run Koala under WSL2 (Ubuntu) and install JAX there.
+- **Driver too old for the wheel.** The `cuda12` wheels need a recent NVIDIA
+  driver, and Blackwell cards such as the RTX 50 series need driver 570 or
+  newer. `import jax` then logs `cuInit` or "Unable to initialize backend
+  'cuda'" and continues on CPU. Update the driver.
+- **Mismatched JAX packages.** `jax`, `jaxlib`, `jax-cuda12-plugin`, and
+  `jax-cuda12-pjrt` must all be the same version. If a later
+  `pip install` upgraded `jax` alone, JAX logs a plugin version error and
+  falls back to CPU. Fix it with
+  `python -m pip install -U "jax[cuda12]"`, then re-run the check above.
 
 ## 3. Run the bundled example
 
