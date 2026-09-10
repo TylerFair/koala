@@ -19,6 +19,7 @@ from .core import (
     HARMONICA_HALF_AREA_CONVEX_Q_LIMIT,
     harmonica_half_area_coefficients_from_area_radius,
 )
+from ..common import apply_systematics
 from ..detrend import _split_components
 from ..limb_darkening_config import GAUSSIAN_LD_WIDTH
 from ..trends import (
@@ -468,7 +469,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
         transit_signal = compute_transit_model_harmonica(params, t)
         t_norm = t - jnp.min(t)
         if detrend_type == 'none':
-            lc_model = transit_signal + 1.0
+            lc_model = apply_systematics(transit_signal, 1.0)
         else:
             trend = params.get('c', 1.0) + params.get('v', 0.0) * t_norm
             if 'v2' in params:
@@ -491,7 +492,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
                 trend = trend + spot_crossing(
                     t, params['spot_amp2'], params['spot_mu2'], params['spot_sigma2']
                 )
-            lc_model = transit_signal + trend
+            lc_model = apply_systematics(transit_signal, trend)
 
         if 'gp' not in detrend_type:
             numpyro.sample('obs', dist.Normal(lc_model, error), obs=y)
@@ -760,7 +761,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
             A_jump = numpyro.sample('A_jump', dist.Uniform(0.5, 2).expand([num_lcs]))
             trend = trend + A_jump[:, None] * jump_trend
 
-        y_model = transit_sig + trend
+        y_model = apply_systematics(transit_sig, trend)
         numpyro.sample('obs', dist.Normal(y_model, error_broadcast), obs=y)
 
     return _vectorized_model

@@ -299,12 +299,37 @@ def _phase_curve_flux_init_sites(surface_config, shape=()):
     return result
 
 
+def _surface_polynomial_ld(u, ld_profile):
+    """Return polynomial limb-darkening rows for the starry surface.
+
+    starry takes polynomial coefficients directly, so quadratic ``(u1, u2)``
+    pass through. Power-2 ``(c, alpha)`` must first be projected onto the same
+    degree-12 polynomial the jaxoplanet builders use; handing them to starry
+    unconverted silently produces a wrong intensity profile.
+    """
+    u = np.asarray(u, dtype=float)
+    if ld_profile != "power2":
+        return u
+    from models.common import get_I_power2
+    from models.detrend import _prepare_power2_poly
+
+    mus, projection = _prepare_power2_poly()
+    rows = np.atleast_2d(u)
+    if rows.shape[-1] != 2:
+        raise ValueError("power2 limb darkening needs (c, alpha) per channel.")
+    profiles = np.asarray(get_I_power2(rows[:, :1], rows[:, 1:], np.asarray(mus)[None, :]))
+    poly = np.asarray(np.asarray(projection) @ (1.0 - profiles).T).T
+    return poly[0] if u.ndim == 1 else poly
+
+
 def _prepare_fixed_surface_basis(
-    surface_config, t, u, *, period, t0, a_rs, b, rors, ecc, omega
+    surface_config, t, u, *, period, t0, a_rs, b, rors, ecc, omega,
+    ld_profile="quadratic",
 ):
     """Precompute an exact native linear basis for a fixed surface model."""
     if surface_config.get("fit_geometry", True):
         return None
+    u = _surface_polynomial_ld(u, ld_profile)
     from models.jaxoplanet.surface_basis import (
         EmissionLightCurveBasis,
         SpotLightCurveBasis,

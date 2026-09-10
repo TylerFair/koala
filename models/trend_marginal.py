@@ -58,18 +58,21 @@ def build_marginalized_trend_design(
     spot_trend2=None,
     jump_trend=None,
     exp_trend=None,
-    baseline_template=None,
+    transit_factor=None,
 ):
-    """Build a ``[channel, time, coefficient]`` additive trend design."""
+    """Build a ``[channel, time, coefficient]`` systematics design.
+
+    The light-curve model is ``(1 + transit) * (X @ beta)``; when
+    ``transit_factor`` (``1 + transit``, shape ``[time]`` or
+    ``[channel, time]``) is given, every column is multiplied by it so the
+    model is exactly linear in ``beta`` and the marginal likelihood stays
+    exact.  Without it the design describes the systematics factor alone.
+    """
     names = marginalized_trend_coefficient_names(detrend_type)
     t = jnp.asarray(t, dtype=jnp.float64)
     t_norm = t - jnp.min(t)
     shared = {
-        "c": (
-            jnp.ones_like(t_norm)
-            if baseline_template is None
-            else jnp.asarray(baseline_template, dtype=jnp.float64)
-        ),
+        "c": jnp.ones_like(t_norm),
         "v": t_norm,
         "v2": t_norm**2,
         "v3": t_norm**3,
@@ -107,7 +110,17 @@ def build_marginalized_trend_design(
             raise ValueError(
                 f"Template for {name} must have shape [time] or [channel, time]."
             )
-    return jnp.stack(columns, axis=-1), names
+    design = jnp.stack(columns, axis=-1)
+    if transit_factor is not None:
+        factor = jnp.asarray(transit_factor, dtype=jnp.float64)
+        if factor.ndim == 1 and factor.shape[0] == t.shape[0]:
+            factor = jnp.broadcast_to(factor, (num_channels, t.shape[0]))
+        elif factor.shape != (num_channels, t.shape[0]):
+            raise ValueError(
+                "transit_factor must have shape [time] or [channel, time]."
+            )
+        design = design * factor[..., None]
+    return design, names
 
 
 def materialize_marginalized_trend_samples(

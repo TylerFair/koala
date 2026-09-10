@@ -544,6 +544,7 @@ def _run_low_resolution_stage_hook(
                 rors=RORS_BASE,
                 ecc=HARMONICA_ECC,
                 omega=HARMONICA_OMEGA,
+                ld_profile=ld_profile,
             )
             if spot_basis_lr is not None:
                 print(
@@ -1527,6 +1528,7 @@ def _run_high_resolution_stage_hook(
             rors=RORS_BASE,
             ecc=HARMONICA_ECC,
             omega=HARMONICA_OMEGA,
+            ld_profile=ld_profile,
         )
         if spot_basis_hr is not None:
             model_run_args_hr['surface_basis_data'] = spot_basis_hr

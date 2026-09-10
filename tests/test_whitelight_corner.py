@@ -25,6 +25,14 @@ def _samples(n=400):
         "total_error": rng.normal(size=(n, 3)),  # per-channel site: excluded
         "_transit_phase_mask": np.ones(n),     # bookkeeping: excluded
         "constant": np.full(n, 2.0),           # degenerate: dropped
+        # Latent / derived sites that must not appear:
+        "cos_i_0": rng.normal(0.04, 0.001, n),
+        "delta": rng.normal(0.04, 0.001, n),
+        "log_jitter": rng.normal(-8, 0.1, n),
+        "ld_uplus_uminus1": rng.normal(0.4, 0.05, n),
+        "depths_0": rng.normal(0.021, 1e-4, n),
+        "inc_0": rng.normal(1.53, 0.001, n),
+        "a_rs": rng.normal(11.4, 0.1, n),      # duration present: dropped
     }
 
 

@@ -13,7 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 import tinygp
 
-from .common import compute_transit_model_auto
+from .common import compute_transit_model_auto, apply_systematics
 
 
 GP_MODEL_REVISION = "koala-gp-2026-09-08-tref-v1"
@@ -132,13 +132,13 @@ def _transit_signal(params, t):
 # --- GP MEAN FUNCTIONS ---
 def compute_lc_gp_mean(params, t, t_ref=None):
     """The mean function for the simple GP model is transit plus a constant."""
-    return _transit_signal(params, t) + params["c"]
+    return apply_systematics(_transit_signal(params, t), params["c"])
 
 
 def compute_lc_linear_gp_mean(params, t, t_ref=None):
     """The mean function for the linear + GP model."""
     lc_transit = _transit_signal(params, t)
-    return lc_transit + params["c"] + params["v"] * _time_offset(t, t_ref)
+    return apply_systematics(lc_transit, params["c"] + params["v"] * _time_offset(t, t_ref))
 
 
 def compute_lc_quadratic_gp_mean(params, t, t_ref=None):
@@ -146,7 +146,7 @@ def compute_lc_quadratic_gp_mean(params, t, t_ref=None):
     lc_transit = _transit_signal(params, t)
     t_norm = _time_offset(t, t_ref)
     trend = params["c"] + params["v"] * t_norm + params["v2"] * t_norm**2
-    return lc_transit + trend
+    return apply_systematics(lc_transit, trend)
 
 
 def compute_lc_cubic_gp_mean(params, t, t_ref=None):
@@ -159,7 +159,7 @@ def compute_lc_cubic_gp_mean(params, t, t_ref=None):
         + params["v2"] * t_norm**2
         + params["v3"] * t_norm**3
     )
-    return lc_transit + trend
+    return apply_systematics(lc_transit, trend)
 
 
 def compute_lc_quartic_gp_mean(params, t, t_ref=None):
@@ -173,7 +173,7 @@ def compute_lc_quartic_gp_mean(params, t, t_ref=None):
         + params["v3"] * t_norm**3
         + params["v4"] * t_norm**4
     )
-    return lc_transit + trend
+    return apply_systematics(lc_transit, trend)
 
 
 def compute_lc_explinear_gp_mean(params, t, t_ref=None):
@@ -185,7 +185,7 @@ def compute_lc_explinear_gp_mean(params, t, t_ref=None):
         + params["v"] * t_norm
         + params["A"] * jnp.exp(-t_norm / params["tau"])
     )
-    return lc_transit + trend
+    return apply_systematics(lc_transit, trend)
 
 
 GP_MEAN_FUNCTIONS = {
@@ -209,20 +209,20 @@ def resolve_gp_mean_function(detrend_type):
 # --- SPECTROSCOPIC GP FUNCTIONS ---
 def compute_lc_gp_spectroscopic(params, t, gp_trend):
     lc_transit = compute_transit_model_auto(params, t)
-    return lc_transit + params["c"] + params["A_gp"] * gp_trend
+    return apply_systematics(lc_transit, params["c"] + params["A_gp"] * gp_trend)
 
 
 def compute_lc_linear_gp_spectroscopic(params, t, gp_trend):
     lc_transit = compute_transit_model_auto(params, t)
     trend = params["c"] + params["v"] * (t - jnp.min(t))
-    return lc_transit + trend + params["A_gp"] * gp_trend
+    return apply_systematics(lc_transit, trend + params["A_gp"] * gp_trend)
 
 
 def compute_lc_quadratic_gp_spectroscopic(params, t, gp_trend):
     lc_transit = compute_transit_model_auto(params, t)
     t_norm = t - jnp.min(t)
     trend = params["c"] + params["v"] * t_norm + params["v2"] * t_norm**2
-    return lc_transit + trend + params["A_gp"] * gp_trend
+    return apply_systematics(lc_transit, trend + params["A_gp"] * gp_trend)
 
 
 def compute_lc_cubic_gp_spectroscopic(params, t, gp_trend):
@@ -234,7 +234,7 @@ def compute_lc_cubic_gp_spectroscopic(params, t, gp_trend):
         + params["v2"] * t_norm**2
         + params["v3"] * t_norm**3
     )
-    return lc_transit + trend + params["A_gp"] * gp_trend
+    return apply_systematics(lc_transit, trend + params["A_gp"] * gp_trend)
 
 
 def compute_lc_quartic_gp_spectroscopic(params, t, gp_trend):
@@ -247,7 +247,7 @@ def compute_lc_quartic_gp_spectroscopic(params, t, gp_trend):
         + params["v3"] * t_norm**3
         + params["v4"] * t_norm**4
     )
-    return lc_transit + trend + params["A_gp"] * gp_trend
+    return apply_systematics(lc_transit, trend + params["A_gp"] * gp_trend)
 
 
 def compute_lc_explinear_gp_spectroscopic(params, t, gp_trend):
@@ -258,7 +258,7 @@ def compute_lc_explinear_gp_spectroscopic(params, t, gp_trend):
         + params["v"] * t_norm
         + params["A"] * jnp.exp(-t_norm / params["tau"])
     )
-    return lc_transit + trend + params["A_gp"] * gp_trend
+    return apply_systematics(lc_transit, trend + params["A_gp"] * gp_trend)
 
 
 # --- GP BUILDERS AND TRAINING-POINT PREDICTION ---

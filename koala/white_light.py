@@ -206,7 +206,9 @@ def _compute_whitelight_gp_products(
         "mu": mu,
         "var": var,
         "planet_model_only": planet_model,
-        "trend_flux_total": mu - planet_model - 1.0,
+        # Total systematics factor (parametric trend plus GP), given
+        # F = (1 + planet) * systematics.
+        "trend_flux_total": mu / (1.0 + planet_model),
         "parametric_mean": parametric_mean,
         "gp_stochastic_component": mu - parametric_mean,
     }
@@ -592,6 +594,7 @@ def run_white_light_stage(
                     rors=PRIOR_RPRS,
                     ecc=HARMONICA_ECC,
                     omega=HARMONICA_OMEGA,
+                    ld_profile=ld_profile,
                 )
                 if spot_basis_wl is not None:
                     _engine_wl_kw['surface_basis'] = spot_basis_wl
@@ -1592,18 +1595,20 @@ def run_white_light_stage(
                 surface_config=surface_config,
             )
 
+            # F = (1 + transit) * systematics, so detrending divides by the
+            # systematics factor.
             if 'gp' in detrending_type:
                 planet_model_masked = compute_transit_model_auto(masked_model_eval_params_wl, t_masked)
-                mu_masked = mu[~wl_mad_mask] 
-                total_trend_at_points = mu_masked - planet_model_masked
-                detrended_flux = f_masked - (total_trend_at_points - 1.0)
+                mu_masked = mu[~wl_mad_mask]
+                systematics_at_points = mu_masked / (1.0 + planet_model_masked)
+                detrended_flux = f_masked / systematics_at_points
             else:
                 trend = _trend_from_params_np(
                     detrending_type,
                     np.array(t_masked),
                     bestfit_params_wl
                 )
-                detrended_flux = f_masked - trend + 1.0
+                detrended_flux = f_masked / trend
 
             transit_only_model = compute_transit_model_auto(masked_model_eval_params_wl, t_masked) + 1.0
             wl_flux_err_full = np.broadcast_to(
@@ -1649,7 +1654,8 @@ def run_white_light_stage(
                 dtype=float,
             )
             bestfit_model_full = np.asarray(wl_transit_model, dtype=float)
-            trend_model_full = bestfit_model_full - transit_only_full
+            # Systematics factor: full model divided by the transit-only model.
+            trend_model_full = bestfit_model_full / transit_only_full
             gp_flux_full = np.asarray(mu, dtype=float) if 'gp' in detrending_type else None
             gp_err_full = np.asarray(jnp.sqrt(var), dtype=float) if 'gp' in detrending_type else None
             gp_trend_full = np.asarray(gp_stochastic_component, dtype=float) if 'gp' in detrending_type else None

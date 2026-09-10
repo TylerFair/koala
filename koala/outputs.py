@@ -303,7 +303,8 @@ def save_whitelight_timeseries(time, flux, flux_err, bestfit_model, output_csv,
     if trend_model is not None:
         trend_model = np.asarray(trend_model, dtype=float)
         data["trend_model"] = trend_model
-        data["detrended_flux"] = flux - trend_model
+        # F = (1 + transit) * trend, so the detrended flux is flux / trend.
+        data["detrended_flux"] = flux / trend_model
     if gp_flux is not None:
         data["gp_flux"] = np.asarray(gp_flux, dtype=float)
     if gp_err is not None:

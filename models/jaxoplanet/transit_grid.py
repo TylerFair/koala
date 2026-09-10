@@ -653,7 +653,8 @@ def grid_reduced_log_likelihood(
             contact_fallback_margin=contact_fallback_margin,
             order=order,
         )
-        model = transit + design @ beta
+        # Multiplicative systematics: F = (1 + transit) * (design @ beta).
+        model = (1.0 + transit) * (design @ beta)
         error = jnp.sqrt(yerr**2 + jitter**2)
         active_log_prob = dist.Normal(model, error).log_prob(y)
         active_log_prob = jnp.where(
@@ -741,18 +742,21 @@ def grid_reduced_log_likelihood(
             )
         else:
             raise ValueError(f"Unsupported transit-grid LD profile: {ld_profile}")
-        model = transit + design @ beta
+        systematics = design @ beta
+        model = (1.0 + transit) * systematics
         residual_flux = y - model
         variance = yerr**2 + jitter**2
         model_cotangent = jnp.where(
             likelihood_mask, residual_flux / variance, 0.0
         )
         active_gradient = jnp.zeros_like(parameters)
+        # d model / d transit-params = systematics * d transit / d params.
         active_gradient = active_gradient.at[:3].set(
-            jnp.einsum("ip,i->p", transit_jacobian, model_cotangent)
+            jnp.einsum("ip,i->p", transit_jacobian, systematics * model_cotangent)
         )
+        # d model / d beta = (1 + transit) * design.
         active_gradient = active_gradient.at[3:-1].set(
-            design.T @ model_cotangent
+            design.T @ ((1.0 + transit) * model_cotangent)
         )
         active_jitter = jnp.where(
             likelihood_mask,

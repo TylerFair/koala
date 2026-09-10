@@ -17,6 +17,20 @@ def get_I_power2(c, alpha, u):
     return 1 - c * (1 - jnp.power(u, alpha))
 
 
+def apply_systematics(lc_transit, trend):
+    """Combine a transit signal with a systematics model multiplicatively.
+
+    Koala's light-curve convention is ``F(t) = (1 + lc_transit) * trend``:
+    ``lc_transit`` is the transit *signal* (0 out of transit, negative in
+    transit, as returned by jaxoplanet and Harmonica) and ``trend`` is the
+    systematics factor (baseline ``c`` near 1 plus polynomial, exponential,
+    spot, step, or GP-template terms).  Every model builder and every
+    reconstruction of a detrended light curve (``flux / trend``) uses this
+    convention.
+    """
+    return (1.0 + lc_transit) * trend
+
+
 def compute_transit_model_auto(params, t):
     """Dispatch to harmonica or jaxoplanet transit model based on params keys."""
     has_harmonica_power2_ld = all(
@@ -31,11 +45,7 @@ def compute_transit_model_auto(params, t):
         from .harmonica.core import compute_transit_model_harmonica
         return compute_transit_model_harmonica(params, t)
     from .jaxoplanet.core import compute_transit_model
-    signal = compute_transit_model(params, t)
-    # Surface signals are normalized stellar-system flux minus one.  Scale
-    # them with the fitted constant baseline so normalized eclipse and phase
-    # amplitudes remain exact when the data normalization is not exactly one.
-    if (params.get("_surface_model", "transit") != "transit"
-            or params.get("_stellar_spots", ())):
-        signal = signal * params.get("c", 1.0)
-    return signal
+    # Surface signals are normalized stellar-system flux minus one.  The
+    # multiplicative systematics convention (``apply_systematics``) scales
+    # them by the fitted baseline automatically.
+    return compute_transit_model(params, t)

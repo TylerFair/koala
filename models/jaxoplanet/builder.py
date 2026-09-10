@@ -7,7 +7,7 @@ import numpyro
 import numpyro.distributions as dist
 import numpy as np
 
-from ..common import get_I_power2
+from ..common import apply_systematics, get_I_power2
 from ..cadence_reduction import linear_spectro_trend_coefficient_names
 from ..linear_marginalization import marginalized_log_likelihood_and_conditional
 from ..ld_parameterization import Power2MaxtedTransform
@@ -1423,7 +1423,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                 compute_transit_model,
                 in_axes=(in_axes, None),
             )(params, t)
-            surface_active = bool(surface_params)
+            # F = (1 + transit) * (X @ beta): fold the transit factor into
+            # every design column so the model is exactly linear in beta.
             design, coefficient_names = build_marginalized_trend_design(
                 detrend_type,
                 t,
@@ -1433,7 +1434,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                 spot_trend2=spot_trend2,
                 jump_trend=jump_trend,
                 exp_trend=exp_trend,
-                baseline_template=(1.0 + transit_model) if surface_active else None,
+                transit_factor=1.0 + transit_model,
             )
             num_coefficients = len(coefficient_names)
             if trend_prior_mean is None:
@@ -1456,9 +1457,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                 )
             log_likelihood, conditional = (
                 marginalized_log_likelihood_and_conditional(
-                    (jnp.asarray(y, dtype=jnp.float64)
-                     if surface_active
-                     else jnp.asarray(y, dtype=jnp.float64) - transit_model),
+                    jnp.asarray(y, dtype=jnp.float64),
                     design,
                     error_broadcast,
                     trend_prior_mean,
@@ -1753,7 +1752,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='gaussian', trend_mod
                 resolved_trend_design, dtype=jnp.float64
             )[indices]
             trend_active = beta @ design_active.T
-            active_model = transit_active + trend_active
+            active_model = apply_systematics(transit_active, trend_active)
             active_error = error_broadcast[:, indices]
             active_y = jnp.atleast_2d(
                 jnp.asarray(y, dtype=jnp.float64)

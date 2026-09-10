@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
-from models.common import compute_transit_model_auto
+from models.common import apply_systematics, compute_transit_model_auto
 from models.harmonica.core import _ALL_ODD_COEFF_SPECS
 from plotting_style import (
     DATA_MARKER_STYLE,
@@ -117,8 +117,6 @@ def _single_curve_transit_signal(t, map_params, transit_params, idx):
         ):
             if name in map_params:
                 params[name] = jnp.asarray(map_params[name][idx])
-        if params.get("_surface_model", "transit") != "transit" or params.get("_stellar_spots", ()):
-            params["c"] = jnp.asarray(_first_value(map_params.get("c", 1.0), idx))
         basis = map_params.get("_surface_basis")
         if basis is not None:
             basis_time = map_params.get("_surface_basis_time")
@@ -488,8 +486,10 @@ def _simple_channel_trend(t, map_params, index, detrend_type):
 def _map_full_models(t, map_params, transit_params, count, detrend_type):
     return np.asarray(
         [
-            _single_curve_transit_signal(t, map_params, transit_params, index)
-            + _simple_channel_trend(t, map_params, index, detrend_type)
+            apply_systematics(
+                _single_curve_transit_signal(t, map_params, transit_params, index),
+                _simple_channel_trend(t, map_params, index, detrend_type),
+            )
             for index in range(count)
         ]
     )
@@ -783,7 +783,7 @@ def plot_wavelength_offset_summary(
             jump_trend=jump_trend,
             exp_trend=exp_trend,
         )
-        model = transit + trend
+        model = apply_systematics(transit, trend)
         residual = data[index] - model
         color = colors[position]
         ax_data.plot(
@@ -1058,15 +1058,32 @@ _CORNER_ORDER = (
     "spot_amp2", "spot_mu2", "spot_sigma2", "t_jump", "jump", "width",
     "error", "GP_log_sigma", "GP_log_rho",
 )
-# Deterministic duplicates and bookkeeping sites that add nothing to a corner.
-_CORNER_EXCLUDE = {"width_minutes", "log_width", "total_error", "depths"}
+# Surface-model sites shown when present (labels fall back to the name).
+_CORNER_SURFACE = (
+    "eclipse_depth", "dayside_flux", "nightside_flux", "hotspot_offset",
+    "stellar_spot_contrast", "stellar_rotation_period",
+)
+# Only physical, directly interpretable sites are plotted. Latent
+# reparameterisations (cos i, delta, log-jitter, u+/u- coordinates, log tau)
+# and deterministic duplicates (depths, inclination, width in minutes) are
+# left out; a_rs is shown only when duration is not.
+_CORNER_KEEP = set(_CORNER_ORDER) | set(_CORNER_SURFACE)
 
 
 def _corner_columns(samples):
     """Return (columns, labels) of scalar posterior sites for a corner plot."""
+    def stem_of(name):
+        if "_" in name and name.rsplit("_", 1)[1].isdigit():
+            return name.rsplit("_", 1)[0]
+        return name
+
+    has_duration = any(stem_of(n) == "duration" for n in samples)
     columns = {}
     for name, value in samples.items():
-        if name.startswith("_") or name in _CORNER_EXCLUDE:
+        stem = stem_of(name)
+        if name.startswith("_") or (stem not in _CORNER_KEEP and name != "u"):
+            continue
+        if stem == "a_rs" and has_duration:
             continue
         arr = np.asarray(value, dtype=float)
         if arr.ndim == 1:

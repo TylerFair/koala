@@ -92,24 +92,29 @@ def test_whitelight_phase_curve_anchors_t0_outside_visit(monkeypatch):
         assert name in trace
 
 
-def test_surface_signal_scales_with_fitted_baseline(monkeypatch):
+def test_surface_signal_is_scaled_by_the_multiplicative_baseline(monkeypatch):
+    from models.common import apply_systematics
+
     monkeypatch.setattr(
         "models.jaxoplanet.core.compute_transit_model",
         lambda params, time: jnp.full_like(time, 0.01),
     )
     params = {"_surface_model": "eclipse", "c": 0.8}
-    np.testing.assert_allclose(
-        compute_transit_model_auto(params, jnp.arange(3.0)), 0.008,
-    )
+    signal = compute_transit_model_auto(params, jnp.arange(3.0))
+    # The raw signal is the normalized system flux minus one ...
+    np.testing.assert_allclose(signal, 0.01)
+    # ... and the baseline scales the whole system flux multiplicatively.
+    np.testing.assert_allclose(apply_systematics(signal, params["c"]), 0.8 * 1.01)
 
 
-def test_marginalized_surface_intercept_is_system_flux():
+def test_marginalized_design_is_scaled_by_the_transit_factor():
     system_flux = jnp.array([[1.001, 1.000, 1.001], [1.002, 1.000, 1.002]])
     design, names = build_marginalized_trend_design(
-        "linear", jnp.arange(3.0), 2, baseline_template=system_flux,
+        "linear", jnp.arange(3.0), 2, transit_factor=system_flux,
     )
-    assert names[0] == "c"
+    assert names == ("c", "v")
     np.testing.assert_allclose(design[..., 0], system_flux)
+    np.testing.assert_allclose(design[..., 1], system_flux * jnp.arange(3.0))
 
 
 def test_postfit_surface_metadata_preserves_fitted_values():
