@@ -36,7 +36,8 @@ from models.jaxoplanet.surface_basis import (
 )
 from plotting_style import apply_publication_style
 from surface_outputs import save_surface_results
-from tools.example_phase_curves import _scenario, _write_nirspec, PERIOD, T0, A_RS, B, RPRS, NOISE_PPM
+from koala.config import parse_planet_parameter_specs
+from tools.example_phase_curves import _scenario, _write_nirspec, GEOMETRY, NOISE_PPM
 
 ROOT = Path(__file__).resolve().parents[1]
 SITES = {"eclipse": ["eclipse_depth"],
@@ -82,7 +83,18 @@ def fit(name, output, draws=1000, warmup=500, seed=20260904):
     directory = output / name
     directory.mkdir(parents=True, exist_ok=True)
     cfg = yaml.safe_load((ROOT / "examples" / f"{name}.yaml").read_text())
-    config = parse_surface_config(cfg["flags"], cfg["planet"], cfg["stellar"], 1)
+    config = parse_surface_config(
+        cfg["flags"], cfg["planet"], cfg["stellar"], 1,
+        parameter_specs=parse_planet_parameter_specs(cfg["planet"]),
+        param_method="a_rs",
+    )
+    # This tool fits with the injected geometry held fixed; the production
+    # pipeline (fit_jwst.py) honours the priors in the example file.
+    geometry = GEOMETRY[name]
+    PERIOD, T0, A_RS, B, RPRS = (
+        geometry["period"], geometry["t0"], geometry["a_rs"],
+        geometry["b"], geometry["rprs"],
+    )
     wave = np.linspace(2.9, 5., 14)
     time, signal, truth = _scenario(name, wave)
     rng = np.random.default_rng(seed)
@@ -160,6 +172,7 @@ def fit(name, output, draws=1000, warmup=500, seed=20260904):
 
 
 def plot_products(name, directory, wave, time, observed, error, truth, samples, quantiles):
+    PERIOD, T0 = GEOMETRY[name]["period"], GEOMETRY[name]["t0"]
     import corner
     apply_publication_style()
     plt.rcParams.update({"font.size": 11, "axes.labelsize": 11, "axes.titlesize": 12,

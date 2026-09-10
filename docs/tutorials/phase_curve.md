@@ -9,32 +9,30 @@ No download is needed.
 ## Configuration
 
 `examples/phase_curve.yaml` describes one orbit with a transit, a secondary
-eclipse, and a degree-one thermal map. The three surface quantities each have
-a centre and a prior width; a positive width makes the quantity a fitted
-parameter.
+eclipse, and a degree-one thermal map. The three surface quantities each
+take a `{value, prior, ...}` mapping; a `gaussian` prior makes the quantity
+a fitted parameter and `fixed` holds it.
 
 ```yaml
 planet:
-  period: 2.0
-  t0: 60000.0
-  b: 0.25
-  rprs: 0.10
-  a_rs: 6.0
-  dayside_flux_ppm: 1000.0
-  dayside_flux_prior_width_ppm: 150.0
-  nightside_flux_ppm: 300.0
-  nightside_flux_prior_width_ppm: 75.0
-  hotspot_offset_deg: 18.0
-  hotspot_offset_prior_width_deg: 10.0
+  period: {value: 2.0, prior: fixed}
+  t0: {value: 60000.0, prior: fixed}
+  b: {value: 0.25, prior: fixed}
+  rprs: {value: 0.10, prior: fixed}
+  a_rs: {value: 6.0, prior: fixed}
+  dayside_flux_ppm: {value: 1000.0, prior: gaussian, sigma: 150.0}
+  nightside_flux_ppm: {value: 300.0, prior: gaussian, sigma: 75.0}
+  hotspot_offset_deg: {value: 18.0, prior: gaussian, sigma: 10.0}
 
 flags:
   light_curve_model: phase_curve
-  fit_geometry: false
   transit_engine: jaxoplanet
   detrending_type: linear
   ld_profile: quadratic
   ld_prior: fixed
 ```
+
+The orbit is held fixed because every geometry key has `prior: fixed`.
 
 ## Run
 

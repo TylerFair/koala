@@ -33,8 +33,10 @@ stellar:
 - {download}`Read its provenance and transformation <../examples/data/README.md>`
 
 For your own observation, replace the planet and stellar values and set
-`path`, `input_dir`, `input_file`, and `output_dir`. The transit time
-`planet.t0` and the FITS time array must use the same time system.
+`path`, `input_dir`, `input_file`, and `output_dir`. Every planet
+parameter is a `{value, prior, ...}` mapping (see
+[Parameter priors](guides/configuration.md#parameter-priors)). The transit
+time `planet.t0` and the FITS time array must use the same time system.
 
 The model choices for a first fit are:
 

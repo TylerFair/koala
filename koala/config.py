@@ -21,61 +21,74 @@ class UnknownFlagWarning(UserWarning):
 
 @dataclass(frozen=True)
 class ParameterSpec:
-    """How one ``planet`` parameter enters the white-light fit.
+    """How one ``planet`` parameter enters the fit.
 
-    ``mode`` is ``'fixed'`` or ``'free'``.  A free parameter written as a bare
-    number keeps ``prior=None``, which means the engine's historical default
-    prior; an explicit ``[free, prior, ...]`` form sets ``prior`` to
-    ``'uniform'`` (``low``/``high``), ``'gaussian'`` (``mu``/``sigma``) or
-    ``'truncated_gaussian'`` (all four).  ``value`` holds the fixed value or
-    the bare-number initial guess.
+    Every parameter is written as a mapping with the same keys::
+
+        {value: 0.45, prior: fixed}
+        {value: 0.45, prior: uniform, low: 0.0, high: 1.0}
+        {value: 0.45, prior: log_uniform, low: 0.01, high: 1.0}
+        {value: 0.45, prior: gaussian, sigma: 0.05}
+        {value: 0.45, prior: gaussian, sigma: 0.05, low: 0.0}   # truncated
+
+    ``value`` is the fixed value or the starting point of a free parameter
+    (and the centre of a gaussian). ``sigma`` belongs to ``gaussian``;
+    ``low``/``high`` are required for ``uniform``/``log_uniform`` and
+    optional truncation bounds for ``gaussian``.
     """
 
     name: str
-    mode: str
-    prior: str = None
-    value: float = None
-    mu: float = None
+    prior: str
+    value: float
     sigma: float = None
     low: float = None
     high: float = None
-    explicit: bool = False
 
     @property
     def free(self):
-        return self.mode == 'free'
+        return self.prior != 'fixed'
 
     @property
     def fixed(self):
-        return self.mode == 'fixed'
-
-    @property
-    def explicit_prior(self):
-        """True when a free parameter carries a user-specified prior."""
-        return self.free and self.prior is not None
+        return self.prior == 'fixed'
 
     @property
     def center(self):
-        """Representative value: fixed value, prior mean, or interval midpoint."""
-        if self.value is not None:
-            return float(self.value)
-        if self.prior in {'gaussian', 'truncated_gaussian'}:
-            return float(self.mu)
-        return 0.5 * (float(self.low) + float(self.high))
+        """Representative value: the fixed value or the starting point."""
+        return float(self.value)
+
+    @property
+    def bounded(self):
+        return self.low is not None or self.high is not None
+
+    @property
+    def latent_site_suffix(self):
+        """``'log_'`` when the sampled site is the log of the parameter."""
+        return 'log_' if self.prior == 'log_uniform' else ''
+
+    def scaled(self, factor):
+        """Return the same specification in different units."""
+        factor = float(factor)
+
+        def _s(x):
+            return None if x is None else float(x) * factor
+
+        return ParameterSpec(
+            self.name, self.prior, _s(self.value), _s(self.sigma),
+            _s(self.low), _s(self.high),
+        )
 
     def describe(self):
         if self.fixed:
             return f"fixed at {self.value!r}"
-        if self.prior is None:
-            return f"free (default prior, initial value {self.value!r})"
         if self.prior == 'uniform':
-            return f"free, uniform({self.low!r}, {self.high!r})"
-        if self.prior == 'gaussian':
-            return f"free, gaussian(mu={self.mu!r}, sigma={self.sigma!r})"
-        return (
-            f"free, truncated_gaussian(mu={self.mu!r}, sigma={self.sigma!r}, "
-            f"low={self.low!r}, high={self.high!r})"
-        )
+            return f"uniform({self.low!r}, {self.high!r}), start {self.value!r}"
+        if self.prior == 'log_uniform':
+            return f"log-uniform({self.low!r}, {self.high!r}), start {self.value!r}"
+        text = f"gaussian(mu={self.value!r}, sigma={self.sigma!r})"
+        if self.bounded:
+            text += f" truncated to [{self.low!r}, {self.high!r}]"
+        return text
 
 
 def _is_number(value):
@@ -85,175 +98,128 @@ def _is_number(value):
 def _spec_number(key, label, value):
     if not _is_number(value):
         raise ValueError(
-            f"planet.{key}: {label} must be a number, received {value!r}."
+            f"planet.{key}: '{label}' must be a number, received {value!r}."
         )
     value = float(value)
     if not np.isfinite(value):
-        raise ValueError(f"planet.{key}: {label} must be finite.")
+        raise ValueError(f"planet.{key}: '{label}' must be finite.")
     return value
 
 
-def _finish_free_spec(key, prior, fields):
-    """Validate the prior fields of an explicit free specification."""
-    if prior not in PARAMETER_SPEC_PRIORS:
-        raise ValueError(
-            f"planet.{key}: unknown prior {prior!r}; expected one of "
-            f"{list(PARAMETER_SPEC_PRIORS)}."
-        )
-    mu = sigma = low = high = None
-    if prior in {'gaussian', 'truncated_gaussian'}:
-        mu = _spec_number(key, 'mu', fields['mu'])
-        sigma = _spec_number(key, 'sigma', fields['sigma'])
-        if sigma <= 0.0:
-            raise ValueError(f"planet.{key}: sigma must be > 0, received {sigma!r}.")
-    if prior in {'uniform', 'truncated_gaussian'}:
-        low = _spec_number(key, 'low', fields['low'])
-        high = _spec_number(key, 'high', fields['high'])
-        if low >= high:
-            raise ValueError(
-                f"planet.{key}: prior bounds require low < high, received "
-                f"low={low!r}, high={high!r}."
-            )
-    if key in PLANET_PARAMETERS_FIXED_ONLY:
-        raise ValueError(
-            f"planet.{key} may only be fixed for now; write "
-            f"[fixed, <value>] or a bare number."
-        )
-    return ParameterSpec(
-        key, 'free', prior, None, mu, sigma, low, high, explicit=True,
-    )
-
-
-_LIST_FORMS = {
-    'uniform': '[free, uniform, low, high]',
-    'gaussian': '[free, gaussian, mu, sigma]',
-    'truncated_gaussian': '[free, truncated_gaussian, mu, sigma, low, high]',
-}
-
-
-def _parse_list_spec(key, raw):
-    mode = str(raw[0]).strip().lower()
-    if mode not in PARAMETER_SPEC_MODES:
-        raise ValueError(
-            f"planet.{key}: unknown mode {raw[0]!r}; expected 'fixed' or 'free'."
-        )
-    if mode == 'fixed':
-        if len(raw) != 2:
-            raise ValueError(
-                f"planet.{key}: the fixed form is [fixed, value], received {raw!r}."
-            )
-        return ParameterSpec(
-            key, 'fixed', None, _spec_number(key, 'value', raw[1]), explicit=True,
-        )
-    if len(raw) < 2:
-        raise ValueError(
-            f"planet.{key}: the free form is [free, prior, ...], received {raw!r}."
-        )
-    prior = str(raw[1]).strip().lower()
-    if prior not in _LIST_FORMS:
-        raise ValueError(
-            f"planet.{key}: unknown prior {raw[1]!r}; expected one of "
-            f"{list(PARAMETER_SPEC_PRIORS)}."
-        )
-    arity = {'uniform': 4, 'gaussian': 4, 'truncated_gaussian': 6}[prior]
-    if len(raw) != arity:
-        raise ValueError(
-            f"planet.{key}: expected {_LIST_FORMS[prior]}, received {raw!r}."
-        )
-    values = raw[2:]
-    if prior == 'uniform':
-        fields = {'low': values[0], 'high': values[1]}
-    elif prior == 'gaussian':
-        fields = {'mu': values[0], 'sigma': values[1]}
-    else:
-        fields = {'mu': values[0], 'sigma': values[1], 'low': values[2], 'high': values[3]}
-    return _finish_free_spec(key, prior, fields)
-
-
-_DICT_FIELD_ALIASES = {
-    'lo': 'low', 'min': 'low', 'lower': 'low',
-    'hi': 'high', 'max': 'high', 'upper': 'high',
-    'mean': 'mu', 'loc': 'mu', 'std': 'sigma', 'scale': 'sigma',
-}
-
-
-def _parse_dict_spec(key, raw):
-    fields = {}
-    for name, value in raw.items():
-        canonical = _DICT_FIELD_ALIASES.get(str(name).lower(), str(name).lower())
-        fields[canonical] = value
-    if 'mode' not in fields:
-        raise ValueError(
-            f"planet.{key}: a mapping specification needs 'mode' "
-            "('fixed' or 'free')."
-        )
-    mode = str(fields.pop('mode')).strip().lower()
-    if mode not in PARAMETER_SPEC_MODES:
-        raise ValueError(
-            f"planet.{key}: unknown mode {mode!r}; expected 'fixed' or 'free'."
-        )
-    if mode == 'fixed':
-        unexpected = set(fields) - {'value'}
-        if unexpected or 'value' not in fields:
-            raise ValueError(
-                f"planet.{key}: the fixed mapping form is "
-                "{mode: fixed, value: <number>}."
-            )
-        return ParameterSpec(
-            key, 'fixed', None, _spec_number(key, 'value', fields['value']),
-            explicit=True,
-        )
-    if 'prior' not in fields:
-        raise ValueError(
-            f"planet.{key}: a free mapping needs 'prior' ('uniform', "
-            "'gaussian' or 'truncated_gaussian')."
-        )
-    prior = str(fields.pop('prior')).strip().lower()
-    required = {
-        'uniform': {'low', 'high'},
-        'gaussian': {'mu', 'sigma'},
-        'truncated_gaussian': {'mu', 'sigma', 'low', 'high'},
-    }.get(prior)
-    if required is None:
-        raise ValueError(
-            f"planet.{key}: unknown prior {prior!r}; expected one of "
-            f"{list(PARAMETER_SPEC_PRIORS)}."
-        )
-    missing = required - set(fields)
-    unexpected = set(fields) - required
-    if missing or unexpected:
-        raise ValueError(
-            f"planet.{key}: prior '{prior}' takes exactly {sorted(required)}; "
-            f"missing {sorted(missing)}, unexpected {sorted(unexpected)}."
-        )
-    return _finish_free_spec(key, prior, fields)
+_SPEC_FORM = (
+    "{value: <number>, prior: fixed | uniform | log_uniform | gaussian, "
+    "sigma: <gaussian width>, low: <bound>, high: <bound>}"
+)
 
 
 def parse_parameter_spec(key, raw):
-    """Parse one bare-number, list, or mapping parameter specification."""
-    if _is_number(raw):
-        mode = 'fixed' if key in PLANET_PARAMETERS_FIXED_BY_DEFAULT else 'free'
-        return ParameterSpec(key, mode, None, _spec_number(key, 'value', raw))
-    if isinstance(raw, (list, tuple)):
-        if not raw or not isinstance(raw[0], str):
+    """Parse one ``{value, prior, sigma, low, high}`` parameter mapping."""
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"planet.{key}: every planet parameter is written as a mapping "
+            f"{_SPEC_FORM}; received {raw!r}. A fixed value is "
+            f"{{value: {raw!r}, prior: fixed}}."
+        )
+    fields = {str(name).strip().lower(): value for name, value in raw.items()}
+    if 'mode' in fields or 'mu' in fields:
+        raise ValueError(
+            f"planet.{key}: 'mode' and 'mu' are no longer accepted; use "
+            f"{_SPEC_FORM} (the gaussian centre is 'value')."
+        )
+    unknown = set(fields) - {'value', 'prior', 'sigma', 'low', 'high'}
+    if unknown:
+        raise ValueError(
+            f"planet.{key}: unknown keys {sorted(unknown)}; the form is {_SPEC_FORM}."
+        )
+    for required in ('value', 'prior'):
+        if required not in fields:
             raise ValueError(
-                f"planet.{key}: expected [fixed, value] or [free, prior, ...], "
-                f"received {list(raw)!r}."
+                f"planet.{key}: '{required}' is required; the form is {_SPEC_FORM}."
             )
-        return _parse_list_spec(key, list(raw))
-    if isinstance(raw, dict):
-        return _parse_dict_spec(key, raw)
-    raise ValueError(
-        f"planet.{key}: expected a number, [fixed, value], "
-        f"[free, prior, ...] or a mapping, received {raw!r}."
-    )
+    prior = str(fields['prior']).strip().lower()
+    if prior not in PARAMETER_SPEC_PRIORS:
+        raise ValueError(
+            f"planet.{key}: unknown prior {fields['prior']!r}; expected one of "
+            f"{list(PARAMETER_SPEC_PRIORS)}."
+        )
+    value = _spec_number(key, 'value', fields['value'])
+    sigma = low = high = None
+    if prior == 'fixed':
+        extra = {'sigma', 'low', 'high'} & set(fields)
+        if extra:
+            raise ValueError(
+                f"planet.{key}: a fixed parameter takes only 'value'; "
+                f"remove {sorted(extra)}."
+            )
+        if key in PLANET_PARAMETERS_FIXED_ONLY:
+            pass
+        return ParameterSpec(key, 'fixed', value)
+    if key in PLANET_PARAMETERS_FIXED_ONLY:
+        raise ValueError(
+            f"planet.{key} may only be fixed for now; write "
+            f"{{value: {value!r}, prior: fixed}}."
+        )
+    if key in PLANET_PARAMETERS_GAUSSIAN_ONLY and prior != 'gaussian':
+        raise ValueError(
+            f"planet.{key} supports only 'fixed' or 'gaussian' priors."
+        )
+    if prior == 'gaussian':
+        if 'sigma' not in fields:
+            raise ValueError(f"planet.{key}: a gaussian prior needs 'sigma'.")
+        sigma = _spec_number(key, 'sigma', fields['sigma'])
+        if sigma <= 0.0:
+            raise ValueError(f"planet.{key}: 'sigma' must be > 0, received {sigma!r}.")
+        if 'low' in fields:
+            low = _spec_number(key, 'low', fields['low'])
+        if 'high' in fields:
+            high = _spec_number(key, 'high', fields['high'])
+    else:
+        if 'sigma' in fields:
+            raise ValueError(f"planet.{key}: 'sigma' only applies to a gaussian prior.")
+        for bound in ('low', 'high'):
+            if bound not in fields:
+                raise ValueError(
+                    f"planet.{key}: a {prior} prior needs both 'low' and 'high'."
+                )
+        low = _spec_number(key, 'low', fields['low'])
+        high = _spec_number(key, 'high', fields['high'])
+        if prior == 'log_uniform' and low <= 0.0:
+            raise ValueError(
+                f"planet.{key}: a log_uniform prior needs low > 0, received {low!r}."
+            )
+    if low is not None and high is not None and low >= high:
+        raise ValueError(
+            f"planet.{key}: bounds require low < high, received "
+            f"low={low!r}, high={high!r}."
+        )
+    if (low is not None and value < low) or (high is not None and value > high):
+        raise ValueError(
+            f"planet.{key}: 'value' {value!r} must lie inside "
+            f"[{low!r}, {high!r}]."
+        )
+    return ParameterSpec(key, prior, value, sigma, low, high)
 
 
 def _parse_parameter_entries(key, raw):
     """Return one specification per planet for a ``planet`` block entry."""
-    if isinstance(raw, (list, tuple)) and raw and not isinstance(raw[0], str):
+    if isinstance(raw, (list, tuple)):
+        if not raw or not all(isinstance(item, dict) for item in raw):
+            raise ValueError(
+                f"planet.{key}: a list is only used for several planets and "
+                f"must hold one {{value, prior, ...}} mapping per planet; "
+                f"received {list(raw)!r}."
+            )
         return tuple(parse_parameter_spec(key, item) for item in raw)
     return (parse_parameter_spec(key, raw),)
+
+
+def reject_legacy_planet_keys(planet_cfg):
+    """Raise for removed ``planet`` keys, naming the replacement."""
+    for key, replacement in PLANET_LEGACY_KEYS.items():
+        if key in planet_cfg:
+            raise ValueError(
+                f"planet.{key} has been removed; write {replacement} instead."
+            )
 
 
 def parse_planet_parameter_specs(planet_cfg):
@@ -261,30 +227,106 @@ def parse_planet_parameter_specs(planet_cfg):
 
     Returns ``{name: (ParameterSpec, ...)}`` with one entry per planet for
     each of ``PLANET_PARAMETER_KEYS`` present in the block (``ecc`` and
-    ``omega`` default to fixed zero).  Scalars are broadcast to the number of
-    planets, which is taken from ``period`` when present.
+    ``omega`` default to fixed zero).  Single mappings are broadcast to the
+    number of planets, which is taken from ``period``. ``eclipse_time`` may
+    replace ``t0`` for circular orbits; the derived ``t0`` specification is
+    then added (``t0 = eclipse_time - period / 2``).
     """
+    reject_legacy_planet_keys(planet_cfg)
     entries = {}
     for key in PLANET_PARAMETER_KEYS:
         if key in planet_cfg:
             entries[key] = _parse_parameter_entries(key, planet_cfg[key])
     for key in ('ecc', 'omega'):
-        entries.setdefault(key, (ParameterSpec(key, 'fixed', None, 0.0),))
-    if 'period' in entries:
-        n_planets = len(entries['period'])
-    else:
-        n_planets = max(len(specs) for specs in entries.values())
+        entries.setdefault(key, (ParameterSpec(key, 'fixed', 0.0),))
+    if 'period' not in entries:
+        raise KeyError("'planet.period' is required.")
+    n_planets = len(entries['period'])
     resolved = {}
     for key, specs in entries.items():
         if len(specs) == 1 and n_planets > 1:
             specs = specs * n_planets
         if len(specs) != n_planets:
             raise ValueError(
-                f"planet.{key} must be scalar or length {n_planets}, "
+                f"planet.{key} must be one mapping or a list of {n_planets}, "
                 f"got {len(specs)} entries."
             )
         resolved[key] = tuple(specs)
+    if 'eclipse_time' in resolved:
+        if 't0' in resolved:
+            raise ValueError(
+                "planet.t0 and planet.eclipse_time are alternatives; give "
+                "exactly one of them."
+            )
+        resolved['t0'] = tuple(
+            _t0_spec_from_eclipse_time(spec, period, ecc)
+            for spec, period, ecc in zip(
+                resolved['eclipse_time'], resolved['period'], resolved['ecc']
+            )
+        )
+    elif 't0' not in resolved:
+        raise KeyError("'planet.t0' (or 'planet.eclipse_time') is required.")
     return resolved
+
+
+def _t0_spec_from_eclipse_time(spec, period_spec, ecc_spec):
+    """Shift an ``eclipse_time`` specification to the primary-transit epoch.
+
+    Valid for circular orbits only: t0 = eclipse_time - period / 2.
+    """
+    if not period_spec.fixed:
+        raise ValueError(
+            "planet.eclipse_time requires a fixed planet.period."
+        )
+    if float(ecc_spec.value) != 0.0:
+        raise ValueError(
+            "planet.eclipse_time assumes a circular orbit; set planet.ecc to "
+            "0 or give planet.t0 directly."
+        )
+    shift = -0.5 * float(period_spec.value)
+
+    def _s(x):
+        return None if x is None else float(x) + shift
+
+    return ParameterSpec(
+        't0', spec.prior, _s(spec.value), spec.sigma, _s(spec.low), _s(spec.high),
+    )
+
+
+def parse_planet_surface_specs(planet_cfg, n_planets, keys):
+    """Parse emission entries of ``planet`` (ppm/degree units) into model units.
+
+    ``keys`` are the ``PLANET_SURFACE_PARAMETER_SCALES`` names required by the
+    active light-curve model. Returns ``{name: (ParameterSpec, ...)}`` with
+    the specification scaled to fractional flux or radians.
+    """
+    reject_legacy_planet_keys(planet_cfg)
+    resolved = {}
+    for key in keys:
+        if key not in planet_cfg:
+            raise ValueError(
+                f"planet.{key} is required for this light-curve model; write "
+                f"{key}: {_SPEC_FORM}."
+            )
+        specs = _parse_parameter_entries(key, planet_cfg[key])
+        if len(specs) == 1 and n_planets > 1:
+            specs = specs * n_planets
+        if len(specs) != n_planets:
+            raise ValueError(
+                f"planet.{key} must be one mapping or a list of {n_planets}, "
+                f"got {len(specs)} entries."
+            )
+        scale = PLANET_SURFACE_PARAMETER_SCALES[key]
+        resolved[key] = tuple(spec.scaled(scale) for spec in specs)
+    return resolved
+
+
+def geometry_is_fixed(specs, param_method):
+    """True when t0, b, rprs, and duration/a_rs are all fixed."""
+    names = ('t0', 'b', 'rprs', 'duration' if param_method == 'duration' else 'a_rs')
+    return all(
+        spec.fixed for name in names if name in specs for spec in specs[name]
+    )
 
 
 def planet_parameter_centers(specs, key, default=None):
@@ -297,18 +339,16 @@ def planet_parameter_centers(specs, key, default=None):
     return np.asarray([spec.center for spec in specs[key]], dtype=np.float64)
 
 
-def describe_planet_parameter_specs(specs):
-    """One human-readable line per configured parameter."""
-    lines = []
+def describe_planet_parameter_specs(specs, title="Planet parameters"):
+    """A small table, one row per configured parameter (and planet)."""
+    rows = []
     for key, entries in specs.items():
-        described = [spec.describe() for spec in entries]
-        if len(set(described)) == 1:
-            lines.append(f"planet.{key}: {described[0]}")
-        else:
-            lines.append(
-                f"planet.{key}: "
-                + "; ".join(f"planet {i}: {text}" for i, text in enumerate(described))
-            )
+        for index, spec in enumerate(entries):
+            label = key if len(entries) == 1 else f"{key}[{index}]"
+            rows.append((label, spec.describe()))
+    width = max((len(label) for label, _ in rows), default=0)
+    lines = [f"{title}:"]
+    lines.extend(f"  {label.ljust(width)}  {text}" for label, text in rows)
     return lines
 
 

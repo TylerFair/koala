@@ -1,12 +1,13 @@
 # WASP-121 b, NIRSpec/G395H NRS1. Supply the matching extracted spectra.
 
 planet:
+  # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
   name: WASP-121
-  period: 1.274924762
-  duration: 0.11595833333333333
-  t0: 59867.1426
-  b: 0.1
-  rprs: 0.122551
+  period: {value: 1.274924762, prior: fixed}
+  duration: {value: 0.11595833333333333, prior: log_uniform, low: 0.01, high: 1.0}
+  t0: {value: 59867.1426, prior: uniform, low: 59867.0926, high: 59867.1926}
+  b: {value: 0.1, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.122551, prior: uniform, low: 0.01, high: 0.5}
 
 stellar:
   teff: 6827

@@ -117,7 +117,11 @@ def test_process_filters_invalid_integrations_globally_before_binning(monkeypatc
     cfg = {
         "instrument": "NIRSPEC/PRISM",
         "nrs": 1,
-        "planet": {"t0": [0.0], "duration": [0.1]},
+        "planet": {
+            "period": {"value": 1000.0, "prior": "fixed"},
+            "t0": {"value": 0.0, "prior": "fixed"},
+            "duration": {"value": 0.1, "prior": "fixed"},
+        },
     }
     data = createdatacube.process_spectroscopy_data(
         "NIRSPEC/PRISM", "", "", "test", cfg, "unused.fits"

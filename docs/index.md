@@ -111,7 +111,7 @@ faq
 
 Overview <tutorials/index>
 tutorials/soss_order1
-tutorials/wasp39_eclipse
+tutorials/rocky_eclipse
 tutorials/phase_curve
 tutorials/harmonica
 ```

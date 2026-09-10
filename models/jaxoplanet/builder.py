@@ -159,19 +159,11 @@ def _sample_surface_parameters(surface_config, n_planets, num_lcs=None):
 
     def sample_flux(name):
         values = []
-        centers = np.asarray(config[name], dtype=float)
-        widths = np.asarray(config[f"{name}_prior_width"], dtype=float)
+        specs = config[f"{name}_spec"]
         for index in range(n_planets):
-            if widths[index] > 0.0:
-                value = numpyro.sample(
-                    f"_{name}_{index}",
-                    dist.TruncatedNormal(
-                        centers[index], widths[index], low=0.0
-                    ).expand(shape),
-                )
-            else:
-                value = jnp.full(shape, centers[index], dtype=jnp.float64)
-            values.append(value)
+            values.append(
+                sample_parameter(specs[index], f"_{name}_{index}", shape)
+            )
         axis = 0 if num_lcs is None else 1
         value = numpyro.deterministic(name, jnp.stack(values, axis=axis))
         numpyro.deterministic(f"{name}_ppm", value * 1e6)
@@ -277,17 +269,11 @@ def _sample_surface_parameters(surface_config, n_planets, num_lcs=None):
         result["dayside_flux"] = dayside
         result["nightside_flux"] = nightside
         values = []
-        centers = np.asarray(config["hotspot_offset"], dtype=float)
-        widths = np.asarray(config["hotspot_offset_prior_width"], dtype=float)
+        specs = config["hotspot_offset_spec"]
         for index in range(n_planets):
-            if widths[index] > 0.0:
-                value = numpyro.sample(
-                    f"_hotspot_offset_{index}",
-                    dist.Normal(centers[index], widths[index]).expand(shape),
-                )
-            else:
-                value = jnp.full(shape, centers[index], dtype=jnp.float64)
-            values.append(value)
+            values.append(
+                sample_parameter(specs[index], f"_hotspot_offset_{index}", shape)
+            )
         axis = 0 if num_lcs is None else 1
         value = numpyro.deterministic(
             "hotspot_offset", jnp.stack(values, axis=axis)
@@ -543,31 +529,20 @@ def derive_geometry(wl_samples, period, ecc=0.0, omega=0.0):
 
 
 _WHITELIGHT_PARAMETER_PRIOR_KEYS = (
-    'period', 't0', 'b', 'rprs', 'duration', 'a_rs', 'ecc', 'omega',
+    'period', 't0', 'eclipse_time', 'b', 'rprs', 'duration', 'a_rs', 'ecc', 'omega',
 )
 
 
-def _spec_distribution(spec):
-    """NumPyro distribution for a free ``ParameterSpec`` with an explicit prior."""
-    if spec.prior == 'uniform':
-        return dist.Uniform(float(spec.low), float(spec.high))
-    if spec.prior == 'gaussian':
-        return dist.Normal(float(spec.mu), float(spec.sigma))
-    if spec.prior == 'truncated_gaussian':
-        return dist.TruncatedNormal(
-            float(spec.mu), float(spec.sigma),
-            low=float(spec.low), high=float(spec.high),
-        )
-    raise ValueError(
-        f"planet.{spec.name}: unsupported prior {spec.prior!r} for the "
-        "white-light model."
-    )
+from models.priors import spec_distribution as _spec_distribution, sample_parameter
 
 
 def _validate_parameter_priors(parameter_priors, n_planets, param_method):
     """Check the per-planet parameter specifications at factory time."""
-    if parameter_priors is None:
-        return {}
+    if not parameter_priors:
+        raise ValueError(
+            "parameter_priors is required: every planet parameter must carry "
+            "a {value, prior, ...} specification (see koala.config)."
+        )
     resolved = {}
     for name, specs in parameter_priors.items():
         if name not in _WHITELIGHT_PARAMETER_PRIOR_KEYS:
@@ -581,24 +556,25 @@ def _validate_parameter_priors(parameter_priors, n_planets, param_method):
                 f"received {len(specs)}."
             )
         for spec in specs:
-            if spec.mode not in {'fixed', 'free'}:
-                raise ValueError(f"planet.{name}: unknown mode {spec.mode!r}.")
-            if spec.free and spec.prior is not None:
-                _spec_distribution(spec)
             if name in {'ecc', 'omega'} and spec.free:
                 raise ValueError(f"planet.{name} may only be fixed for now.")
+            if spec.free and spec.prior != 'log_uniform':
+                _spec_distribution(spec)
         unused = (
             (name == 'duration' and param_method == 'a_rs')
             or (name == 'a_rs' and param_method == 'duration')
         )
-        if unused and any(spec.explicit for spec in specs):
+        if unused and any(spec.free for spec in specs):
             other = 'a_rs' if name == 'duration' else 'duration'
             raise ValueError(
-                f"planet.{name} carries an explicit specification but the "
-                f"white-light model is parameterized by {other}; specify "
-                f"planet.{other} instead."
+                f"planet.{name} is free but the white-light model is "
+                f"parameterized by {other}; give planet.{other} the prior instead."
             )
         resolved[name] = specs
+    for name in ('period', 't0', 'b', 'rprs',
+                 'duration' if param_method == 'duration' else 'a_rs'):
+        if name not in resolved:
+            raise ValueError(f"parameter_priors is missing planet.{name}.")
     return resolved
 
 
@@ -619,13 +595,11 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                             parameter_priors=None):
     """Jaxoplanet white-light model with duration- or a_rs-based geometry.
 
-    ``parameter_priors`` optionally maps a ``planet`` key (``period``, ``t0``,
-    ``b``, ``rprs``, ``duration``, ``a_rs``) to one ``ParameterSpec`` per
-    planet (see :mod:`koala.config`).  A free specification with an explicit
-    prior replaces the historical default prior of that site; a fixed
-    specification makes the site deterministic; ``period`` is only sampled
-    when its specification is free.  Bare-number specifications (or no
-    mapping at all) reproduce the historical model exactly.
+    ``parameter_priors`` maps every ``planet`` key (``period``, ``t0``,
+    ``b``, ``rprs``, ``duration`` or ``a_rs``, ``ecc``, ``omega``) to one
+    ``ParameterSpec`` per planet (see :mod:`koala.config`). A fixed
+    specification becomes a deterministic site; a free one is sampled from
+    its prior by :func:`models.priors.sample_parameter`.
     """
     if param_method not in ('duration', 'a_rs'):
         raise ValueError(f"Unknown param_method: {param_method}")
@@ -635,13 +609,6 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
     surface_config = surface_config or {"model": "transit", "spots": ()}
     if (surface_config.get("model") != "transit" or surface_config.get("spots")) and param_method != "a_rs":
         raise ValueError("Eclipses, phase curves, and stellar spots require param_method='a_rs'.")
-    if not surface_config.get("fit_geometry", True):
-        for name, specs in parameter_priors.items():
-            if any(spec.free and spec.explicit for spec in specs):
-                raise ValueError(
-                    f"planet.{name} is configured as free but flags.fit_geometry "
-                    "is false; remove one of the two."
-                )
     basis_surface_valid = (
         (surface_config.get("model") == "transit" and surface_config.get("spots"))
         or (
@@ -696,93 +663,32 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
         )
         cadence = jnp.median(jnp.diff(jnp.sort(jnp.asarray(t))))
 
-        def _prior_array(name, default):
-            arr = jnp.atleast_1d(jnp.asarray(prior_params.get(name, default), dtype=jnp.float64))
-            if arr.size == 1 and n_planets > 1:
-                return jnp.repeat(arr, n_planets)
-            return arr
-
-        eccs = _prior_array("ecc", 0.0)
-        omegas = _prior_array("omega", 0.0)
-        a_rs_prior_min = _prior_array("a_rs_prior_min", 2.0)
-        a_rs_prior_max = _prior_array("a_rs_prior_max", 100.0)
-
         durations, t0s, bs, rorss, a_rss, cos_is, incs = [], [], [], [], [], [], []
         periods = []
-        fixed_periods = _prior_array("period", 1.0)
+        eccs = jnp.asarray([spec.value for spec in parameter_priors['ecc']], dtype=jnp.float64)
+        omegas = jnp.asarray([spec.value for spec in parameter_priors['omega']], dtype=jnp.float64)
         fit_geometry = bool(surface_config.get("fit_geometry", True))
         if not fit_geometry:
             numpyro.deterministic("_geometry_fixed", jnp.asarray(True))
 
-        def _spec(name, index):
-            specs = parameter_priors.get(name)
-            return None if specs is None else specs[index]
-
-        def _configured_site(name, index, site, default_site):
-            """Sample or fix ``site`` from an explicit specification.
-
-            Returns ``None`` when the parameter keeps its historical default
-            treatment, in which case ``default_site()`` is used by the caller.
-            """
-            spec = _spec(name, index)
-            if spec is None or not spec.explicit:
-                return default_site()
-            if spec.fixed:
-                return numpyro.deterministic(site, jnp.asarray(spec.value, dtype=jnp.float64))
-            return numpyro.sample(site, _spec_distribution(spec))
+        def _site(name, i):
+            return sample_parameter(parameter_priors[name][i], f"{name}_{i}")
 
         for i in range(n_planets):
-            period_spec = _spec("period", i)
-            if period_spec is not None and period_spec.free:
-                period_i = numpyro.sample(
-                    f"period_{i}", _spec_distribution(period_spec)
-                )
-            else:
-                period_i = fixed_periods[i]
+            period_i = _site("period", i)
             periods.append(period_i)
-
-            def _default_t0():
-                if not fit_geometry:
-                    return numpyro.deterministic(f"t0_{i}", _prior_array("t0", 0.0)[i])
-                if surface_config.get("model") != "transit" or surface_config.get("spots"):
-                    t0_width = _prior_array(
-                        "t0_prior_width", jnp.maximum(_prior_array("duration", 0.1), 1e-4)
-                    )[i]
-                    return numpyro.sample(
-                        f"t0_{i}",
-                        dist.Normal(_prior_array("t0", 0.5 * (jnp.min(t) + jnp.max(t)))[i], t0_width),
-                    )
-                return numpyro.sample(f"t0_{i}", dist.Uniform(jnp.min(t), jnp.max(t)))
-
-            t0_i = _configured_site("t0", i, f"t0_{i}", _default_t0)
+            t0_i = _site("t0", i)
             t0s.append(t0_i)
-
-            def _default_rors():
-                if fit_geometry:
-                    return numpyro.sample(f"rors_{i}", dist.Uniform(jnp.sqrt(1e-6), jnp.sqrt(0.5)))
-                return numpyro.deterministic(f"rors_{i}", _prior_array("rprs", 0.1)[i])
-
-            rors_i = _configured_site("rprs", i, f"rors_{i}", _default_rors)
+            if 'eclipse_time' in parameter_priors:
+                numpyro.deterministic(f"eclipse_time_{i}", t0_i + 0.5 * period_i)
+            rors_i = sample_parameter(parameter_priors["rprs"][i], f"rors_{i}")
             numpyro.deterministic(f"depths_{i}", rors_i ** 2)
             rorss.append(rors_i)
-
-            def _default_b():
-                if fit_geometry:
-                    _b = numpyro.sample(f"_b_{i}", dist.Uniform(-2.0, 2.0))
-                    return numpyro.deterministic(f'b_{i}', jnp.abs(_b))
-                return numpyro.deterministic(f'b_{i}', _prior_array("b", 0.0)[i])
-
-            b_i = _configured_site("b", i, f"b_{i}", _default_b)
+            b_i = _site("b", i)
             bs.append(b_i)
 
             if param_method == 'duration':
-                def _default_duration():
-                    logD = numpyro.sample(f"logD_{i}", dist.Uniform(jnp.log(0.0007), jnp.log(1)))
-                    return numpyro.deterministic(f"duration_{i}", jnp.exp(logD))
-
-                duration_i = _configured_site(
-                    "duration", i, f"duration_{i}", _default_duration
-                )
+                duration_i = _site("duration", i)
                 a_rs_i = numpyro.deterministic(
                     f"a_rs_{i}",
                     harmonica_a_rs_from_duration(
@@ -791,21 +697,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
                     ),
                 )
             else:
-                def _default_a_rs():
-                    if fit_geometry:
-                        log_a_rs = numpyro.sample(
-                            f"log_a_rs_{i}",
-                            dist.Uniform(
-                                jnp.log(jnp.maximum(a_rs_prior_min[i], 1e-6)),
-                                jnp.log(jnp.maximum(a_rs_prior_max[i], a_rs_prior_min[i] + 1e-6)),
-                            ),
-                        )
-                        return numpyro.deterministic(f"a_rs_{i}", jnp.exp(log_a_rs))
-                    return numpyro.deterministic(
-                        f"a_rs_{i}", _prior_array("a_rs", 10.0)[i]
-                    )
-
-                a_rs_i = _configured_site("a_rs", i, f"a_rs_{i}", _default_a_rs)
+                a_rs_i = _site("a_rs", i)
                 duration_i = numpyro.deterministic(
                     f"duration_{i}",
                     harmonica_duration_from_geometry(

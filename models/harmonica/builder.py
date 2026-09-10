@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
+from models.priors import sample_parameter
 import numpy as np
 
 from .core import (
@@ -192,8 +193,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
                             gp_assume_sorted=False):
     """Harmonica white-light model with power-2 or fixed quadratic LD.
 
-    param_method='duration' samples (logD, _b) and derives a_rs/inc.
-    param_method='a_rs'     samples (log_a_rs, _b) directly, matching the legacy flow.
+    Geometry sites come from prior_params['parameter_priors'] (one
+    koala.config.ParameterSpec per planet and parameter); param_method
+    picks whether duration or a_rs is the sampled quantity.
     """
     if param_method not in ('duration', 'a_rs'):
         raise ValueError(f"Unknown param_method: {param_method}")
@@ -226,32 +228,34 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
         )
         cadence = jnp.median(jnp.diff(jnp.sort(jnp.asarray(t))))
 
-        def _prior_array(name, default):
-            arr = jnp.atleast_1d(jnp.asarray(
-                prior_params.get(name, default), dtype=jnp.float64
-            ))
-            if arr.size == 1 and n_planets > 1:
-                return jnp.repeat(arr, n_planets)
-            return arr
-
-        harmonica_ecc = _prior_array('ecc', 0.0)
-        harmonica_omega = _prior_array('omega', 0.0)
-        harmonica_a_rs_prior_min = _prior_array('a_rs_prior_min', 2.0)
-        harmonica_a_rs_prior_max = _prior_array('a_rs_prior_max', 100.0)
+        parameter_priors = prior_params.get('parameter_priors')
+        if not parameter_priors:
+            raise ValueError(
+                "prior_params['parameter_priors'] is required: every planet "
+                "parameter must carry a {value, prior, ...} specification."
+            )
+        harmonica_ecc = jnp.asarray([s.value for s in parameter_priors['ecc']], dtype=jnp.float64)
+        harmonica_omega = jnp.asarray([s.value for s in parameter_priors['omega']], dtype=jnp.float64)
 
         durations, t0s, bs, cos_is, rorss, a_rss, incs = [], [], [], [], [], [], []
 
+        def _site(name, i):
+            return sample_parameter(parameter_priors[name][i], f"{name}_{i}")
+
         for i in range(n_planets):
-            t0s.append(numpyro.sample(f"t0_{i}", dist.Uniform(jnp.min(t), jnp.max(t))))
-            rors_i = numpyro.sample(f"rors_{i}", dist.Uniform(jnp.sqrt(1e-6), jnp.sqrt(0.5)))
+            t0_i = _site('t0', i)
+            t0s.append(t0_i)
+            if 'eclipse_time' in parameter_priors:
+                numpyro.deterministic(
+                    f"eclipse_time_{i}", t0_i + 0.5 * prior_params['period'][i]
+                )
+            rors_i = sample_parameter(parameter_priors['rprs'][i], f"rors_{i}")
             numpyro.deterministic(f"depths_{i}", rors_i ** 2)
             rorss.append(rors_i)
+            b_i = _site('b', i)
 
             if param_method == 'duration':
-                _b = numpyro.sample(f"_b_{i}", dist.Uniform(-2.0, 2.0))
-                b_i = numpyro.deterministic(f"b_{i}", jnp.abs(_b))
-                logD = numpyro.sample(f"logD_{i}", dist.Uniform(jnp.log(0.0007), jnp.log(1.0)))
-                duration_i = numpyro.deterministic(f"duration_{i}", jnp.exp(logD))
+                duration_i = _site('duration', i)
                 a_rs_i = numpyro.deterministic(
                     f"a_rs_{i}",
                     harmonica_a_rs_from_duration(
@@ -259,31 +263,8 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
                         ecc=harmonica_ecc[i], omega=harmonica_omega[i],
                     ),
                 )
-                cos_i_i = numpyro.deterministic(
-                    f"cos_i_{i}",
-                    harmonica_cos_i_from_geometry(
-                        b_i, a_rs_i, ecc=harmonica_ecc[i], omega=harmonica_omega[i],
-                    ),
-                )
-                inc_i = numpyro.deterministic(
-                    f"inc_{i}", jnp.arccos(jnp.clip(cos_i_i, 0.0, 1.0 - 1e-9))
-                )
             else:  # param_method == 'a_rs'
-                _b = numpyro.sample(f"_b_{i}", dist.Uniform(-2.0, 2.0))
-                b_i = numpyro.deterministic(f"b_{i}", jnp.abs(_b))
-                log_a_rs = numpyro.sample(
-                    f"log_a_rs_{i}",
-                    dist.Uniform(
-                        jnp.log(jnp.maximum(harmonica_a_rs_prior_min[i], 1e-6)),
-                        jnp.log(
-                            jnp.maximum(
-                                harmonica_a_rs_prior_max[i],
-                                harmonica_a_rs_prior_min[i] + 1e-6,
-                            )
-                        ),
-                    ),
-                )
-                a_rs_i = numpyro.deterministic(f"a_rs_{i}", jnp.exp(log_a_rs))
+                a_rs_i = _site('a_rs', i)
                 duration_i = numpyro.deterministic(
                     f"duration_{i}",
                     harmonica_duration_from_geometry(
@@ -291,15 +272,15 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
                         ecc=harmonica_ecc[i], omega=harmonica_omega[i],
                     ),
                 )
-                cos_i_i = numpyro.deterministic(
-                    f"cos_i_{i}",
-                    harmonica_cos_i_from_geometry(
-                        b_i, a_rs_i, ecc=harmonica_ecc[i], omega=harmonica_omega[i],
-                    ),
-                )
-                inc_i = numpyro.deterministic(
-                    f"inc_{i}", jnp.arccos(jnp.clip(cos_i_i, 0.0, 1.0 - 1e-9))
-                )
+            cos_i_i = numpyro.deterministic(
+                f"cos_i_{i}",
+                harmonica_cos_i_from_geometry(
+                    b_i, a_rs_i, ecc=harmonica_ecc[i], omega=harmonica_omega[i],
+                ),
+            )
+            inc_i = numpyro.deterministic(
+                f"inc_{i}", jnp.arccos(jnp.clip(cos_i_i, 0.0, 1.0 - 1e-9))
+            )
 
             durations.append(duration_i)
             bs.append(b_i)

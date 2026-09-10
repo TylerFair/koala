@@ -2,12 +2,13 @@
 # linear baseline. This is the standard starting point for a SOSS transit.
 
 planet:
+  # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
   name: WASP-39
-  period: 4.05528043      # days
-  duration: 0.11693087    # days
-  t0: 59787.055           # BMJD_TDB
-  b: 0.4498
-  rprs: 0.1457
+  period: {value: 4.05528043, prior: fixed}      # days
+  duration: {value: 0.11693087, prior: log_uniform, low: 0.01, high: 1.0}    # days
+  t0: {value: 59787.055, prior: uniform, low: 59787.005, high: 59787.105}           # BMJD_TDB
+  b: {value: 0.4498, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.1457, prior: uniform, low: 0.01, high: 0.5}
 
 stellar:
   teff: 5509

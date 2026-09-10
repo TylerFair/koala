@@ -253,58 +253,24 @@ def _white_light_fingerprint_config(cfg):
     return {key: value for key, value in cfg.items() if key != "gp_solver"}
 
 
-def _whitelight_geometry_sites(
-    specs, n_planets, param_method, *, period, t0, b, rors, duration, a_rs,
-    engine_supports_specs=True,
-):
+def _whitelight_geometry_sites(specs, n_planets, param_method):
     """Map each latent white-light geometry site to its starting value.
 
-    Bare-number specifications keep the historical latent coordinates
-    (``t0_i``, ``rors_i``, ``_b_i`` and ``logD_i`` or ``log_a_rs_i``).  An
-    explicit free specification samples the physical site directly
-    (``b_i``, ``duration_i``, ``a_rs_i``); a fixed one has no latent site;
-    a free ``period`` adds ``period_i``.
+    Every free specification contributes one latent site (``t0_i``,
+    ``rors_i``, ``b_i``, ``period_i`` and ``duration_i`` or ``a_rs_i``, or
+    the ``log`` form for a log-uniform prior); fixed ones contribute none.
     """
+    from models.priors import latent_init_site
+
     sites = {}
-
-    def _spec(name, index):
-        if not specs or name not in specs:
-            return None
-        return specs[name][index]
-
-    def _explicit(spec):
-        return engine_supports_specs and spec is not None and spec.explicit
-
+    names = ['period', 't0', 'rprs', 'b',
+             'duration' if param_method == 'duration' else 'a_rs']
     for i in range(n_planets):
-        period_spec = _spec('period', i)
-        if engine_supports_specs and period_spec is not None and period_spec.free:
-            sites[f'period_{i}'] = period[i]
-        if param_method == 'a_rs':
-            a_rs_spec = _spec('a_rs', i)
-            if _explicit(a_rs_spec):
-                if a_rs_spec.free:
-                    sites[f'a_rs_{i}'] = a_rs[i]
-            else:
-                sites[f'log_a_rs_{i}'] = jnp.log(a_rs[i])
-        else:
-            duration_spec = _spec('duration', i)
-            if _explicit(duration_spec):
-                if duration_spec.free:
-                    sites[f'duration_{i}'] = duration[i]
-            else:
-                sites[f'logD_{i}'] = jnp.log(duration[i])
-        b_spec = _spec('b', i)
-        if _explicit(b_spec):
-            if b_spec.free:
-                sites[f'b_{i}'] = b[i]
-        else:
-            sites[f'_b_{i}'] = b[i]
-        t0_spec = _spec('t0', i)
-        if not (_explicit(t0_spec) and t0_spec.fixed):
-            sites[f't0_{i}'] = t0[i]
-        rors_spec = _spec('rprs', i)
-        if not (_explicit(rors_spec) and rors_spec.fixed):
-            sites[f'rors_{i}'] = rors[i]
+        for name in names:
+            site = f"{'rors' if name == 'rprs' else name}_{i}"
+            init = latent_init_site(specs[name][i], site)
+            if init is not None:
+                sites[init[0]] = init[1]
     return sites
 
 
@@ -335,11 +301,7 @@ for _module in (artifacts, config, constants, data, geometry, harmonica_products
 
 def run_white_light_stage(
     HARMONICA_A_RS,
-    HARMONICA_A_RS_PRIOR_MAX,
-    HARMONICA_A_RS_PRIOR_MIN,
     HARMONICA_ECC,
-    HARMONICA_INC_PRIOR_MAX,
-    HARMONICA_INC_PRIOR_MIN,
     HARMONICA_ODD_HARMONICS,
     HARMONICA_OMEGA,
     NUTS_KWARGS,
@@ -348,7 +310,6 @@ def run_white_light_stage(
     PRIOR_DUR,
     PRIOR_RPRS,
     PRIOR_T0,
-    T0_PRIOR_WIDTH,
     _engine_wl_kw,
     _explicit_ld_grid,
     cfg,
@@ -404,13 +365,9 @@ def run_white_light_stage(
         gp_solver = resolve_gp_solver(cfg.get('gp_solver'))
         print(f"White-light GP solver: {gp_solver}")
     # Latent white-light geometry sites and their starting values, resolved
-    # from the parameter specifications (bare numbers keep the historical
-    # logD / _b / log_a_rs coordinates).
+    # from the parameter specifications.
     geometry_sites = _whitelight_geometry_sites(
         planet_parameter_specs, n_planets, param_method,
-        period=PERIOD_FIXED, t0=PRIOR_T0, b=PRIOR_B, rors=PRIOR_RPRS,
-        duration=PRIOR_DUR, a_rs=HARMONICA_A_RS,
-        engine_supports_specs=(transit_engine == 'jaxoplanet'),
     )
     _engine_wl_kw = dict(_engine_wl_kw)
     _engine_wl_kw.update(
@@ -519,13 +476,9 @@ def run_white_light_stage(
                 'rprs': PRIOR_RPRS,
                 'u': U_mu_wl,
                 'a_rs': HARMONICA_A_RS,
-                'a_rs_prior_min': HARMONICA_A_RS_PRIOR_MIN,
-                'a_rs_prior_max': HARMONICA_A_RS_PRIOR_MAX,
-                'inc_prior_min': HARMONICA_INC_PRIOR_MIN,
-                'inc_prior_max': HARMONICA_INC_PRIOR_MAX,
                 'ecc': HARMONICA_ECC,
                 'omega': HARMONICA_OMEGA,
-                't0_prior_width': T0_PRIOR_WIDTH,
+                'parameter_priors': planet_parameter_specs,
             }
             if '2spot' in detrending_type:
                 hyper_params_wl['spot_guess'] = spot_mu
@@ -580,32 +533,19 @@ def run_white_light_stage(
                     and surface_name in {'dayside_flux', 'nightside_flux'}
                 ):
                     continue
-                width_name = f'{surface_name}_prior_width'
-                if width_name in surface_config:
-                    for i, (center, width) in enumerate(zip(
-                        np.atleast_1d(surface_config[surface_name]),
-                        np.atleast_1d(surface_config[width_name]),
-                    )):
-                        if width > 0.0:
-                            init_params_wl[f'_{surface_name}_{i}'] = center
+                spec_name = f'{surface_name}_spec'
+                if spec_name in surface_config:
+                    from models.priors import latent_init_site
+                    for i, spec in enumerate(surface_config[spec_name]):
+                        init = latent_init_site(spec, f'_{surface_name}_{i}')
+                        if init is not None:
+                            init_params_wl[init[0]] = init[1]
             init_params_wl.update(
                 _phase_curve_flux_init_sites(surface_config)
             )
             for i, spot in enumerate(surface_config.get('spots', ())):
                 if spot.get('contrast_prior_width', 0.0) > 0.0:
                     init_params_wl[f'_stellar_spot_contrast_{i}'] = spot['contrast']
-            if uses_surface_model and not surface_config.get('fit_geometry', True):
-                for i in range(n_planets):
-                    init_params_wl.pop(f'log_a_rs_{i}', None)
-                    init_params_wl.pop(f'_b_{i}', None)
-                    init_params_wl.pop(f't0_{i}', None)
-                    init_params_wl.pop(f'rors_{i}', None)
-                    init_params_wl[f't0_{i}'] = PRIOR_T0[i]
-                    init_params_wl[f'b_{i}'] = PRIOR_B[i]
-                    init_params_wl[f'rors_{i}'] = PRIOR_RPRS[i]
-                    init_params_wl[f'a_rs_{i}'] = HARMONICA_A_RS[i]
-                    init_params_wl[f'duration_{i}'] = PRIOR_DUR[i]
-
             if 'quadratic' in detrending_type:
                 init_params_wl['v2'] = 0.0
             if 'cubic' in detrending_type:

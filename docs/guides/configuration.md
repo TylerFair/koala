@@ -8,11 +8,11 @@ have production defaults.
 ```yaml
 planet:
   name: WASP-39
-  period: 4.05528043      # days
-  duration: 0.11693087    # days
-  t0: 59787.055           # BMJD_TDB
-  b: 0.4498
-  rprs: 0.1457
+  period: {value: 4.05528043, prior: fixed}                        # days
+  duration: {value: 0.11693087, prior: log_uniform, low: 0.01, high: 1.0}   # days
+  t0: {value: 59787.055, prior: uniform, low: 59787.005, high: 59787.105}   # BMJD_TDB
+  b: {value: 0.4498, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.1457, prior: uniform, low: 0.01, high: 0.5}
 
 stellar:
   teff: 5509
@@ -54,7 +54,7 @@ python fit_jwst.py -c config.yaml
 
 | Setting | Meaning |
 |---|---|
-| `planet` | `period`, `t0`, `b`, `rprs`, and either `duration` or `a_rs`. |
+| `planet` | `period`, `t0`, `b`, `rprs`, and either `duration` or `a_rs`, each as a `{value, prior, ...}` mapping; see [Parameter priors](#parameter-priors). |
 | `stellar` | Stellar parameters for limb darkening; the three `*_sigma` fields are required for `ld_prior: stellarprior`. |
 | `instrument` | One of the [supported modes](../quickstart.md#supported-modes): `NIRISS/SOSS` with `order: 1` or `2`; a `NIRSPEC/...` mode with `nrs: 1` or `2`; `NIRCAM/F322W2`, `NIRCAM/F444W`, or `MIRI/LRS` with neither. |
 | `path`, `input_dir`, `input_file` | The input is read from `path/input_dir/input_file` (`fits_file` is an accepted alias). |
@@ -102,28 +102,71 @@ The template trends take initial guesses through `spot_amp`, `spot_center`,
 
 ## Parameter priors
 
-Every orbital entry of `planet` (`period`, `t0`, `b`, `rprs`, `duration`
-or `a_rs`, `ecc`, `omega`) accepts one of three forms:
+Every entry of `planet` other than `name` is written the same way: a
+mapping with `value`, `prior`, and the keys that prior needs. This applies
+to the orbital parameters (`period`, `t0`, `b`, `rprs`, `duration` or
+`a_rs`, `ecc`, `omega`) and to the emission parameters of eclipse and
+phase-curve fits (`eclipse_depth_ppm`, `dayside_flux_ppm`,
+`nightside_flux_ppm`, `hotspot_offset_deg`). Bare numbers are not accepted.
+
+| `prior` | Keys | Meaning |
+|---|---|---|
+| `fixed` | `value` | Held at `value`; not sampled. |
+| `uniform` | `value`, `low`, `high` | Uniform between `low` and `high`; `value` is the starting point. |
+| `log_uniform` | `value`, `low`, `high` | Uniform in the logarithm between `low` and `high` (`low` > 0); `value` is the starting point. |
+| `gaussian` | `value`, `sigma`, optional `low`, `high` | Normal with mean `value` and width `sigma`; `low` and/or `high` truncate it. |
 
 ```yaml
 planet:
   name: WASP-39
-  period: 4.05528043                          # bare number: today's default
-  t0: [free, uniform, 59786.9, 59787.2]       # list form
-  b: {mode: free, prior: gaussian, mu: 0.45, sigma: 0.05}   # mapping form
-  duration: [free, truncated_gaussian, 0.117, 0.005, 0.05, 0.3]
-  rprs: 0.1457
-  ecc: [fixed, 0.0]
+  period: {value: 4.05528043, prior: fixed}
+  t0: {value: 59787.055, prior: uniform, low: 59787.0, high: 59787.1}
+  b: {value: 0.45, prior: gaussian, sigma: 0.05, low: 0.0}
+  rprs: {value: 0.1457, prior: uniform, low: 0.05, high: 0.3}
+  duration: {value: 0.117, prior: log_uniform, low: 0.05, high: 0.3}
+  ecc: {value: 0.0, prior: fixed}
 ```
 
-A bare number keeps the historical behaviour: `period`, `ecc`, and
-`omega` are fixed, the others are free with the built-in wide priors and
-the number is the starting point. The list forms are `[fixed, value]`,
-`[free, uniform, low, high]`, `[free, gaussian, mu, sigma]`, and
-`[free, truncated_gaussian, mu, sigma, low, high]`; the mapping form uses
-the same names (`mode`, `prior`, `value`, `mu`, `sigma`, `low`, `high`).
-For several planets give one entry per planet. `ecc` and `omega` may only
-be fixed, and explicit priors need `flags.transit_engine: jaxoplanet`.
+`value` must lie inside `low`/`high` when they are given. `ecc` and
+`omega` may only be `fixed` and default to fixed zero when omitted. Eclipse
+and phase-curve fits may give `eclipse_time`, the secondary-eclipse
+mid-time, instead of `t0` (exactly one of the two); koala then derives
+`t0 = eclipse_time - period / 2` for the circular orbit and reports both.
+`dayside_flux_ppm`, `nightside_flux_ppm`, and `hotspot_offset_deg` accept
+only `fixed` or `gaussian`; `eclipse_depth_ppm` accepts any prior. The
+`log_uniform` and `gaussian` priors need `flags.transit_engine: jaxoplanet`
+or `harmonica`; both engines read the same specifications.
+
+For several planets give a list with one mapping per planet, in the same
+order for every key:
+
+```yaml
+planet:
+  name: TOI-two-planets
+  period:
+    - {value: 3.1, prior: fixed}
+    - {value: 7.4, prior: fixed}
+  t0:
+    - {value: 60000.10, prior: uniform, low: 60000.05, high: 60000.15}
+    - {value: 60002.30, prior: uniform, low: 60002.25, high: 60002.35}
+  b: {value: 0.2, prior: uniform, low: 0.0, high: 1.5}     # one mapping is broadcast
+  rprs: {value: 0.05, prior: uniform, low: 0.01, high: 0.3}
+  duration: {value: 0.1, prior: log_uniform, low: 0.02, high: 0.5}
+```
+
+The geometry counts as fixed when `t0`, `b`, `rprs`, and `duration` (or
+`a_rs`) all have `prior: fixed`; this is how eclipse and phase-curve fits
+hold the orbit at literature values, and it replaces the former
+`flags.fit_geometry` switch. Giving any of those four a free prior fits it.
+Koala prints one line per parameter at start-up saying how it was resolved.
+
+The former keys `t0_prior_width_days`, `a_rs_prior_min`, `a_rs_prior_max`,
+`eclipse_depth_prior_width_ppm`, `dayside_flux_prior_width_ppm`,
+`nightside_flux_prior_width_ppm`, `hotspot_offset_prior_width_deg`, and
+`flags.fit_geometry` are no longer read; each raises an error that names
+the replacement. A gaussian `t0`, for example, replaces
+`t0_prior_width_days`, and a `log_uniform` `a_rs` replaces the
+`a_rs_prior_*` bounds.
 
 A free `period` is sampled in the white-light fit (it appears in the
 best-fit CSV and the corner plot) and then held at its posterior median
@@ -133,15 +176,15 @@ masked as in transit, so a free period constrains the ephemeris:
 
 ```yaml
 planet:
-  period: [free, gaussian, 4.05528043, 0.001]
-  t0: [free, uniform, 59786.9, 59787.2]
+  period: {value: 4.05528043, prior: gaussian, sigma: 0.001}
+  t0: {value: 59787.05, prior: uniform, low: 59786.9, high: 59787.2}
 ```
 
 Stacking separate input files into one series is not done by Koala; the
 input must already be a single time series.
 
 Other accepted `flags` keys, shown in context by the example files:
-`fit_geometry`, `transit_engine`, `analysis_stage`, `random_seed`,
+`transit_engine`, `analysis_stage`, `random_seed`,
 `spectro_chunk_size` (alias `vmap_chunk`), `need_lowres`,
 `trend_inference`, `ld_uniform_basis`, `spectro_sampler`,
 `spectro_min_depth_ess`, `spectro_max_divergences`,

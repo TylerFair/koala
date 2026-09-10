@@ -11,9 +11,9 @@ order 1). The settings that select the model are:
 
 ```yaml
 planet:
-  a_rs: 7.299998525
-  ecc: 0.0
-  omega: 0.0
+  a_rs: {value: 7.299998525, prior: log_uniform, low: 2.0, high: 100.0}
+  ecc: {value: 0.0, prior: fixed}
+  omega: {value: 0.0, prior: fixed}
 
 flags:
   transit_engine: harmonica
@@ -26,8 +26,9 @@ flags:
 
 `harmonica_max_order: 1` fits the mean radius and one asymmetry term; the
 `delta_r` parameterization samples the radius difference between the two
-limbs directly. Harmonica needs `a_rs` and works with one planet and either
-limb-darkening law.
+limbs directly. Harmonica samples `a_rs` (not `duration`, which is then
+`fixed` and only used to locate the transit window) and works with one
+planet and either limb-darkening law.
 
 ## Run
 

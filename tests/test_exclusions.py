@@ -102,7 +102,12 @@ def test_process_spectroscopy_data_applies_both_exclusions(tmp_path):
 
     cfg = {
         "instrument": "NIRCAM/F322W2",
-        "planet": {"name": "TEST", "period": 3.0, "t0": 60000.2, "duration": 0.05},
+        "planet": {
+            "name": "TEST",
+            "period": {"value": 3.0, "prior": "fixed"},
+            "t0": {"value": 60000.2, "prior": "fixed"},
+            "duration": {"value": 0.05, "prior": "fixed"},
+        },
         "resolution": {"high": "native"},
         "flags": {
             "exclude_integrations": [[0, 4], [-3, None]],

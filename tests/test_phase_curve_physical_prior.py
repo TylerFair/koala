@@ -18,16 +18,27 @@ from models.jaxoplanet.builder import (
 jax.config.update("jax_enable_x64", True)
 
 
+def _spec(name, value, width):
+    from koala.config import ParameterSpec
+
+    if width > 0.0:
+        return (ParameterSpec(name, "gaussian", value, width),)
+    return (ParameterSpec(name, "fixed", value),)
+
+
 def _config(day_width=2e-4, night_width=8e-5):
     return {
         "model": "phase_curve",
         "spots": (),
         "dayside_flux": np.array([1.2e-3]),
         "dayside_flux_prior_width": np.array([day_width]),
+        "dayside_flux_spec": _spec("dayside_flux_ppm", 1.2e-3, day_width),
         "nightside_flux": np.array([2.5e-4]),
         "nightside_flux_prior_width": np.array([night_width]),
+        "nightside_flux_spec": _spec("nightside_flux_ppm", 2.5e-4, night_width),
         "hotspot_offset": np.array([0.2]),
         "hotspot_offset_prior_width": np.array([0.1]),
+        "hotspot_offset_spec": _spec("hotspot_offset_deg", 0.2, 0.1),
     }
 
 

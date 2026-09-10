@@ -38,12 +38,15 @@ from surface_outputs import save_surface_results
 
 
 def validate(scenario, output, draws=500, phase_nightside_ppm=None):
-    planet = {"eclipse_depth_ppm": 1200., "eclipse_depth_prior_width_ppm": 500.,
-              "dayside_flux_ppm": 1200., "dayside_flux_prior_width_ppm": 300.,
-              "nightside_flux_ppm": 400., "nightside_flux_prior_width_ppm": 150.,
-              "hotspot_offset_deg": 20., "hotspot_offset_prior_width_deg": 15.}
+    fixed = lambda value: {"value": value, "prior": "fixed"}
+    planet = {"period": fixed(1.), "t0": fixed(0.), "a_rs": fixed(6.),
+              "b": fixed(.25), "rprs": fixed(.1),
+              "eclipse_depth_ppm": {"value": 1200., "prior": "gaussian", "sigma": 500., "low": 0.},
+              "dayside_flux_ppm": {"value": 1200., "prior": "gaussian", "sigma": 300.},
+              "nightside_flux_ppm": {"value": 400., "prior": "gaussian", "sigma": 150.},
+              "hotspot_offset_deg": {"value": 20., "prior": "gaussian", "sigma": 15.}}
     if phase_nightside_ppm is not None:
-        planet["nightside_flux_ppm"] = float(phase_nightside_ppm)
+        planet["nightside_flux_ppm"]["value"] = float(phase_nightside_ppm)
     stellar = {}
     mode = scenario
     if scenario == "stellar_spots":
@@ -53,14 +56,14 @@ def validate(scenario, output, draws=500, phase_nightside_ppm=None):
                    "contrast_prior_width": .15}]}
     # The exact spot basis is available only when geometry is fixed. Other
     # scenarios condition their production geometry sites explicitly below.
+    from koala.config import parse_planet_parameter_specs
     config = parse_surface_config(
-        {
-            "light_curve_model": mode,
-            "fit_geometry": False,
-        },
+        {"light_curve_model": mode},
         planet,
         stellar,
         1,
+        parameter_specs=parse_planet_parameter_specs(planet),
+        param_method="a_rs",
     )
     t = jnp.linspace(.35, .65, 81) if mode == "eclipse" else jnp.linspace(-.1, 1.1, 121)
     physical = {"period": 1., "t0": 0., "a_rs": 6., "b": .25,

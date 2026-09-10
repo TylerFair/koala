@@ -2,12 +2,13 @@
 # detector selection and how to mask a bad stretch of the time series.
 
 planet:
+  # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
   name: HAT-P-18
-  period: 5.50802941
-  duration: 0.10999998
-  t0: 60795.39
-  b: 0.148
-  rprs: 0.1356
+  period: {value: 5.50802941, prior: fixed}
+  duration: {value: 0.10999998, prior: log_uniform, low: 0.01, high: 1.0}
+  t0: {value: 60795.39, prior: uniform, low: 60795.34, high: 60795.44}
+  b: {value: 0.148, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.1356, prior: uniform, low: 0.01, high: 0.5}
 
 stellar:
   teff: 4710

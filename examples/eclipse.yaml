@@ -1,22 +1,26 @@
-# Small secondary-eclipse recovery example. Generate its input from the repo
-# root with: python tools/example_phase_curves.py eclipse
+# Synthetic rocky-planet secondary eclipse ("ROCKY-1 b") with MIRI/LRS.
+# The orbit and the fit setup mirror the JWST/MIRI 15 micron eclipse analysis
+# of GJ 3929 b (arXiv:2508.12516). Generate the input from the repo root with:
+#   python tools/example_phase_curves.py eclipse
 planet:
-  name: Synthetic-Eclipse
-  period: 2.0
-  t0: 60000.0
-  b: 0.25
-  rprs: 0.10
-  a_rs: 6.0
-  ecc: 0.0
-  omega: 0.0
-  eclipse_depth_ppm: 900.0
-  eclipse_depth_prior_width_ppm: 250.0
+  # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
+  name: ROCKY-1
+  period: {value: 2.6162644, prior: fixed}
+  # Secondary-eclipse mid-time (BMJD_TDB) searched over +/- 0.085 d; koala
+  # derives the transit epoch t0 = eclipse_time - period / 2 (circular orbit).
+  eclipse_time: {value: 60001.3081322, prior: uniform, low: 60001.2231322, high: 60001.3931322}
+  a_rs: {value: 17.04, prior: gaussian, sigma: 0.5}
+  b: {value: 0.208, prior: gaussian, sigma: 0.15, low: 0.0, high: 1.0}   # i = 89.3 +/- 0.5 deg
+  rprs: {value: 0.0318, prior: fixed}
+  ecc: {value: 0.0, prior: fixed}
+  omega: {value: 0.0, prior: fixed}
+  eclipse_depth_ppm: {value: 100.0, prior: uniform, low: 0.0, high: 1000.0}
 
 stellar:
-  ld_coefficients: [0.3, 0.2]
+  # The star is not limb-darkened during an eclipse.
+  ld_coefficients: [0.0, 0.0]
 
-instrument: NIRSPEC/G395M
-nrs: 1
+instrument: MIRI/LRS
 path: .
 input_dir: examples/data/generated
 input_file: synthetic_eclipse.fits
@@ -28,7 +32,6 @@ resolution:
 
 flags:
   light_curve_model: eclipse
-  fit_geometry: false
   transit_engine: jaxoplanet
   detrending_type: linear
   ld_profile: quadratic

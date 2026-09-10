@@ -33,7 +33,14 @@ def test_example_injection_matches_fixed_config_geometry(monkeypatch, scenario):
         (Path(__file__).resolve().parents[1] / "examples" / f"{scenario}.yaml").read_text()
     )
     planet = config["planet"]
-    assert config["flags"]["fit_geometry"] is False
+    assert "fit_geometry" not in config.get("flags", {})
+    # The injected geometry is fixed in the example fits: every geometry
+    # parameter carries ``prior: fixed``.
+    # ``t0`` (or ``eclipse_time`` for an eclipse) and the surface fluxes may
+    # be free; the radius ratio and period the injection relies on are fixed.
+    assert planet["period"]["prior"] == "fixed"
+    assert planet["rprs"]["prior"] == "fixed"
+    assert ("t0" in planet) != ("eclipse_time" in planet)
     seen_radii = []
 
     def record_geometry(time, radius_ratios, *args, **kwargs):
@@ -42,13 +49,19 @@ def test_example_injection_matches_fixed_config_geometry(monkeypatch, scenario):
 
     monkeypatch.setattr(examples, "_surface_signals", record_geometry)
     _, _, truth = examples._scenario(scenario, np.linspace(2.9, 5.0, 14))
-    np.testing.assert_allclose(seen_radii, planet["rprs"], rtol=0, atol=0)
+    np.testing.assert_allclose(seen_radii, planet["rprs"]["value"], rtol=0, atol=0)
     for truth_key, config_key in (
-        ("period_days", "period"), ("t0_bmjd_tdb", "t0"),
-        ("a_rs", "a_rs"), ("impact_parameter", "b"),
-        ("radius_ratio", "rprs"),
+        ("period_days", "period"), ("a_rs", "a_rs"),
+        ("impact_parameter", "b"), ("radius_ratio", "rprs"),
     ):
-        assert truth[truth_key] == planet[config_key]
+        assert truth[truth_key] == planet[config_key]["value"]
+    if "t0" in planet:
+        assert truth["t0_bmjd_tdb"] == planet["t0"]["value"]
+    else:
+        # Circular orbit: the configured eclipse time is half a period after t0.
+        assert truth["t0_bmjd_tdb"] + 0.5 * truth["period_days"] == pytest.approx(
+            planet["eclipse_time"]["value"], abs=1e-9
+        )
     if scenario == "stellar_spots":
         assert truth["rotation_period_days"] == config["stellar"]["rotation_period"]
         assert len(truth["spots"]) == len(config["stellar"]["spots"])

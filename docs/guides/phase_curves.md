@@ -5,17 +5,22 @@ of light curve, chosen with `flags.light_curve_model`:
 
 - `transit` (default): the planet is dark and blocks the star.
 - `eclipse`: the planet has a uniform brightness given by
-  `planet.eclipse_depth_ppm`; a positive `planet.eclipse_depth_prior_width_ppm`
-  makes it a fitted quantity.
+  `planet.eclipse_depth_ppm`; a `gaussian` (or `uniform`) prior makes it a
+  fitted quantity, `fixed` holds it.
 - `phase_curve`: the planet carries a smooth day--night brightness map set by
   `planet.dayside_flux_ppm`, `planet.nightside_flux_ppm`, and
-  `planet.hotspot_offset_deg`, each with a matching `*_prior_width` key.
+  `planet.hotspot_offset_deg`, each `fixed` or `gaussian`.
+
+Each of these is written as a `{value, prior, ...}` mapping like every other
+`planet` entry; see [Parameter priors](configuration.md#parameter-priors).
 
 All three use Keplerian geometry: give the `planet` block `a_rs`, or
 `duration` from which it is derived (plus `ecc` and `omega`, which default to
-zero). `planet.t0` is always the
-primary-transit epoch. `flags.fit_geometry: false` holds the supplied
-geometry fixed; it is the default for eclipse-only fits.
+zero). `planet.t0` is always the primary-transit epoch. Giving `t0`, `b`,
+`rprs`, and `a_rs` (or `duration`) `prior: fixed` holds the supplied geometry
+fixed, which is the usual choice for eclipse-only fits; a free prior on any
+of them fits it, for example `t0: {value: ..., prior: gaussian, sigma: 0.02}`
+to let the eclipse time float.
 
 ## Stellar spots
 
@@ -44,6 +49,6 @@ size and non-overlapping. Surface models are not available with the Harmonica
 engine.
 
 See the [phase-curve tutorial](../tutorials/phase_curve.md) and the
-[WASP-39 b eclipse tutorial](../tutorials/wasp39_eclipse.md) for complete
+[rocky-planet eclipse tutorial](../tutorials/rocky_eclipse.md) for complete
 configurations; `examples/eclipse.yaml`, `examples/phase_curve.yaml`, and
 `examples/stellar_spots.yaml` are small synthetic versions.

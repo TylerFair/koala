@@ -20,18 +20,50 @@ from models.independent_nuts import get_samples_independent
 jax.config.update("jax_enable_x64", True)
 
 
-def _surface_config(model):
+def _fixed(value):
+    return {"value": value, "prior": "fixed"}
+
+
+def _gaussian(value, sigma, **bounds):
+    return {"value": value, "prior": "gaussian", "sigma": sigma, **bounds}
+
+
+def _geometry_planet(free=False):
+    """Orbital specifications; ``free`` opens t0 so the geometry is fitted."""
     planet = {
-        "eclipse_depth_ppm": 800.0,
-        "eclipse_depth_prior_width_ppm": 100.0,
-        "dayside_flux_ppm": 800.0,
-        "dayside_flux_prior_width_ppm": 100.0,
-        "nightside_flux_ppm": 200.0,
-        "nightside_flux_prior_width_ppm": 30.0,
-        "hotspot_offset_deg": 12.0,
-        "hotspot_offset_prior_width_deg": 4.0,
+        "period": _fixed(2.0), "t0": _fixed(60_000.0), "b": _fixed(0.2),
+        "rprs": _fixed(0.1), "a_rs": _fixed(6.0),
     }
-    return parse_surface_config({"light_curve_model": model}, planet, {}, 1)
+    if free:
+        planet["t0"] = {"value": 60_000.0, "prior": "gaussian", "sigma": 0.02}
+        planet["a_rs"] = {"value": 6.0, "prior": "log_uniform", "low": 5.0, "high": 7.0}
+    return planet
+
+
+def _surface_planet(model):
+    return {
+        "eclipse_depth_ppm": _gaussian(800.0, 100.0, low=0.0),
+        "dayside_flux_ppm": _gaussian(800.0, 100.0),
+        "nightside_flux_ppm": _gaussian(200.0, 30.0),
+        "hotspot_offset_deg": _gaussian(12.0, 4.0),
+    }
+
+
+def _surface_config(model, free_geometry=False):
+    from koala.config import parse_planet_parameter_specs
+
+    planet = {**_geometry_planet(free=free_geometry), **_surface_planet(model)}
+    specs = parse_planet_parameter_specs(planet)
+    return parse_surface_config(
+        {"light_curve_model": model}, planet, {}, 1,
+        parameter_specs=specs, param_method="a_rs",
+    )
+
+
+def _geometry_specs(free=False):
+    from koala.config import parse_planet_parameter_specs
+
+    return parse_planet_parameter_specs(_geometry_planet(free=free))
 
 
 def _fake_surface(params, time, **kwargs):
@@ -70,21 +102,22 @@ def test_whitelight_phase_curve_anchors_t0_outside_visit(monkeypatch):
     monkeypatch.setattr("models.jaxoplanet.surface.compute_surface_model", _fake_surface)
     model = create_whitelight_model(
         ld_mode="fixed", param_method="a_rs",
-        surface_config=_surface_config("phase_curve"),
+        surface_config=_surface_config("phase_curve", free_geometry=True),
+        parameter_priors=_geometry_specs(free=True),
     )
     time = jnp.linspace(60_000.7, 60_001.3, 9)
     trace = handlers.trace(handlers.seed(model, jax.random.PRNGKey(3))).get_trace(
         time, jnp.full(time.shape, 2e-4),
         prior_params={
             "period": jnp.array([2.0]), "duration": jnp.array([0.1]),
-            "t0": jnp.array([60_000.0]), "t0_prior_width": jnp.array([0.02]),
-            "a_rs_prior_min": jnp.array([5.0]),
-            "a_rs_prior_max": jnp.array([7.0]),
+            "t0": jnp.array([60_000.0]),
             "ecc": jnp.array([0.0]), "omega": jnp.array([0.0]),
             "u": jnp.array([0.3, 0.2]),
         },
     )
+    assert trace["t0_0"]["type"] == "sample"
     assert np.isfinite(float(trace["t0_0"]["fn"].log_prob(60_000.0)))
+    assert trace["log_a_rs_0"]["type"] == "sample"
     for name in (
         "dayside_flux", "nightside_flux", "hotspot_offset",
         "dayside_flux_ppm", "nightside_flux_ppm", "hotspot_offset_deg",
@@ -277,7 +310,9 @@ def test_vector_builder_accepts_dynamic_channel_emission_basis():
 def test_runtime_surface_basis_rejects_free_geometry():
     import pytest
 
-    config = _surface_config("phase_curve")  # phase curves fit geometry by default
+    # Free t0/a_rs specifications make the surface geometry fitted.
+    config = _surface_config("phase_curve", free_geometry=True)
+    assert config["fit_geometry"] is True
     model = create_vectorized_model(
         ld_mode="fixed", param_method="a_rs", surface_config=config,
     )

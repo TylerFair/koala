@@ -100,12 +100,14 @@ def test_joint_geometry_trace_has_single_shared_sites_with_whitelight_prior(para
     assert trace["c"]["value"].shape == (NUM_CHANNELS,)
 
 
-def test_joint_geometry_requires_prior_widths_and_fit_geometry():
+def test_joint_geometry_requires_prior_widths_and_fitted_geometry():
     model = create_vectorized_model(detrend_type="linear", ld_mode="fixed", joint_geometry=True)
     kwargs = _model_kwargs(joint=True)
     kwargs.pop("sigma_b")
     with pytest.raises(ValueError, match="sigma_b"):
         _trace(model, **kwargs)
+    # A surface configuration whose geometry resolved to fixed (every
+    # geometry specification ``prior: fixed``) cannot share geometry sites.
     with pytest.raises(ValueError, match="fit_geometry"):
         create_vectorized_model(
             detrend_type="linear", ld_mode="fixed", joint_geometry=True,

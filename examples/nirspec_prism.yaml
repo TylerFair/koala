@@ -4,12 +4,13 @@
 # channel and are slower per channel, not faster.
 
 planet:
+  # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
   name: WASP-6
-  period: 3.36100208
-  duration: 0.10861111
-  t0: 59803.1
-  b: 0.256
-  rprs: 0.1404
+  period: {value: 3.36100208, prior: fixed}
+  duration: {value: 0.10861111, prior: log_uniform, low: 0.01, high: 1.0}
+  t0: {value: 59803.1, prior: uniform, low: 59803.05, high: 59803.15}
+  b: {value: 0.256, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.1404, prior: uniform, low: 0.01, high: 0.5}
 
 stellar:
   teff: 5375

@@ -27,7 +27,6 @@ FLAG_TIERS = {
         'detrending_type',
         'exclude_integrations',
         'exclude_times',
-        'fit_geometry',
         'jump_guess',
         'ld_prior',
         'ld_profile',
@@ -92,25 +91,47 @@ INTERNAL_FLAGS = FLAG_TIERS['internal']
 KNOWN_FLAGS = frozenset().union(*FLAG_TIERS.values())
 
 
-# Orbital parameters of the ``planet`` block that accept the unified
-# ``[fixed, value]`` / ``[free, prior, ...]`` specification.
+# Orbital parameters of the ``planet`` block. Every one is written as a
+# ``{value: ..., prior: ...}`` mapping; see ``koala.config.parse_parameter_spec``.
 PLANET_PARAMETER_KEYS = (
-    'period', 't0', 'duration', 'a_rs', 'b', 'rprs', 'ecc', 'omega',
+    'period', 't0', 'eclipse_time', 'duration', 'a_rs', 'b', 'rprs', 'ecc', 'omega',
 )
 
 
-# Bare numbers keep the historical behaviour: these are fixed, the rest free.
-PLANET_PARAMETERS_FIXED_BY_DEFAULT = frozenset({'period', 'ecc', 'omega'})
+# Surface (emission) parameters of the ``planet`` block, with the factor that
+# converts the user's unit into the model's internal unit.
+PLANET_SURFACE_PARAMETER_SCALES = {
+    'eclipse_depth_ppm': 1e-6,
+    'dayside_flux_ppm': 1e-6,
+    'nightside_flux_ppm': 1e-6,
+    'hotspot_offset_deg': 3.141592653589793 / 180.0,
+}
 
 
 # Parameters that may only be ``fixed`` for now.
 PLANET_PARAMETERS_FIXED_ONLY = frozenset({'ecc', 'omega'})
 
 
-PARAMETER_SPEC_MODES = ('fixed', 'free')
+# Parameters whose free prior must be gaussian (the physical phase-map prior
+# is built from a centre and a width).
+PLANET_PARAMETERS_GAUSSIAN_ONLY = frozenset({
+    'dayside_flux_ppm', 'nightside_flux_ppm', 'hotspot_offset_deg',
+})
 
 
-PARAMETER_SPEC_PRIORS = ('uniform', 'gaussian', 'truncated_gaussian')
+PARAMETER_SPEC_PRIORS = ('fixed', 'uniform', 'log_uniform', 'gaussian')
+
+
+# Removed ``planet`` keys and the replacement each error message names.
+PLANET_LEGACY_KEYS = {
+    't0_prior_width_days': "t0: {value: ..., prior: gaussian, sigma: <days>}",
+    'a_rs_prior_min': "a_rs: {value: ..., prior: log_uniform, low: ..., high: ...}",
+    'a_rs_prior_max': "a_rs: {value: ..., prior: log_uniform, low: ..., high: ...}",
+    'eclipse_depth_prior_width_ppm': "eclipse_depth_ppm: {value: ..., prior: gaussian, sigma: <ppm>, low: 0}",
+    'dayside_flux_prior_width_ppm': "dayside_flux_ppm: {value: ..., prior: gaussian, sigma: <ppm>}",
+    'nightside_flux_prior_width_ppm': "nightside_flux_ppm: {value: ..., prior: gaussian, sigma: <ppm>}",
+    'hotspot_offset_prior_width_deg': "hotspot_offset_deg: {value: ..., prior: gaussian, sigma: <deg>}",
+}
 
 
 _JUMP_WIDTH_DAYS = 1e-4

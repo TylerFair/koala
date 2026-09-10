@@ -602,13 +602,30 @@ def run(cfg, config_path=None):
     if 'period' not in planet_cfg:
         raise KeyError("'planet.period' is required.")
     planet_parameter_specs = parse_planet_parameter_specs(planet_cfg)
-    for line in describe_planet_parameter_specs(planet_parameter_specs):
-        print(line)
     from models.jaxoplanet.config import parse_surface_config
+    _early_engine = str(flags.get('transit_engine', 'jaxoplanet')).strip().lower()
+    _early_model = str(flags.get('light_curve_model', 'transit')).strip().lower()
+    _early_param_method = (
+        'a_rs' if _early_engine == 'harmonica' or _early_model != 'transit'
+        or stellar_cfg.get('spots') else 'duration'
+    )
     surface_config = parse_surface_config(
         flags, planet_cfg, stellar_cfg,
         len(planet_parameter_specs['period']),
+        parameter_specs=planet_parameter_specs,
+        param_method=_early_param_method,
     )
+    for line in describe_planet_parameter_specs(planet_parameter_specs):
+        print(line)
+    _surface_spec_names = [k for k in surface_config if k.endswith('_spec')]
+    if _surface_spec_names:
+        _surface_specs = {
+            name[:-5]: surface_config[name] for name in _surface_spec_names
+        }
+        for line in describe_planet_parameter_specs(
+            _surface_specs, title="Planet surface parameters (model units)"
+        ):
+            print(line)
     is_prism = instrument == 'NIRSPEC/PRISM'
     is_explinear = 'explinear' in str(flags.get('detrending_type', 'linear'))
     flags.setdefault('spectro_sampler', 'independent_nuts')
@@ -1005,10 +1022,6 @@ def run(cfg, config_path=None):
     periods = _planet_centers('period')
     n_planets = len(periods)
     period_is_free = any(spec.free for spec in planet_parameter_specs['period'])
-    explicit_planet_specs = sorted(
-        name for name, specs in planet_parameter_specs.items()
-        if any(spec.explicit for spec in specs)
-    )
     if transit_engine == 'harmonica' and n_planets != 1:
         raise NotImplementedError(
             "Harmonica production fitting and limb-product export currently "
@@ -1019,13 +1032,6 @@ def run(cfg, config_path=None):
         raise NotImplementedError(
             "A free planet.period is supported only with "
             "flags.transit_engine='jaxoplanet'; fix the period for Harmonica."
-        )
-    if transit_engine == 'harmonica' and explicit_planet_specs:
-        raise NotImplementedError(
-            "Explicit planet parameter specifications "
-            f"({', '.join('planet.' + name for name in explicit_planet_specs)}) "
-            "are supported only with flags.transit_engine='jaxoplanet'; "
-            "use bare numbers for Harmonica."
         )
     for key in ('t0', 'b', 'rprs'):
         if key not in planet_parameter_specs:
@@ -1076,8 +1082,6 @@ def run(cfg, config_path=None):
             )
         return jnp.asarray(arr, dtype=jnp.float64)
 
-    T0_PRIOR_WIDTH = _planet_cfg_array('t0_prior_width_days', PRIOR_DUR)
-
     # Shared orbital geometry inputs used by harmonica and jaxoplanet a_rs parameterizations.
     HARMONICA_ECC = _ecc_tmp
     HARMONICA_OMEGA = _omega_tmp
@@ -1089,19 +1093,7 @@ def run(cfg, config_path=None):
             ecc=HARMONICA_ECC, omega=HARMONICA_OMEGA,
         )
     HARMONICA_COS_I = _harmonica_cosi_from_b(PRIOR_B, HARMONICA_A_RS, HARMONICA_ECC, HARMONICA_OMEGA)
-    HARMONICA_A_RS_PRIOR_MIN = _planet_cfg_array(
-        'a_rs_prior_min', np.maximum(2.0, 0.5 * np.asarray(HARMONICA_A_RS))
-    )
-    HARMONICA_A_RS_PRIOR_MAX = _planet_cfg_array(
-        'a_rs_prior_max', np.maximum(10.0, 2.0 * np.asarray(HARMONICA_A_RS))
-    )
     HARMONICA_INC = jnp.arccos(HARMONICA_COS_I)
-    HARMONICA_INC_PRIOR_MIN = _planet_cfg_array('inc_prior_min', 0.0)
-    HARMONICA_INC_PRIOR_MAX = _planet_cfg_array('inc_prior_max', np.pi / 2.0)
-    if jnp.any(HARMONICA_A_RS_PRIOR_MIN <= 0.0):
-        raise ValueError("`planet.a_rs_prior_min` must be > 0.")
-    if jnp.any(HARMONICA_A_RS_PRIOR_MAX <= HARMONICA_A_RS_PRIOR_MIN):
-        raise ValueError("`planet.a_rs_prior_max` must exceed `planet.a_rs_prior_min`.")
     if jnp.any((HARMONICA_ECC < 0.0) | (HARMONICA_ECC >= 1.0)):
         raise ValueError("`planet.ecc` must satisfy 0 <= ecc < 1.")
 
@@ -1182,8 +1174,10 @@ def run(cfg, config_path=None):
             "nrs": cfg.get("nrs"),
             "resolution": resolution,
             "pixels": pixels,
-            "planet_t0": planet_cfg.get("t0"),
-            "planet_duration": planet_cfg.get("duration"),
+            "planet_specs": {
+                key: [spec.__dict__ for spec in specs]
+                for key, specs in planet_parameter_specs.items()
+            },
             "transit_ephemeris": transit_ephemeris,
             "wavelength_filter": cfg.get("wavelength_filter", {}),
             "wavelength_masks": cfg.get("wavelength_masks"),
@@ -1237,11 +1231,7 @@ def run(cfg, config_path=None):
 
     wl_mad_mask, bestfit_params_wl_df, wl_geometry_handoff = run_white_light_stage(
         HARMONICA_A_RS=locals().get('HARMONICA_A_RS'),
-        HARMONICA_A_RS_PRIOR_MAX=locals().get('HARMONICA_A_RS_PRIOR_MAX'),
-        HARMONICA_A_RS_PRIOR_MIN=locals().get('HARMONICA_A_RS_PRIOR_MIN'),
         HARMONICA_ECC=locals().get('HARMONICA_ECC'),
-        HARMONICA_INC_PRIOR_MAX=locals().get('HARMONICA_INC_PRIOR_MAX'),
-        HARMONICA_INC_PRIOR_MIN=locals().get('HARMONICA_INC_PRIOR_MIN'),
         HARMONICA_ODD_HARMONICS=locals().get('HARMONICA_ODD_HARMONICS'),
         HARMONICA_OMEGA=locals().get('HARMONICA_OMEGA'),
         NUTS_KWARGS=locals().get('NUTS_KWARGS'),
@@ -1250,7 +1240,6 @@ def run(cfg, config_path=None):
         PRIOR_DUR=locals().get('PRIOR_DUR'),
         PRIOR_RPRS=locals().get('PRIOR_RPRS'),
         PRIOR_T0=locals().get('PRIOR_T0'),
-        T0_PRIOR_WIDTH=locals().get('T0_PRIOR_WIDTH'),
         _engine_wl_kw=locals().get('_engine_wl_kw'),
         _explicit_ld_grid=locals().get('_explicit_ld_grid'),
         cfg=locals().get('cfg'),

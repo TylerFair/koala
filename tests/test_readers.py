@@ -147,7 +147,7 @@ def test_process_spectroscopy_data_honours_input_format(tmp_path, monkeypatch):
         raise RuntimeError('stop here')
 
     monkeypatch.setattr(createdatacube, 'load_spectra', fake_load)
-    cfg = {'instrument': 'NIRCAM/F444W', 'input_format': 'sparta', 'planet': {'t0': [0.0], 'duration': [0.1]}}
+    cfg = {'instrument': 'NIRCAM/F444W', 'input_format': 'sparta', 'planet': {'period': {'value': 1.0, 'prior': 'fixed'}, 't0': {'value': 0.0, 'prior': 'fixed'}, 'duration': {'value': 0.1, 'prior': 'fixed'}}}
     with pytest.raises(RuntimeError):
         createdatacube.process_spectroscopy_data('NIRCAM/F444W', '', '', 'x', cfg, 'unused.pkl')
     assert seen['format'] == 'sparta'

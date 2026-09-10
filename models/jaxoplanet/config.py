@@ -8,75 +8,60 @@ import numpy as np
 SURFACE_MODELS = frozenset({"transit", "eclipse", "phase_curve"})
 
 
-def _planet_values(planet, name, n_planets, default=None):
-    if name not in planet:
-        if default is None:
-            raise ValueError(f"planet.{name} is required for this light-curve model.")
-        value = default
-    else:
-        value = planet[name]
-    values = np.atleast_1d(np.asarray(value, dtype=float))
-    if values.size == 1 and n_planets > 1:
-        values = np.repeat(values, n_planets)
-    if values.size != n_planets or not np.all(np.isfinite(values)):
-        raise ValueError(
-            f"planet.{name} must be finite and scalar or length {n_planets}."
-        )
-    return values
+def parse_surface_config(flags, planet, stellar, n_planets, parameter_specs=None,
+                         param_method="a_rs"):
+    """Normalize friendly ppm/degree inputs to the model's fraction/radian form.
 
+    ``parameter_specs`` are the parsed orbital specifications; the geometry
+    counts as fixed when t0, b, rprs, and duration/a_rs are all fixed.
+    """
+    from koala.config import geometry_is_fixed, parse_planet_surface_specs
 
-def parse_surface_config(flags, planet, stellar, n_planets):
-    """Normalize friendly ppm/degree inputs to the model's fraction/radian form."""
     model = str(flags.get("light_curve_model", "transit")).strip().lower()
     if model not in SURFACE_MODELS:
         raise ValueError(
             "flags.light_curve_model must be 'transit', 'eclipse', or "
             f"'phase_curve'; got {model!r}."
         )
+    if "fit_geometry" in flags:
+        raise ValueError(
+            "flags.fit_geometry has been removed: geometry is fixed when "
+            "planet.t0, b, rprs, and duration/a_rs all have prior: fixed, "
+            "and fitted otherwise."
+        )
     if n_planets != 1 and (model != "transit" or stellar.get("spots")):
         raise ValueError(
             "JAXoplanet eclipse, phase-curve, and stellar-spot models currently "
             "support exactly one planet."
         )
-    fit_geometry = flags.get("fit_geometry", model != "eclipse")
-    if not isinstance(fit_geometry, (bool, np.bool_)):
-        raise ValueError("flags.fit_geometry must be true or false.")
-    raw_spots_for_geometry = stellar.get("spots", ())
-    has_spots_for_geometry = (
-        isinstance(raw_spots_for_geometry, (list, tuple))
-        and len(raw_spots_for_geometry) > 0
+    fit_geometry = (
+        True if parameter_specs is None
+        else not geometry_is_fixed(parameter_specs, param_method)
     )
-    if (
-        model == "transit"
-        and not has_spots_for_geometry
-        and "fit_geometry" in flags
-        and not bool(fit_geometry)
-    ):
-        raise ValueError(
-            "flags.fit_geometry: false is supported for eclipse, phase-curve, "
-            "or stellar-spot fits; ordinary transit fits always infer geometry."
-        )
     result = {"model": model, "spots": ()}
     # Pure transit fits retain their established geometry behavior.  This flag
     # controls geometry only when a planetary surface or stellar map is active.
     if model != "transit":
         result["fit_geometry"] = bool(fit_geometry)
 
-    def flux(name, default=None):
-        center = _planet_values(planet, f"{name}_ppm", n_planets, default)
-        width = _planet_values(
-            planet, f"{name}_prior_width_ppm", n_planets, 0.0
+    def flux(name, unit):
+        specs = parse_planet_surface_specs(planet, n_planets, [f"{name}_{unit}"])[f"{name}_{unit}"]
+        center = np.asarray([spec.value for spec in specs], dtype=float)
+        width = np.asarray(
+            [spec.sigma if spec.prior == "gaussian" else 0.0 for spec in specs],
+            dtype=float,
         )
-        if np.any(center < 0.0) or np.any(width < 0.0):
-            raise ValueError(f"planet.{name}_ppm and its prior width must be >= 0.")
-        result[name] = center * 1e-6
-        result[f"{name}_prior_width"] = width * 1e-6
+        if unit == "ppm" and np.any(center < 0.0):
+            raise ValueError(f"planet.{name}_ppm must be >= 0.")
+        result[name] = center
+        result[f"{name}_prior_width"] = width
+        result[f"{name}_spec"] = tuple(specs)
 
     if model == "eclipse":
-        flux("eclipse_depth")
+        flux("eclipse_depth", "ppm")
     elif model == "phase_curve":
-        flux("dayside_flux")
-        flux("nightside_flux")
+        flux("dayside_flux", "ppm")
+        flux("nightside_flux", "ppm")
         inferred_flux = (
             (result["dayside_flux_prior_width"] > 0.0)
             | (result["nightside_flux_prior_width"] > 0.0)
@@ -100,14 +85,7 @@ def parse_surface_config(flags, planet, stellar, n_planets):
                 "The phase map requires nonnegative day/night fluxes whose "
                 "larger value is no more than five times the smaller value."
             )
-        offset = _planet_values(planet, "hotspot_offset_deg", n_planets, 0.0)
-        offset_width = _planet_values(
-            planet, "hotspot_offset_prior_width_deg", n_planets, 0.0
-        )
-        if np.any(offset_width < 0.0):
-            raise ValueError("planet.hotspot_offset_prior_width_deg must be >= 0.")
-        result["hotspot_offset"] = np.deg2rad(offset)
-        result["hotspot_offset_prior_width"] = np.deg2rad(offset_width)
+        flux("hotspot_offset", "deg")
 
     raw_spots = stellar.get("spots", ())
     if raw_spots is None:

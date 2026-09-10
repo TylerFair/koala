@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Generate the small synthetic datasets used by the surface-model examples.
 
-The files use the six-HDU NIRSpec layout consumed by ``createdatacube.py``.
+The files use the six-HDU extracted-spectra layout consumed by
+``createdatacube.py`` (read as NIRSpec/G395M for the phase-curve and spot
+scenarios and as MIRI/LRS for the rocky-planet eclipse).
 They are deliberately small enough for a laptop smoke test and deterministic
 unless a different seed is requested.
 """
@@ -17,6 +19,7 @@ import numpy as np
 from astropy.io import fits
 
 
+# Hot-Jupiter geometry shared by the phase-curve and stellar-spot scenarios.
 PERIOD = 2.0
 T0 = 60_000.0
 A_RS = 6.0
@@ -24,11 +27,43 @@ B = 0.25
 RPRS = 0.1
 NOISE_PPM = 120.0
 
+# Synthetic rocky planet "ROCKY-1 b" for the eclipse scenario. The orbit and
+# the fit setup mirror the JWST/MIRI 15 micron eclipse analysis of GJ 3929 b
+# (arXiv:2508.12516): P = 2.6162644 d, a/R* = 17.04, i = 89.3 deg
+# (b = a/R* cos i = 0.208), Rp/R* = 0.0318, and an eclipse depth of 100 ppm.
+ROCKY_PERIOD = 2.6162644
+ROCKY_T0 = 60_000.0
+ROCKY_ECLIPSE_TIME = ROCKY_T0 + 0.5 * ROCKY_PERIOD   # 60001.3081322, circular orbit
+ROCKY_A_RS = 17.04
+ROCKY_B = 0.208
+ROCKY_RPRS = 0.0318
+ROCKY_ECLIPSE_DEPTH_PPM = 100.0
+
+GEOMETRY = {
+    "eclipse": dict(period=ROCKY_PERIOD, t0=ROCKY_T0, a_rs=ROCKY_A_RS,
+                    b=ROCKY_B, rprs=ROCKY_RPRS),
+    "phase_curve": dict(period=PERIOD, t0=T0, a_rs=A_RS, b=B, rprs=RPRS),
+    "stellar_spots": dict(period=PERIOD, t0=T0, a_rs=A_RS, b=B, rprs=RPRS),
+}
+
+WAVELENGTHS = {
+    # MIRI/LRS bandpass for the rocky-planet eclipse.
+    "eclipse": np.linspace(5.5, 11.5, 14),
+    "phase_curve": np.linspace(2.9, 5.0, 14),
+    "stellar_spots": np.linspace(2.9, 5.0, 14),
+}
+
 
 def _surface_signals(
-    time, radius_ratios, model, channel_params=None, **surface_params
+    time, radius_ratios, model, channel_params=None, geometry=None,
+    **surface_params
 ):
-    """Evaluate the same JAXoplanet/Starry path used by the fitter."""
+    """Evaluate the same JAXoplanet/Starry path used by the fitter.
+
+    ``geometry`` maps ``period``, ``t0``, ``a_rs``, ``b`` (see ``GEOMETRY``);
+    the hot-Jupiter constants are used when it is omitted.
+    """
+    geometry = geometry or GEOMETRY["phase_curve"]
     repository_root = str(Path(__file__).resolve().parents[1])
     if repository_root not in sys.path:
         sys.path.insert(0, repository_root)
@@ -46,10 +81,10 @@ def _surface_signals(
 
     def evaluate(radius_ratio, *values):
         params = {
-            "period": PERIOD,
-            "t0": T0,
-            "a_rs": A_RS,
-            "b": B,
+            "period": geometry["period"],
+            "t0": geometry["t0"],
+            "a_rs": geometry["a_rs"],
+            "b": geometry["b"],
             "rors": radius_ratio,
             "ecc": 0.0,
             "omega": 0.0,
@@ -71,8 +106,12 @@ def _surface_signals(
 
 
 def _scenario(name, wavelengths):
+    geometry = GEOMETRY.get(name)
     if name == "eclipse":
-        time = np.linspace(T0 + 0.35 * PERIOD, T0 + 0.65 * PERIOD, 161)
+        # One MIRI-style visit: 0.15 d either side of the secondary eclipse.
+        time = np.linspace(
+            ROCKY_ECLIPSE_TIME - 0.15, ROCKY_ECLIPSE_TIME + 0.15, 181
+        )
     elif name == "phase_curve":
         time = np.linspace(T0 - 0.05 * PERIOD, T0 + 1.05 * PERIOD, 321)
     elif name == "stellar_spots":
@@ -85,25 +124,28 @@ def _scenario(name, wavelengths):
     noiseless = np.empty((ntime, nwave))
     truth = {
         "scenario": name,
-        "period_days": PERIOD,
-        "t0_bmjd_tdb": T0,
-        "a_rs": A_RS,
-        "impact_parameter": B,
-        "radius_ratio": RPRS,
+        "period_days": geometry["period"],
+        "t0_bmjd_tdb": geometry["t0"],
+        "a_rs": geometry["a_rs"],
+        "impact_parameter": geometry["b"],
+        "radius_ratio": geometry["rprs"],
         "noise_ppm_per_channel": NOISE_PPM,
         "wavelength_um": wavelengths.tolist(),
     }
 
-    # The example fits fix geometry, so every channel must use that exact
-    # configured radius; a transmission slope would bias surface recovery.
-    radius_ratio = np.full(nwave, RPRS)
+    # The example fits fix the radius ratio, so every channel must use that
+    # exact configured radius; a transmission slope would bias surface recovery.
+    radius_ratio = np.full(nwave, geometry["rprs"])
     if name == "eclipse":
-        eclipse_depth_ppm = 700.0 + 180.0 * (wavelengths - wavelengths.min())
+        # A flat 100 ppm rocky-planet eclipse across the MIRI/LRS bandpass.
+        eclipse_depth_ppm = np.full(nwave, ROCKY_ECLIPSE_DEPTH_PPM)
+        truth["eclipse_time_bmjd_tdb"] = ROCKY_ECLIPSE_TIME
         noiseless[:] = 1.0 + _surface_signals(
             time,
             radius_ratio,
             "eclipse",
             channel_params={"eclipse_depth": eclipse_depth_ppm * 1e-6},
+            geometry=geometry,
         )
         truth["eclipse_depth_ppm"] = eclipse_depth_ppm.tolist()
     elif name == "phase_curve":
@@ -118,6 +160,7 @@ def _scenario(name, wavelengths):
                 "dayside_flux": dayside_ppm * 1e-6,
                 "nightside_flux": nightside_ppm * 1e-6,
             },
+            geometry=geometry,
             hotspot_offset=np.deg2rad(offset_deg),
         )
         truth.update(
@@ -146,6 +189,7 @@ def _scenario(name, wavelengths):
             radius_ratio[:1],
             "transit",
             spots=spots_model,
+            geometry=geometry,
             stellar_rotation_period=2.0,
             stellar_spot_contrast=np.asarray([0.40]),
         )
@@ -180,7 +224,7 @@ def _write_nirspec(path, time, wavelengths, flux, uncertainty):
 
 
 def generate(name, output_dir, rng):
-    wavelengths = np.linspace(2.9, 5.0, 14)
+    wavelengths = WAVELENGTHS[name]
     time, noiseless, truth = _scenario(name, wavelengths)
     uncertainty = np.full_like(noiseless, NOISE_PPM * 1e-6)
     flux = noiseless + rng.normal(scale=uncertainty)
