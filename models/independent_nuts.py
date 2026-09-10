@@ -25,6 +25,47 @@ from numpyro.infer.initialization import init_to_value
 from numpyro.infer.util import initialize_model
 
 
+def _segment_length(total, target):
+    """Largest divisor of ``total`` no greater than ``target``.
+
+    Every segment then has the same static length, so the segment program is
+    compiled once.  A non-positive ``target`` (or a prime ``total``) yields a
+    single segment.
+    """
+    total = int(total)
+    target = int(target)
+    if total <= 0:
+        return 0
+    if target <= 0 or target >= total:
+        return total
+    for length in range(target, 0, -1):
+        if total % length == 0:
+            return length
+    return total
+
+
+class _SegmentProgress:
+    """A tqdm bar advanced once per compiled segment; silent when disabled."""
+
+    def __init__(self, total, desc, enabled):
+        self._bar = None
+        if enabled and total > 0:
+            try:
+                from tqdm.auto import tqdm
+            except ImportError:  # pragma: no cover - tqdm is a dependency
+                return
+            self._bar = tqdm(total=int(total), desc=desc, leave=True,
+                             dynamic_ncols=True, mininterval=0.5)
+
+    def update(self, n):
+        if self._bar is not None:
+            self._bar.update(int(n))
+
+    def close(self):
+        if self._bar is not None:
+            self._bar.close()
+
+
 @dataclass(frozen=True)
 class IndependentNUTSDiagnostics:
     """Per-draw and final adapted diagnostics for every real channel."""
@@ -520,6 +561,7 @@ def _resolve_sampler_options(
         "laplace_line_search_steps",
         "laplace_trust_radius",
         "laplace_fuse_program",
+        "progress_segment",
     }
     unknown_nuts = set(nuts) - supported_nuts
     if unknown_nuts:
@@ -636,6 +678,10 @@ def _resolve_sampler_options(
             nuts.get("laplace_line_search_steps", 8)
         ),
         "laplace_trust_radius": float(nuts.get("laplace_trust_radius", 5.0)),
+        "progress_bar": bool(mcmc.get("progress_bar", True)),
+        # Iterations per compiled warmup/sampling segment; the Python loop
+        # between segments drives the progress bar.  Zero disables splitting.
+        "progress_segment": int(nuts.get("progress_segment", 50)),
         "laplace_fuse_program": bool(
             nuts.get("laplace_fuse_program", False)
         ),
@@ -791,6 +837,8 @@ class _IndependentSamplerRunner:
         self._static_shared_kwargs = None
         self._init_program = None
         self._warmup_program = None
+        self._warmup_segment = 0
+        self._sample_segment = 0
         self._sample_program = None
         self._postprocess_program = None
         self._laplace_sample_program = None
@@ -1260,9 +1308,16 @@ class _IndependentSamplerRunner:
                 collect_step,
                 initial,
                 xs=None,
-                length=options["num_samples"],
+                length=(
+                    options["num_samples"]
+                    if options["laplace_fuse_program"]
+                    else self._sample_segment
+                ),
             )
 
+        self._sample_segment = _segment_length(
+            options["num_samples"], options.get("progress_segment", 50)
+        )
         self._laplace_sample_program = jax.jit(sample_and_postprocess)
         if options["laplace_fuse_program"]:
             def prepare_sample_and_postprocess(
@@ -1372,11 +1427,14 @@ class _IndependentSamplerRunner:
             )(states, errors, observations, varying)
 
         if options["num_warmup"]:
+            self._warmup_segment = _segment_length(
+                options["num_warmup"], options.get("progress_segment", 50)
+            )
             self._warmup_program = jax.jit(
                 lambda initial, t, errors, observations, varying, shared: (
                     jax.lax.fori_loop(
                         0,
-                        options["num_warmup"],
+                        self._warmup_segment,
                         lambda _, state: advance(
                             state, t, errors, observations, varying, shared
                         ),
@@ -1401,9 +1459,12 @@ class _IndependentSamplerRunner:
                 collect_step,
                 initial,
                 xs=None,
-                length=options["num_samples"],
+                length=self._sample_segment,
             )
 
+        self._sample_segment = _segment_length(
+            options["num_samples"], options.get("progress_segment", 50)
+        )
         self._sample_program = jax.jit(collect)
         postprocess_gen = model_info.postprocess_fn
 
@@ -1424,6 +1485,35 @@ class _IndependentSamplerRunner:
             )
         )
         self.program_build_count += 1
+
+    @staticmethod
+    def _run_segments(program, states, segment, total, desc, show, collect, args):
+        """Call a compiled fixed-length ``program`` until ``total`` iterations.
+
+        ``collect=True`` programs return ``(states, outputs)`` from a scan;
+        the per-segment outputs are concatenated along the draw axis.
+        """
+        n_segments = total // segment if segment else 0
+        bar = _SegmentProgress(total, desc, show)
+        pieces = []
+        try:
+            for _ in range(n_segments):
+                if collect:
+                    states, outputs = program(states, *args)
+                    pieces.append(outputs)
+                else:
+                    states = program(states, *args)
+                bar.update(segment)
+        finally:
+            bar.close()
+        if not collect:
+            return states
+        if len(pieces) == 1:
+            return states, pieces[0]
+        outputs = jax.tree.map(
+            lambda *chunks: jnp.concatenate(chunks, axis=0), *pieces
+        )
+        return states, outputs
 
     def run_raw(self, key, t, yerr, indiv_y, init_params, model_kwargs):
         t = _asarray_f64(t)
@@ -1546,35 +1636,31 @@ class _IndependentSamplerRunner:
                 states, map_diagnostics = prepared
             else:
                 states = prepared
+            label = getattr(self, "progress_label", "")
+            show = bool(self.options.get("progress_bar", True))
             if self._warmup_program is not None:
-                states = self._warmup_program(
-                    states,
-                    t,
-                    padded_yerr,
-                    padded_y,
-                    varying_kwargs,
-                    dynamic_shared,
+                states = self._run_segments(
+                    self._warmup_program, states, self._warmup_segment,
+                    self.options["num_warmup"], f"{label} warmup".strip(),
+                    show, collect=False,
+                    args=(t, padded_yerr, padded_y, varying_kwargs, dynamic_shared),
                 )
             if self.options.get("mass_matrix") == "laplace":
                 states, (samples, steps, accept_prob, diverging) = (
-                    self._laplace_sample_program(
-                        states,
-                        t,
-                        padded_yerr,
-                        padded_y,
-                        varying_kwargs,
-                        dynamic_shared,
+                    self._run_segments(
+                        self._laplace_sample_program, states,
+                        self._sample_segment, self.options["num_samples"],
+                        f"{label} sample".strip(), show, collect=True,
+                        args=(t, padded_yerr, padded_y, varying_kwargs, dynamic_shared),
                     )
                 )
             else:
                 states, (z_samples, steps, accept_prob, diverging) = (
-                    self._sample_program(
-                        states,
-                        t,
-                        padded_yerr,
-                        padded_y,
-                        varying_kwargs,
-                        dynamic_shared,
+                    self._run_segments(
+                        self._sample_program, states,
+                        self._sample_segment, self.options["num_samples"],
+                        f"{label} sample".strip(), show, collect=True,
+                        args=(t, padded_yerr, padded_y, varying_kwargs, dynamic_shared),
                     )
                 )
                 samples = self._postprocess_program(

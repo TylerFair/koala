@@ -1108,6 +1108,10 @@ def get_samples_chunked(
                 f"  chunk {start}:{end} - independent GPU {sampler_label} "
                 f"({end - start} active lanes, padded width {padded_width})"
             )
+            try:
+                runner.progress_label = f"chunk {start}:{end}"
+            except AttributeError:
+                pass
             samples_chunk = independent_sampler(
                 model, key_chunk, t, yerr_chunk, y_chunk, init_chunk,
                 nuts_kwargs=nuts_kwargs, mcmc_kwargs=mcmc_kwargs,
