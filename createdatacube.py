@@ -6,6 +6,10 @@ import jax.numpy as jnp
 import pickle
 from koala.binning import bin_at_resolution, bin_at_pixel
 from koala.readers import read_spectra
+from koala.exclusions import (
+    resolve_exclusions, integration_keep_mask, time_keep_mask,
+    has_cut_phase_directive, is_cut_phase_directive, _pairs_from_legacy_trim,
+)
 from koala.instruments import (
     normalize_instrument, resolve_detector, detector_key, data_wavelength_range,
 )
@@ -74,18 +78,24 @@ SOSS_ORDER2_RANGE = (0.6, 0.85)
 
 
 def _finalize_spectra(wave, wave_err, bjd, fluxcube, fluxcube_err, instrument, order,
-                      trim_start, trim_end, wl_min=None, wl_max=None, wavelength_masks=None):
+                      trim_start, trim_end, wl_min=None, wl_max=None, wavelength_masks=None,
+                      exclude_integrations=None):
     """Apply Koala's common post-read steps to a spectra cube.
 
-    Integrations are trimmed with ``trim_start``/``trim_end``, wavelengths are
+    Integrations are dropped with ``exclude_integrations`` (a list of
+    inclusive ``(first, last)`` index pairs; see ``koala.exclusions``) and the
+    legacy head/tail counts ``trim_start``/``trim_end``. Wavelengths are
     restricted to the instrument window (``SOSS_ORDER2_RANGE`` for SOSS order 2)
     and to the optional ``wl_min``/``wl_max`` filter, ``wavelength_masks`` are
     removed, and everything is returned as ascending, native-endian float64.
     """
-    start = 0 if (trim_start is None) else int(trim_start)
-    stop = None if (trim_end in (None, 0)) else -int(trim_end)
-    fluxcube, fluxcube_err = fluxcube[start:stop, :], fluxcube_err[start:stop, :]
-    bjd = bjd[start:stop]
+    ranges = list(exclude_integrations or []) + _pairs_from_legacy_trim(trim_start, trim_end)
+    if ranges:
+        keep = integration_keep_mask(len(bjd), ranges)
+        dropped = int((~keep).sum())
+        print(f"Excluding {dropped} of {len(bjd)} integrations by index.")
+        fluxcube, fluxcube_err = fluxcube[keep, :], fluxcube_err[keep, :]
+        bjd = bjd[keep]
 
     if order == 2:
         data_range = SOSS_ORDER2_RANGE
@@ -121,8 +131,8 @@ def _finalize_spectra(wave, wave_err, bjd, fluxcube, fluxcube_err, instrument, o
     return wavelength, wavelength_err, t, fluxcube, fluxcube_err
 
 
-def load_spectra(infile, instrument, trim_start, trim_end, order=None, input_format='auto',
-                 wl_min=None, wl_max=None, wavelength_masks=None):
+def load_spectra(infile, instrument, trim_start=None, trim_end=None, order=None, input_format='auto',
+                 wl_min=None, wl_max=None, wavelength_masks=None, exclude_integrations=None):
     """Read ``infile`` in any supported product format and post-process it.
 
     ``input_format`` is ``'auto'`` (sniff the file), ``'exotedrf'``, ``'sparta'``,
@@ -131,25 +141,28 @@ def load_spectra(infile, instrument, trim_start, trim_end, order=None, input_for
     """
     _, raw = read_spectra(infile, input_format=input_format, order=order)
     return _finalize_spectra(*raw, instrument, order, trim_start, trim_end,
-                             wl_min=wl_min, wl_max=wl_max, wavelength_masks=wavelength_masks)
+                             wl_min=wl_min, wl_max=wl_max, wavelength_masks=wavelength_masks,
+                             exclude_integrations=exclude_integrations)
 
 
-def unpack_niriss_exotedrf(infile, order, trim_start, trim_end, wl_min_o1=None, wl_max_o1=None, wl_min_o2=None, wl_max_o2=None, wavelength_masks=None, input_format='exotedrf'):
+def unpack_niriss_exotedrf(infile, order, trim_start=None, trim_end=None, wl_min_o1=None, wl_max_o1=None, wl_min_o2=None, wl_max_o2=None, wavelength_masks=None, input_format='exotedrf', exclude_integrations=None):
     """Read one NIRISS/SOSS order from an extracted-spectra product."""
     wl_min, wl_max = (wl_min_o1, wl_max_o1) if order == 1 else (wl_min_o2, wl_max_o2)
     return load_spectra(infile, 'NIRISS/SOSS', trim_start, trim_end, order=order,
                         input_format=input_format, wl_min=wl_min, wl_max=wl_max,
-                        wavelength_masks=wavelength_masks)
+                        wavelength_masks=wavelength_masks,
+                        exclude_integrations=exclude_integrations)
 
 
-def unpack_exotedrf_spectra(infile, instrument, trim_start, trim_end, wl_min=None, wl_max=None, wavelength_masks=None, input_format='exotedrf'):
+def unpack_exotedrf_spectra(infile, instrument, trim_start=None, trim_end=None, wl_min=None, wl_max=None, wavelength_masks=None, input_format='exotedrf', exclude_integrations=None):
     """Read a NIRSpec, NIRCam, or MIRI extracted-spectra product.
 
     The wavelength window kept for ``instrument`` comes from ``koala.instruments``.
     """
     return load_spectra(infile, instrument, trim_start, trim_end, order=None,
                         input_format=input_format, wl_min=wl_min, wl_max=wl_max,
-                        wavelength_masks=wavelength_masks)
+                        wavelength_masks=wavelength_masks,
+                        exclude_integrations=exclude_integrations)
 
 
 class SpectroData:
@@ -566,13 +579,27 @@ def unpack_miri_exotedrf(infile, trim_start, trim_end, **kwargs):
     return unpack_exotedrf_spectra(infile, 'MIRI/LRS', trim_start, trim_end, **kwargs)
 
 
-def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start=None, mask_end=None, mask_integrations_start=None, mask_integrations_end=None, transit_ephemeris=None):
+def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start=None, mask_end=None, mask_integrations_start=None, mask_integrations_end=None, transit_ephemeris=None, exclude_times=None, exclude_integrations=None):
     """Main function to process spectroscopy data.
 
     ``transit_ephemeris`` optionally supplies ``{'t0', 'duration', 'period'}``
     centre values per planet; otherwise they are read from ``cfg['planet']``.
     Every transit epoch inside the time series is masked as in-transit.
+
+    ``exclude_times`` and ``exclude_integrations`` are lists of inclusive
+    ``(start, end)`` pairs (see ``koala.exclusions``). When ``None`` they are
+    resolved from ``cfg`` and merged with the legacy ``mask_*`` arguments.
     """
+    if exclude_times is None or exclude_integrations is None:
+        cfg_times, cfg_integrations = resolve_exclusions(
+            cfg, mask_start=mask_start, mask_end=mask_end,
+            mask_integrations_start=mask_integrations_start,
+            mask_integrations_end=mask_integrations_end,
+        )
+        if exclude_times is None:
+            exclude_times = cfg_times
+        if exclude_integrations is None:
+            exclude_integrations = cfg_integrations
     prior_t0s, prior_durations, prior_periods = _resolve_transit_ephemeris(
         cfg['planet'], transit_ephemeris
     )
@@ -592,10 +619,10 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     nrs, order = resolve_detector(instrument, cfg)
     input_format = cfg.get('input_format', 'auto')
     if detector_key(instrument) == 'order':
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_niriss_exotedrf(fits_file, order, mask_integrations_start, mask_integrations_end, wl_min_o1=wl_min_o1, wl_max_o1=wl_max_o1, wl_min_o2=wl_min_o2, wl_max_o2=wl_max_o2, wavelength_masks=wavelength_masks, input_format=input_format)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_niriss_exotedrf(fits_file, order, None, None, exclude_integrations=exclude_integrations, wl_min_o1=wl_min_o1, wl_max_o1=wl_max_o1, wl_min_o2=wl_min_o2, wl_max_o2=wl_max_o2, wavelength_masks=wavelength_masks, input_format=input_format)
         mini_instrument = order
     else:
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_exotedrf_spectra(fits_file, instrument, mask_integrations_start, mask_integrations_end, wl_min=wl_min, wl_max=wl_max, wavelength_masks=wavelength_masks, input_format=input_format)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_exotedrf_spectra(fits_file, instrument, None, None, exclude_integrations=exclude_integrations, wl_min=wl_min, wl_max=wl_max, wavelength_masks=wavelength_masks, input_format=input_format)
         mini_instrument = nrs if nrs is not None else ''
     
     wavelengths = np.array(wavelengths)
@@ -637,118 +664,24 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     flux_unbinned = flux_unbinned[:, ~invalid_wavelength]
     flux_err_unbinned = flux_err_unbinned[:, ~invalid_wavelength]
 
-    # Apply time masking criteria (useful for spot-crossings) and optional "cut" directives.
-    #
-    # Supported inputs:
-    # - mask_start/mask_end can be scalars, strings (expressions), or same-length lists.
-    # - None values are treated as open-ended (min(time) or max(time)).
-    # - Special directive "cut_phase_to_transit": keep only t0 ± 3 hours.
-
-    def evaluate_mask_value(value, time):
-        """Evaluate a mask value that could be a number, None, or a string expression."""
-        if value is None:
-            return None
-        if isinstance(value, str):
-            v = value.strip()
-            # Do not eval special directives
-            if v == "cut_phase_to_transit":
-                return v
-            namespace = {
-                'jnp': np,
-                'np': np,
-                't': time,
-                'time': time,
-                'min': np.min,
-                'max': np.max,
-            }
-            return eval(v, {"__builtins__": {}}, namespace)
-        return value
-
-    def _to_pairs(mask_start, mask_end):
-        """Return list of (start,end) pairs from scalar/list inputs."""
-        if mask_start is None and mask_end is None:
-            return []
-
-        # If one side is missing, treat as open-ended
-        if mask_end is None and mask_start is not None:
-            if hasattr(mask_start, '__len__') and not isinstance(mask_start, str):
-                return [(s, None) for s in mask_start]
-            return [(mask_start, None)]
-
-        if mask_start is None and mask_end is not None:
-            if hasattr(mask_end, '__len__') and not isinstance(mask_end, str):
-                return [(None, e) for e in mask_end]
-            return [(None, mask_end)]
-
-        # Both provided
-        if hasattr(mask_start, '__len__') and not isinstance(mask_start, str):
-            if not (hasattr(mask_end, '__len__') and not isinstance(mask_end, str)):
-                raise ValueError("mask_start is a list but mask_end is not.")
-            if len(mask_start) != len(mask_end):
-                raise ValueError("mask_start and mask_end lists must be the same length.")
-            return list(zip(mask_start, mask_end))
-
-        return [(mask_start, mask_end)]
-
-    pairs = _to_pairs(mask_start, mask_end)
-
-    # 1) Handle "cut_phase_to_transit": keep only t0 +/- 3 hours (3/24 days)
-    has_cut = any(
-        (isinstance(s, str) and s.strip() == "cut_phase_to_transit") or
-        (isinstance(e, str) and e.strip() == "cut_phase_to_transit")
-        for s, e in pairs
-    )
-
-    if has_cut:
+    # Time-range exclusions (spot crossings, tilt events, ramps) and the
+    # optional "cut_phase_to_transit" directive; see koala.exclusions.
+    if has_cut_phase_directive(exclude_times):
         # Keep t0 +/- 3 hours around every transit epoch in the series.
-        window = 3.0 / 24.0  # 3 hours in days
-
+        window = 3.0 / 24.0
         keep = np.zeros_like(time, dtype=bool)
         for t0, period in zip(prior_t0s, prior_periods):
             keep |= transit_epoch_mask(time, t0, window, period)
-
         time = time[keep]
         flux_unbinned = flux_unbinned[keep, :]
         flux_err_unbinned = flux_err_unbinned[keep, :]
 
-        # Remove cut directives so they don't get evaluated below
-        pairs = [
-            (s, e) for (s, e) in pairs
-            if not (
-                (isinstance(s, str) and s.strip() == "cut_phase_to_transit") or
-                (isinstance(e, str) and e.strip() == "cut_phase_to_transit")
-            )
-        ]
-
-    # 2) Apply "mask out" time ranges (remove points inside each range)
-    if len(pairs) > 0:
-        timemask = np.zeros_like(time, dtype=bool)
-        tmin = float(np.min(time))
-        tmax = float(np.max(time))
-
-        for start, end in pairs:
-            start_val = evaluate_mask_value(start, time)
-            end_val = evaluate_mask_value(end, time)
-
-            # Skip fully-empty pairs
-            if start_val is None and end_val is None:
-                continue
-
-            # Support open-ended masks
-            if start_val is None:
-                start_val = tmin
-            if end_val is None:
-                end_val = tmax
-
-            # If a directive snuck through, ignore it here
-            if start_val == "cut_phase_to_transit" or end_val == "cut_phase_to_transit":
-                continue
-
-            timemask |= (time >= float(start_val)) & (time <= float(end_val))
-
-        time = time[~timemask]
-        flux_unbinned = flux_unbinned[~timemask, :]
-        flux_err_unbinned = flux_err_unbinned[~timemask, :]
+    keep = time_keep_mask(time, exclude_times)
+    if not np.all(keep):
+        print(f"Excluding {int((~keep).sum())} of {time.size} integrations by time.")
+        time = time[keep]
+        flux_unbinned = flux_unbinned[keep, :]
+        flux_err_unbinned = flux_err_unbinned[keep, :]
 
     # A Normal likelihood requires a finite, strictly positive scale. Apply one
     # union mask across all retained science wavelengths before constructing the

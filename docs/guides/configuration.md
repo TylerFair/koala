@@ -66,8 +66,36 @@ python fit_jwst.py -c config.yaml
 | `flags.light_curve_model` | `transit`, `eclipse`, or `phase_curve`; see [Eclipses, phase curves, and stellar spots](phase_curves.md). |
 | `host_device` | `gpu` for a full run; `cpu` for checks and the bundled example. |
 
-Mask a time interval with `flags.mask_start` and `flags.mask_end`. The
-template trends take initial guesses through `spot_amp`, `spot_center`,
+### Excluding data
+
+Two optional keys drop data before any fitting. Each is a list of
+`[first, last]` pairs, and both ends of every pair are included in the
+exclusion:
+
+```yaml
+flags:
+  exclude_integrations: [[0, 19], [400, 405], [-5, null]]
+  exclude_times: [[60795.15, 60795.26], ["max(t) - 0.01", null]]
+```
+
+`exclude_integrations` counts integrations from the start of the file
+(0-based). A negative index counts from the end, so `[-5, null]` drops the
+last five, and `null` at either end leaves that side open.
+
+`exclude_times` works in the file's time system (BMJD_TDB). An end may be
+`null` for an open range or a string expression in `t`, such as
+`"min(t) + 0.007"` to drop the first ten minutes. A single pair such as
+`exclude_times: [60795.15, 60795.26]` is accepted as shorthand for a
+one-element list, and both keys may sit at the top level instead of under
+`flags`.
+
+The older `flags.mask_start`/`flags.mask_end` (a scalar or list each) and
+`outlier_clip.mask_integrations_start`/`mask_integrations_end` (a count from
+each end) still work and are merged with the new keys. The special value
+`cut_phase_to_transit` in `mask_start` or `mask_end` keeps only three hours on
+either side of each transit.
+
+The template trends take initial guesses through `spot_amp`, `spot_center`,
 `spot_width` (`spot_amp2`, `spot_center2`, `spot_width2`, or the aliases
 `spot_amp_2`, `spot_center_2`, `spot_width_2`, for a second spot) and
 `jump_guess` or `t_jump_guess`.

@@ -49,6 +49,7 @@ import yaml
 import jaxopt
 import arviz as az
 from createdatacube import SpectroData, process_spectroscopy_data
+from koala.exclusions import resolve_exclusions, has_cut_phase_directive
 from matplotlib.widgets import Slider, Button, TextBox
 from jaxoplanet.experimental import calc_poly_coeffs
 import tinygp
@@ -651,8 +652,7 @@ def run(cfg, config_path=None):
 
     outlier_clip = cfg.get('outlier_clip', {})
     planet_str = planet_cfg['name']
-    mask_integrations_start = outlier_clip.get('mask_integrations_start', None)
-    mask_integrations_end = outlier_clip.get('mask_integrations_end', None)
+    exclude_times, exclude_integrations = resolve_exclusions(cfg)
 
     base_path = cfg.get('path', '.')
     input_dir = os.path.join(base_path, cfg.get('input_dir', planet_str + '_NIRSPEC'))
@@ -670,8 +670,6 @@ def run(cfg, config_path=None):
 
     detrending_type = flags.get('detrending_type', 'linear')
     need_lowres = _resolve_need_lowres(flags, low_resolution_bins)
-    mask_start = flags.get('mask_start', False)
-    mask_end = flags.get('mask_end', False)
     spot_amp = flags.get('spot_amp', 0.0)
     spot_mu = flags.get('spot_center', 0.0)
     spot_sigma = flags.get('spot_width', 0.0)
@@ -887,11 +885,7 @@ def run(cfg, config_path=None):
                 "with flags.transit_engine='jaxoplanet'."
             )
         transit_window_optimization = 'off'
-        if any(
-            isinstance(flags.get(name), str)
-            and flags[name].strip().lower() == 'cut_phase_to_transit'
-            for name in ('mask_start', 'mask_end')
-        ):
+        if has_cut_phase_directive(exclude_times):
             raise ValueError(
                 "cut_phase_to_transit cannot be used for eclipse, phase-curve, "
                 "or rotating stellar-spot fits because it removes the signal."
@@ -1193,10 +1187,8 @@ def run(cfg, config_path=None):
             "transit_ephemeris": transit_ephemeris,
             "wavelength_filter": cfg.get("wavelength_filter", {}),
             "wavelength_masks": cfg.get("wavelength_masks"),
-            "mask_start": mask_start,
-            "mask_end": mask_end,
-            "mask_integrations_start": mask_integrations_start,
-            "mask_integrations_end": mask_integrations_end,
+            "exclude_times": [list(pair) for pair in exclude_times],
+            "exclude_integrations": [list(pair) for pair in exclude_integrations],
             "reference_grids": reference_grid_identities,
         },
     )
@@ -1210,8 +1202,9 @@ def run(cfg, config_path=None):
     def _compute_spectro_data():
         return process_spectroscopy_data(
             instrument, input_dir, output_dir, planet_str, cfg, fits_file,
-            mask_start, mask_end, mask_integrations_start,
-            mask_integrations_end, transit_ephemeris=transit_ephemeris,
+            transit_ephemeris=transit_ephemeris,
+            exclude_times=exclude_times,
+            exclude_integrations=exclude_integrations,
         )
 
     def _save_spectro_data(data_to_save):

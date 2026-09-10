@@ -25,6 +25,8 @@ LD_PRIOR_MODES = set(LD_PRIORS)
 FLAG_TIERS = {
     'public': frozenset({
         'detrending_type',
+        'exclude_integrations',
+        'exclude_times',
         'fit_geometry',
         'jump_guess',
         'ld_prior',
