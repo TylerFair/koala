@@ -59,6 +59,8 @@ FLAG_TIERS = {
         'random_seed',
         'spectro_chunk_size',
         'spectro_cadence_reduction',
+        'spectro_joint_geometry',
+        'spectro_joint_geometry_prior_inflation',
         'spectro_transit_grid',
         'spectro_transit_grid_nodes',
         'spectro_max_divergences',

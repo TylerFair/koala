@@ -109,6 +109,9 @@ from .config import (
     _resolve_compile_cache_options, _resolve_ld_prior_cache_options,
     _resolve_harmonica_stage_nuts_kwargs,
     _resolve_jaxoplanet_spectro_nuts_kwargs,
+    _resolve_spectro_joint_geometry,
+    _resolve_spectro_joint_geometry_sampler,
+    _resolve_spectro_joint_geometry_chunk_size,
 )
 from .data import _pad_spectro_cadences_exact, jax_bin_lightcurve
 from .artifacts import (
@@ -132,6 +135,7 @@ from .geometry import (
     _posterior_num_draws, _geometry_from_white_light_medians,
     _selected_geometry_primitives, _whitelight_geometry_handoff_fingerprint,
     _write_whitelight_geometry_handoff, _load_whitelight_geometry_handoff,
+    _joint_geometry_sites, _whitelight_geometry_prior,
 )
 from .sampling import (
     _DUMPED_FIRST_HIGHRES_STAGE, SamplerInputsDumpExit, _build_numpyro_mcmc,
@@ -189,6 +193,94 @@ for _module in (artifacts, config, constants, data, geometry, harmonica_products
                 limb_darkening, outputs, sampling, surface):
     globals().update({name: value for name, value in vars(_module).items()
                       if not name.startswith("__")})
+
+
+def _prepare_joint_geometry(
+    flags, *, stage_name, transit_engine, spectro_sampler, nuts_kwargs,
+    bestfit_params_wl_df, wl_geometry_handoff, param_method,
+):
+    """Resolve ``flags.spectro_joint_geometry`` for one spectroscopic stage.
+
+    Returns ``(joint, sampler, nuts_kwargs)`` where ``joint`` is ``None`` when
+    the flag is off and otherwise a mapping with the prior (``prior``), the
+    inflation factor, the model keyword arguments (``model_kwargs``), the
+    initial values (``init_params``) and the summary used by the writers.
+    """
+    enabled, inflation = _resolve_spectro_joint_geometry(flags)
+    if not enabled:
+        return None, spectro_sampler, nuts_kwargs
+    if transit_engine != 'jaxoplanet':
+        raise ValueError(
+            "flags.spectro_joint_geometry=true is only supported with "
+            "flags.transit_engine='jaxoplanet'; the harmonica engine keeps "
+            "the fixed white-light geometry."
+        )
+    spectro_sampler, nuts_kwargs = _resolve_spectro_joint_geometry_sampler(
+        spectro_sampler, True, nuts_kwargs, stage_name=stage_name
+    )
+    prior = _whitelight_geometry_prior(
+        bestfit_params_wl_df, wl_geometry_handoff,
+        param_method=param_method, prior_inflation=inflation,
+    )
+    sites = _joint_geometry_sites(param_method)
+    joint = {
+        'prior': prior,
+        'prior_inflation': inflation,
+        'sites': sites,
+        'model_kwargs': {
+            f'sigma_{name}': jnp.asarray(prior[f'sigma_{name}'], dtype=jnp.float64)
+            for name in sites
+        },
+        'init_params': {
+            name: jnp.asarray(prior[name], dtype=jnp.float64) for name in sites
+        },
+        'summary': {
+            name: {
+                'prior_center': np.asarray(prior[name], dtype=float),
+                'prior_sigma': np.asarray(prior[f'sigma_{name}'], dtype=float),
+                'whitelight_std': (
+                    np.asarray(prior[f'sigma_{name}'], dtype=float) / inflation
+                ),
+            }
+            for name in sites
+        },
+    }
+    print(
+        f"Joint geometry ({stage_name}): sampling shared "
+        f"{', '.join(sites)} with Gaussian priors of "
+        f"{inflation:g}x the white-light posterior std; "
+        f"sampler={spectro_sampler}."
+    )
+    for name in sites:
+        print(
+            f"  {name}: centre={np.asarray(prior[name], dtype=float)}, "
+            f"prior sigma={np.asarray(prior[f'sigma_{name}'], dtype=float)}"
+        )
+    return joint, spectro_sampler, nuts_kwargs
+
+
+def _joint_geometry_window_duration(duration_base, joint, param_method):
+    """Widen the static transit window so it covers the shared-geometry prior."""
+    duration = np.atleast_1d(np.asarray(duration_base, dtype=float))
+    if joint is None:
+        return duration
+    prior = joint['prior']
+    margin = 5.0 * np.atleast_1d(np.asarray(prior['sigma_t0'], dtype=float))
+    if param_method == 'duration':
+        margin = margin + 2.5 * np.atleast_1d(
+            np.asarray(prior['sigma_duration'], dtype=float)
+        )
+    return duration + 2.0 * margin
+
+
+def _joint_geometry_posterior_medians(samples, joint):
+    """Return the posterior medians of the shared geometry sites."""
+    if joint is None:
+        return {}
+    return {
+        name: jnp.nanmedian(jnp.asarray(samples[name]), axis=0)
+        for name in joint['sites']
+    }
 
 
 def _run_low_resolution_stage_hook(
@@ -385,6 +477,18 @@ def _run_low_resolution_stage_hook(
             jax.clear_caches()
             print("Released white-light JAX executables before surface spectroscopy.")
         print(f"\n--- Running Low-Resolution Analysis (Binned to {lr_bin_str}) ---")
+        joint_geometry_lr, spectro_sampler, jaxoplanet_lr_nuts_kwargs = (
+            _prepare_joint_geometry(
+                flags,
+                stage_name='lowres',
+                transit_engine=transit_engine,
+                spectro_sampler=spectro_sampler,
+                nuts_kwargs=jaxoplanet_lr_nuts_kwargs,
+                bestfit_params_wl_df=bestfit_params_wl_df,
+                wl_geometry_handoff=wl_geometry_handoff,
+                param_method=param_method,
+            )
+        )
         time_lr = jnp.array(data.time[spec_good_mask])
         flux_lr = jnp.array(data.flux_lr[:, spec_good_mask])
         flux_err_lr = jnp.array(data.flux_err_lr[:, spec_good_mask])
@@ -503,7 +607,9 @@ def _run_low_resolution_stage_hook(
                 np.asarray(time_lr),
                 np.asarray(PERIOD_FIXED),
                 np.asarray(T0_BASE),
-                np.asarray(DURATION_BASE),
+                _joint_geometry_window_duration(
+                    DURATION_BASE, joint_geometry_lr, param_method
+                ),
             )
             print(
                 "Jaxoplanet transit window (low-res): "
@@ -526,6 +632,7 @@ def _run_low_resolution_stage_hook(
                         np.max(np.abs(np.asarray(B_BASE)))
                         < 1.0 + np.sqrt(1.0e-5) - 1.0e-5
                     ),
+                    'joint_geometry': joint_geometry_lr is not None,
                 }
                 if transit_engine == 'jaxoplanet' else {}
             ),
@@ -596,6 +703,9 @@ def _run_low_resolution_stage_hook(
             model_run_args_lr['mu_a_rs'] = A_RS_BASE
             model_run_args_lr['mu_ecc'] = HARMONICA_ECC
             model_run_args_lr['mu_omega'] = HARMONICA_OMEGA
+        if joint_geometry_lr is not None:
+            model_run_args_lr.update(joint_geometry_lr['model_kwargs'])
+            init_params_lr.update(joint_geometry_lr['init_params'])
 
         if lr_ld_mode == 'fixed':
             model_run_args_lr['ld_fixed'] = U_mu_lr
@@ -734,6 +844,8 @@ def _run_low_resolution_stage_hook(
                 print("[Sing LD] running broad independent (u_plus, u_minus) coarse calibration pass", flush=True)
                 gray_builder_kwargs = dict(lr_model_builder_kwargs)
                 gray_builder_kwargs['ld_mode'] = 'uniform'
+                # The gray calibration pass is a fixed-geometry lane fit.
+                gray_builder_kwargs.pop('joint_geometry', None)
                 gray_model = _build_spectroscopic_model(
                     create_vectorized_model, **gray_builder_kwargs
                 )
@@ -743,6 +855,10 @@ def _run_low_resolution_stage_hook(
                 gray_init.pop('limb_u_plus', None)
                 gray_init.pop('limb_u_minus', None)
                 gray_init.pop('u', None)
+                for shared_name in (
+                    joint_geometry_lr['sites'] if joint_geometry_lr else ()
+                ):
+                    gray_init.pop(shared_name, None)
                 gray_l_init, gray_delta_init = quadratic_to_sing(
                     np.asarray(sing_model_c_lr)[:, 0],
                     np.asarray(sing_model_c_lr)[:, 1],
@@ -756,6 +872,10 @@ def _run_low_resolution_stage_hook(
                 gray_args = dict(model_run_args_lr)
                 gray_args.pop('mu_u_ld', None)
                 gray_args.pop('sigma_u_ld', None)
+                for shared_kwarg in (
+                    joint_geometry_lr['model_kwargs'] if joint_geometry_lr else ()
+                ):
+                    gray_args.pop(shared_kwarg, None)
                 gray_prefix = _harmonica_checkpoint_prefix(
                     f"{instrument_full_str}_{lr_bin_str}_sing_gray_free_{gray_digest[:12]}",
                     transit_engine,
@@ -874,6 +994,9 @@ def _run_low_resolution_stage_hook(
             if transit_engine == 'harmonica'
             else jaxoplanet_lr_nuts_kwargs
         )
+        vmap_chunk_size_lr = _resolve_spectro_joint_geometry_chunk_size(
+            vmap_chunk_size_lr, num_lcs_lr, joint_geometry_lr is not None
+        )
         vmap_chunk_size_lr = _resolve_stage_vmap_width(
             flags,
             'lowres',
@@ -932,6 +1055,11 @@ def _run_low_resolution_stage_hook(
             ),
             checkpoint_signature={
                 'stage': 'low_resolution',
+                'spectro_joint_geometry': joint_geometry_lr is not None,
+                'spectro_joint_geometry_prior_inflation': (
+                    None if joint_geometry_lr is None
+                    else joint_geometry_lr['prior_inflation']
+                ),
                 'transit_engine': transit_engine,
                 'ld_profile': ld_profile,
                 'ld_mode': lr_ld_mode,
@@ -1066,6 +1194,9 @@ def _run_low_resolution_stage_hook(
                 "ecc": HARMONICA_ECC,
                 "omega": HARMONICA_OMEGA,
             })
+        map_params_lr.update(
+            _joint_geometry_posterior_medians(samples_lr, joint_geometry_lr)
+        )
 
         map_params_lr.update({k: jnp.nanmedian(samples_lr[k], axis=0) for k in TREND_PARAMS if k in samples_lr})
         map_params_lr.update({
@@ -1196,7 +1327,7 @@ def _run_low_resolution_stage_hook(
             wl_lr, data.wavelengths_err_lr, samples_lr,
             f"{output_dir}/{lr_artifact_stem}.csv",
         )
-        save_detailed_fit_results(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, data.wavelengths_err_lr, samples_lr, map_params_lr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{lr_artifact_stem}", median_total_error_lr, gp_trend=gp_trend_lr, spot_trend=spot_trend_lr, jump_trend=jump_trend_lr)
+        save_detailed_fit_results(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, data.wavelengths_err_lr, samples_lr, map_params_lr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{lr_artifact_stem}", median_total_error_lr, gp_trend=gp_trend_lr, spot_trend=spot_trend_lr, jump_trend=jump_trend_lr, joint_geometry=(None if joint_geometry_lr is None else joint_geometry_lr['summary']))
         if transit_engine == 'harmonica' and _has_harmonica_odd_samples(samples_lr):
             save_harmonica_limb_products(
                 wavelengths=wl_lr,
@@ -1294,6 +1425,18 @@ def _run_high_resolution_stage_hook(
         jax.clear_caches()
         print("Released low-resolution JAX executables before high-resolution surface inference.")
     print(f"\n--- Running High-Resolution Analysis (Binned to {hr_bin_str}) ---")
+    joint_geometry_hr, spectro_sampler, jaxoplanet_hr_nuts_kwargs = (
+        _prepare_joint_geometry(
+            flags,
+            stage_name='highres',
+            transit_engine=transit_engine,
+            spectro_sampler=spectro_sampler,
+            nuts_kwargs=jaxoplanet_hr_nuts_kwargs,
+            bestfit_params_wl_df=bestfit_params_wl_df,
+            wl_geometry_handoff=wl_geometry_handoff,
+            param_method=param_method,
+        )
+    )
     time_hr = jnp.array(data.time[spec_good_mask])
     flux_hr = jnp.array(data.flux_hr[:, spec_good_mask])
     flux_err_hr = jnp.array(data.flux_err_hr[:, spec_good_mask])
@@ -1396,6 +1539,9 @@ def _run_high_resolution_stage_hook(
             ld_profile, 'high-res',
         ),
     }
+    if joint_geometry_hr is not None:
+        model_run_args_hr.update(joint_geometry_hr['model_kwargs'])
+        init_params_hr.update(joint_geometry_hr['init_params'])
     _seed_surface_spectroscopic_init(
         init_params_hr, surface_config, num_lcs_hr
     )
@@ -1487,7 +1633,9 @@ def _run_high_resolution_stage_hook(
             np.asarray(time_hr),
             np.asarray(PERIOD_FIXED),
             np.asarray(T0_BASE),
-            np.asarray(DURATION_BASE),
+            _joint_geometry_window_duration(
+                DURATION_BASE, joint_geometry_hr, param_method
+            ),
         )
         print(
             "Jaxoplanet transit window (high-res): "
@@ -1510,6 +1658,7 @@ def _run_high_resolution_stage_hook(
                     np.max(np.abs(np.asarray(B_BASE)))
                     < 1.0 + np.sqrt(1.0e-5) - 1.0e-5
                 ),
+                'joint_geometry': joint_geometry_hr is not None,
             }
             if transit_engine == 'jaxoplanet' else {}
         ),
@@ -1648,6 +1797,9 @@ def _run_high_resolution_stage_hook(
         if transit_engine == 'harmonica'
         else jaxoplanet_hr_nuts_kwargs
     )
+    vmap_chunk_size_hr = _resolve_spectro_joint_geometry_chunk_size(
+        vmap_chunk_size_hr, num_lcs_hr, joint_geometry_hr is not None
+    )
     vmap_chunk_size_hr = _resolve_stage_vmap_width(
         flags,
         'highres',
@@ -1718,6 +1870,11 @@ def _run_high_resolution_stage_hook(
         ),
         checkpoint_signature={
             'stage': 'high_resolution',
+            'spectro_joint_geometry': joint_geometry_hr is not None,
+            'spectro_joint_geometry_prior_inflation': (
+                None if joint_geometry_hr is None
+                else joint_geometry_hr['prior_inflation']
+            ),
             'transit_engine': transit_engine,
             'ld_profile': ld_profile,
             'ld_mode': hr_ld_mode,
@@ -1835,6 +1992,9 @@ def _run_high_resolution_stage_hook(
             "ecc": HARMONICA_ECC,
             "omega": HARMONICA_OMEGA,
         })
+    map_params_hr.update(
+        _joint_geometry_posterior_medians(samples_hr, joint_geometry_hr)
+    )
     map_params_hr.update({k: jnp.nanmedian(samples_hr[k], axis=0) for k in TREND_PARAMS if k in samples_hr})
     map_params_hr.update({
         k: jnp.nanmedian(samples_hr[k], axis=0)
@@ -1930,7 +2090,7 @@ def _run_high_resolution_stage_hook(
         wl_hr, data.wavelengths_err_hr, samples_hr,
         f"{output_dir}/{hr_artifact_stem}.csv",
     )
-    save_detailed_fit_results(time_hr, flux_hr, flux_err_hr, data.wavelengths_hr, data.wavelengths_err_hr, samples_hr, map_params_hr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{hr_artifact_stem}", median_total_error_hr, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
+    save_detailed_fit_results(time_hr, flux_hr, flux_err_hr, data.wavelengths_hr, data.wavelengths_err_hr, samples_hr, map_params_hr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{hr_artifact_stem}", median_total_error_hr, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend, joint_geometry=(None if joint_geometry_hr is None else joint_geometry_hr['summary']))
 
     if transit_engine == 'harmonica' and _has_harmonica_odd_samples(samples_hr):
         save_harmonica_limb_products(

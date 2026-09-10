@@ -8,6 +8,7 @@ import numpy as np
 import yaml
 import jax
 import jax.numpy as jnp
+import numpy as np
 from models.channel_batching import SpectroMemoryModel, resolve_spectro_auto_width
 from models.cadence_reduction import linear_spectro_trend_coefficient_names
 from models.limb_darkening_config import resolve_ld_prior
@@ -651,3 +652,84 @@ def _resolve_jaxoplanet_spectro_nuts_kwargs(
         depth = 6 if is_prism else 5
         result.update(max_tree_depth=depth, laplace_max_tree_depth=depth)
     return result
+
+
+def _resolve_spectro_joint_geometry(flags):
+    """Return ``(enabled, prior_inflation)`` for ``flags.spectro_joint_geometry``.
+
+    When enabled, the spectroscopic stages sample the transit geometry
+    (``t0``, ``b``, and ``duration`` or ``a_rs``) as sites shared by every
+    channel instead of fixing them to the white-light medians.  The prior on
+    each shared site is a Gaussian centred on the white-light posterior median
+    whose width is the white-light posterior standard deviation multiplied by
+    ``flags.spectro_joint_geometry_prior_inflation`` (default 3).
+    """
+    enabled = flags.get('spectro_joint_geometry', False)
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() in {'1', 'true', 'yes', 'on'}
+    enabled = bool(enabled)
+    inflation = flags.get('spectro_joint_geometry_prior_inflation', 3.0)
+    try:
+        inflation = float(inflation)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "flags.spectro_joint_geometry_prior_inflation must be a number."
+        ) from error
+    if not np.isfinite(inflation) or inflation <= 0.0:
+        raise ValueError(
+            "flags.spectro_joint_geometry_prior_inflation must be finite and > 0."
+        )
+    return enabled, inflation
+
+
+def _resolve_spectro_joint_geometry_sampler(
+    spectro_sampler, joint_geometry, nuts_kwargs, *, stage_name='spectroscopic'
+):
+    """Force the joint sampler when the geometry is shared across channels.
+
+    Shared sites cannot be sampled by the per-channel independent lanes, so a
+    configured ``independent_nuts``/``independent_hmc`` backend is overridden
+    to ``joint_nuts`` with a warning and the Laplace-metric lane options are
+    replaced by the joint-NUTS defaults.
+    """
+    if not joint_geometry:
+        return spectro_sampler, nuts_kwargs
+    sampler = str(spectro_sampler).lower()
+    if sampler == 'joint_nuts':
+        return sampler, nuts_kwargs
+    warnings.warn(
+        f"flags.spectro_joint_geometry=true requires the joint sampler; "
+        f"overriding flags.spectro_sampler={sampler!r} with 'joint_nuts' for "
+        f"the {stage_name} stage.",
+        UserWarning,
+        stacklevel=2,
+    )
+    from models.jaxoplanet.builder import NUTS_KWARGS as _JAXOPLANET_NUTS_KWARGS
+    return 'joint_nuts', _resolve_jaxoplanet_spectro_nuts_kwargs(
+        stage_name, _JAXOPLANET_NUTS_KWARGS, independent=False
+    )
+
+
+def _resolve_spectro_joint_geometry_chunk_size(
+    chunk_size, num_channels, joint_geometry
+):
+    """Return the resident width that keeps every channel in one joint fit."""
+    if not joint_geometry:
+        return chunk_size
+    num_channels = int(num_channels)
+    if num_channels < 1:
+        raise ValueError("Joint geometry requires at least one channel.")
+    if chunk_size is None or (
+        isinstance(chunk_size, str) and chunk_size.lower() == 'auto'
+    ):
+        return num_channels
+    width = int(chunk_size)
+    if width < num_channels:
+        raise ValueError(
+            "flags.spectro_joint_geometry=true fits every channel of a stage "
+            "in one chunk so the geometry is shared across the whole spectrum, "
+            f"but flags.spectro_chunk_size/vmap_chunk={width} would split the "
+            f"{num_channels} channels. Raise it to at least {num_channels} "
+            "or remove it."
+        )
+    return num_channels
