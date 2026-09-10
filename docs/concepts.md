@@ -34,6 +34,12 @@ A Gaussian process can be added to a polynomial or `explinear` trend by
 appending `+gp` (for example `linear+gp`), or used alone as `gp`. It absorbs
 correlated residual structure that the mean trend does not describe.
 
+A thermal phase curve is not a trend. It is a separate light-curve model,
+`flags.light_curve_model: phase_curve`, that adds the planet's day-night
+brightness and hotspot offset to the transit and eclipse; the trend above
+still describes the instrument on top of it. See
+[Eclipses, phase curves, and stellar spots](guides/phase_curves.md).
+
 Channels are independent once the geometry is fixed, so Koala fits them in
 parallel batches on the GPU and checkpoints each completed batch; re-running
 the same configuration resumes from the checkpoints. `resolution.high` sets
