@@ -604,8 +604,81 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
     }
 
 
-def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start=None, mask_end=None, mask_integrations_start=None, mask_integrations_end=None):
-    """Main function to process spectroscopy data."""
+def transit_epoch_mask(time, t0, half_window, period=None):
+    """Boolean mask of ``time`` within ``half_window`` of any transit epoch.
+
+    With a finite positive ``period`` every epoch ``t0 + n * period`` that
+    falls inside the time series is masked, so a single time series that
+    spans several transits (a multi-visit stack) is handled; without one only
+    the ``t0`` epoch is used.
+    """
+    time = np.asarray(time, dtype=float)
+    t0 = float(t0)
+    half_window = float(half_window)
+    if time.size == 0:
+        return np.zeros(0, dtype=bool)
+    if period is None or not np.isfinite(period) or float(period) <= 0.0:
+        centers = np.array([t0])
+    else:
+        period = float(period)
+        n_low = int(np.floor((np.min(time) - half_window - t0) / period))
+        n_high = int(np.ceil((np.max(time) + half_window - t0) / period))
+        centers = t0 + period * np.arange(n_low, n_high + 1)
+        centers = centers[
+            (centers >= np.min(time) - half_window)
+            & (centers <= np.max(time) + half_window)
+        ]
+        if centers.size == 0:
+            centers = np.array([t0])
+    mask = np.zeros(time.shape, dtype=bool)
+    for center in centers:
+        mask |= (time >= center - half_window) & (time <= center + half_window)
+    return mask
+
+
+def _resolve_transit_ephemeris(planet_cfg, transit_ephemeris=None):
+    """Per-planet ``(t0, duration, period)`` centre values for the data masks."""
+    if transit_ephemeris is None:
+        from koala.config import parse_planet_parameter_specs, planet_parameter_centers
+        specs = parse_planet_parameter_specs(planet_cfg)
+        if 't0' not in specs or 'duration' not in specs:
+            raise KeyError(
+                "planet.t0 and planet.duration are required to build the "
+                "out-of-transit mask."
+            )
+        t0s = planet_parameter_centers(specs, 't0')
+        durations = planet_parameter_centers(specs, 'duration')
+        periods = (
+            planet_parameter_centers(specs, 'period')
+            if 'period' in specs else np.full(t0s.shape, np.nan)
+        )
+    else:
+        t0s = np.atleast_1d(np.asarray(transit_ephemeris['t0'], dtype=float))
+        durations = np.atleast_1d(np.asarray(transit_ephemeris['duration'], dtype=float))
+        periods = transit_ephemeris.get('period')
+        periods = (
+            np.full(t0s.shape, np.nan) if periods is None
+            else np.atleast_1d(np.asarray(periods, dtype=float))
+        )
+    if not (t0s.shape == durations.shape == periods.shape):
+        raise ValueError(
+            "Transit ephemeris arrays must share one length per planet; "
+            f"received t0 {t0s.shape}, duration {durations.shape}, "
+            f"period {periods.shape}."
+        )
+    return t0s, durations, periods
+
+
+def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start=None, mask_end=None, mask_integrations_start=None, mask_integrations_end=None, transit_ephemeris=None):
+    """Main function to process spectroscopy data.
+
+    ``transit_ephemeris`` optionally supplies ``{'t0', 'duration', 'period'}``
+    centre values per planet; otherwise they are read from ``cfg['planet']``.
+    Every transit epoch inside the time series is masked as in-transit.
+    """
+    prior_t0s, prior_durations, prior_periods = _resolve_transit_ephemeris(
+        cfg['planet'], transit_ephemeris
+    )
     # Unpack data based on instrument
     wl_filt_cfg = cfg.get('wavelength_filter', {})
     wl_min = wl_filt_cfg.get('wl_min')
@@ -737,13 +810,12 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     )
 
     if has_cut:
-        # Use prior t0(s) from config
-        prior_t0s = np.atleast_1d(cfg['planet']['t0']).astype(float)
+        # Keep t0 +/- 3 hours around every transit epoch in the series.
         window = 3.0 / 24.0  # 3 hours in days
 
         keep = np.zeros_like(time, dtype=bool)
-        for t0 in prior_t0s:
-            keep |= (time >= (t0 - window)) & (time <= (t0 + window))
+        for t0, period in zip(prior_t0s, prior_periods):
+            keep |= transit_epoch_mask(time, t0, window, period)
 
         time = time[keep]
         flux_unbinned = flux_unbinned[keep, :]
@@ -795,15 +867,16 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         time, flux_unbinned, flux_err_unbinned
     )
 
-    planet_cfg = cfg['planet']
-    prior_t0s = np.atleast_1d(planet_cfg['t0'])
-    prior_durations = np.atleast_1d(planet_cfg['duration'])
-
     in_transit_mask = np.zeros_like(time, dtype=bool)
-    for t0, duration in zip(prior_t0s, prior_durations):
-        in_transit_mask |= (time >= t0 - 0.6 * duration) & (time <= t0 + 0.6 * duration)
+    for t0, duration, period in zip(prior_t0s, prior_durations, prior_periods):
+        in_transit_mask |= transit_epoch_mask(time, t0, 0.6 * duration, period)
 
     oot_mask = ~in_transit_mask
+    if not np.any(oot_mask):
+        raise ValueError(
+            "Every integration falls inside a transit window; the "
+            "out-of-transit normalization mask is empty."
+        )
 
     binned_data = bin_spectroscopy_data(
         wavelengths, wavelengths_err, flux_unbinned, flux_err_unbinned, cfg, oot_mask

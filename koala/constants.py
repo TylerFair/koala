@@ -88,6 +88,27 @@ INTERNAL_FLAGS = FLAG_TIERS['internal']
 KNOWN_FLAGS = frozenset().union(*FLAG_TIERS.values())
 
 
+# Orbital parameters of the ``planet`` block that accept the unified
+# ``[fixed, value]`` / ``[free, prior, ...]`` specification.
+PLANET_PARAMETER_KEYS = (
+    'period', 't0', 'duration', 'a_rs', 'b', 'rprs', 'ecc', 'omega',
+)
+
+
+# Bare numbers keep the historical behaviour: these are fixed, the rest free.
+PLANET_PARAMETERS_FIXED_BY_DEFAULT = frozenset({'period', 'ecc', 'omega'})
+
+
+# Parameters that may only be ``fixed`` for now.
+PLANET_PARAMETERS_FIXED_ONLY = frozenset({'ecc', 'omega'})
+
+
+PARAMETER_SPEC_MODES = ('fixed', 'free')
+
+
+PARAMETER_SPEC_PRIORS = ('uniform', 'gaussian', 'truncated_gaussian')
+
+
 _JUMP_WIDTH_DAYS = 1e-4
 
 
@@ -141,7 +162,7 @@ WHITELIGHT_GEOMETRY_HANDOFF_SCHEMA_VERSION = 1
 WHITELIGHT_GEOMETRY_HANDOFF_TARGET_REVISION = "retained-draw-data-loglik-v2"
 
 
-SPECTRO_DATA_TARGET_REVISION = "createdatacube-positive-yerr-2026-08-13-v2"
+SPECTRO_DATA_TARGET_REVISION = "createdatacube-multi-epoch-mask-2026-09-09-v3"
 
 
 POWER2_LD_CACHE_TARGET_REVISION = "stellar-grid-direct-power2-v2"

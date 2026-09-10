@@ -131,6 +131,8 @@ from .config import (
     _resolve_compile_cache_options, _resolve_ld_prior_cache_options,
     _resolve_harmonica_stage_nuts_kwargs,
     _resolve_jaxoplanet_spectro_nuts_kwargs,
+    ParameterSpec, parse_planet_parameter_specs, planet_parameter_centers,
+    describe_planet_parameter_specs,
 )
 from .data import _pad_spectro_cadences_exact, jax_bin_lightcurve
 from .artifacts import (
@@ -506,10 +508,15 @@ def run(cfg, config_path=None):
     
     planet_cfg = cfg['planet']
     stellar_cfg = cfg['stellar']
+    if 'period' not in planet_cfg:
+        raise KeyError("'planet.period' is required.")
+    planet_parameter_specs = parse_planet_parameter_specs(planet_cfg)
+    for line in describe_planet_parameter_specs(planet_parameter_specs):
+        print(line)
     from models.jaxoplanet.config import parse_surface_config
     surface_config = parse_surface_config(
         flags, planet_cfg, stellar_cfg,
-        len(np.atleast_1d(planet_cfg['period'])),
+        len(planet_parameter_specs['period']),
     )
     is_prism = instrument == 'NIRSPEC/PRISM'
     is_explinear = 'explinear' in str(flags.get('detrending_type', 'linear'))
@@ -829,6 +836,7 @@ def run(cfg, config_path=None):
             'trend_parameterization': whitelight_trend_parameterization,
             'two_spot_ordering': whitelight_two_spot_ordering,
             'surface_config': surface_config,
+            'parameter_priors': planet_parameter_specs,
         }
         _engine_spectro_kw = {
             'jitter_prior': jitter_prior,
@@ -906,24 +914,50 @@ def run(cfg, config_path=None):
     whitelight_sigma = outlier_clip.get('whitelight_sigma', 4)
     spectroscopic_sigma = outlier_clip.get('spectroscopic_sigma', 4)
 
-    periods = jnp.atleast_1d(planet_cfg['period'])
+    # Representative (fixed value / prior centre) orbital inputs.  The
+    # white-light model samples whichever of these the specification frees.
+    def _planet_centers(key, default=None):
+        return jnp.asarray(
+            planet_parameter_centers(planet_parameter_specs, key, default),
+            dtype=jnp.float64,
+        )
+
+    periods = _planet_centers('period')
     n_planets = len(periods)
+    period_is_free = any(spec.free for spec in planet_parameter_specs['period'])
+    explicit_planet_specs = sorted(
+        name for name, specs in planet_parameter_specs.items()
+        if any(spec.explicit for spec in specs)
+    )
     if transit_engine == 'harmonica' and n_planets != 1:
         raise NotImplementedError(
             "Harmonica production fitting and limb-product export currently "
             "support exactly one planet; refusing to silently export only "
             "planet_index=0."
         )
-    if 'duration' in planet_cfg:
-        durations = jnp.atleast_1d(planet_cfg['duration'])
-    elif 'a_rs' in planet_cfg:
-        _a_rs_tmp = jnp.atleast_1d(jnp.asarray(planet_cfg['a_rs'], dtype=jnp.float64))
-        _b_tmp = jnp.atleast_1d(jnp.asarray(planet_cfg['b'], dtype=jnp.float64))
-        _rors_tmp = jnp.atleast_1d(jnp.asarray(planet_cfg['rprs'], dtype=jnp.float64))
-        _ecc_tmp = jnp.atleast_1d(jnp.asarray(planet_cfg.get('ecc', 0.0), dtype=jnp.float64))
-        _omega_tmp = jnp.atleast_1d(jnp.asarray(planet_cfg.get('omega', 0.0), dtype=jnp.float64))
+    if transit_engine == 'harmonica' and period_is_free:
+        raise NotImplementedError(
+            "A free planet.period is supported only with "
+            "flags.transit_engine='jaxoplanet'; fix the period for Harmonica."
+        )
+    if transit_engine == 'harmonica' and explicit_planet_specs:
+        raise NotImplementedError(
+            "Explicit planet parameter specifications "
+            f"({', '.join('planet.' + name for name in explicit_planet_specs)}) "
+            "are supported only with flags.transit_engine='jaxoplanet'; "
+            "use bare numbers for Harmonica."
+        )
+    for key in ('t0', 'b', 'rprs'):
+        if key not in planet_parameter_specs:
+            raise KeyError(f"'planet.{key}' is required.")
+    _ecc_tmp = _planet_centers('ecc', 0.0)
+    _omega_tmp = _planet_centers('omega', 0.0)
+    if 'duration' in planet_parameter_specs:
+        durations = _planet_centers('duration')
+    elif 'a_rs' in planet_parameter_specs:
         durations = harmonica_duration_from_geometry(
-            periods, _a_rs_tmp, _b_tmp, _rors_tmp, ecc=_ecc_tmp, omega=_omega_tmp,
+            periods, _planet_centers('a_rs'), _planet_centers('b'),
+            _planet_centers('rprs'), ecc=_ecc_tmp, omega=_omega_tmp,
         )
         print(f"Computed duration prior from a_rs geometry: {durations}")
         # The data preparation stage uses duration only to identify an
@@ -933,9 +967,9 @@ def run(cfg, config_path=None):
         raise KeyError(
             "'planet.duration' is required unless 'planet.a_rs' is provided."
         )
-    t0s = jnp.atleast_1d(planet_cfg['t0'])
-    bs = jnp.atleast_1d(planet_cfg['b'])
-    rors = jnp.atleast_1d(planet_cfg['rprs'])
+    t0s = _planet_centers('t0')
+    bs = _planet_centers('b')
+    rors = _planet_centers('rprs')
     depths = rors**2
 
     PERIOD_FIXED = periods
@@ -944,6 +978,13 @@ def run(cfg, config_path=None):
     PRIOR_B = bs
     PRIOR_RPRS = rors
     PRIOR_DEPTH = depths
+    # Centre values used by the data stage for the in-/out-of-transit masks
+    # (every epoch t0 + n * period inside the series is masked).
+    transit_ephemeris = {
+        'period': np.asarray(PERIOD_FIXED, dtype=float).tolist(),
+        't0': np.asarray(PRIOR_T0, dtype=float).tolist(),
+        'duration': np.asarray(PRIOR_DUR, dtype=float).tolist(),
+    }
 
     def _planet_cfg_array(key, default):
         arr = np.atleast_1d(np.asarray(planet_cfg.get(key, default), dtype=float))
@@ -958,10 +999,10 @@ def run(cfg, config_path=None):
     T0_PRIOR_WIDTH = _planet_cfg_array('t0_prior_width_days', PRIOR_DUR)
 
     # Shared orbital geometry inputs used by harmonica and jaxoplanet a_rs parameterizations.
-    HARMONICA_ECC = _planet_cfg_array('ecc', 0.0)
-    HARMONICA_OMEGA = _planet_cfg_array('omega', 0.0)
-    if 'a_rs' in planet_cfg:
-        HARMONICA_A_RS = _planet_cfg_array('a_rs', None)
+    HARMONICA_ECC = _ecc_tmp
+    HARMONICA_OMEGA = _omega_tmp
+    if 'a_rs' in planet_parameter_specs:
+        HARMONICA_A_RS = _planet_centers('a_rs')
     else:
         HARMONICA_A_RS = harmonica_a_rs_from_duration(
             periods, PRIOR_DUR, PRIOR_B, PRIOR_RPRS,
@@ -1068,6 +1109,7 @@ def run(cfg, config_path=None):
             "pixels": pixels,
             "planet_t0": planet_cfg.get("t0"),
             "planet_duration": planet_cfg.get("duration"),
+            "transit_ephemeris": transit_ephemeris,
             "wavelength_filter": cfg.get("wavelength_filter", {}),
             "wavelength_masks": cfg.get("wavelength_masks"),
             "mask_start": mask_start,
@@ -1088,7 +1130,7 @@ def run(cfg, config_path=None):
         return process_spectroscopy_data(
             instrument, input_dir, output_dir, planet_str, cfg, fits_file,
             mask_start, mask_end, mask_integrations_start,
-            mask_integrations_end,
+            mask_integrations_end, transit_ephemeris=transit_ephemeris,
         )
 
     def _save_spectro_data(data_to_save):
@@ -1156,6 +1198,7 @@ def run(cfg, config_path=None):
         order=locals().get('order'),
         output_dir=locals().get('output_dir'),
         param_method=locals().get('param_method'),
+        planet_parameter_specs=locals().get('planet_parameter_specs'),
         planet_str=locals().get('planet_str'),
         prepare_laplace_metric=locals().get('prepare_laplace_metric'),
         quadratic_uniform_physical_bounds=locals().get('quadratic_uniform_physical_bounds'),
@@ -1188,6 +1231,14 @@ def run(cfg, config_path=None):
             "handoff artifact."
         )
     fixed_geometry = wl_geometry_handoff["geometry"]
+    # A free white-light period is fixed at its posterior median from here on,
+    # exactly like t0, b, and duration.
+    PERIOD_FIXED = jnp.asarray(fixed_geometry["period"], dtype=jnp.float64)
+    if period_is_free:
+        print(
+            "Spectroscopic stages use the white-light posterior median period "
+            f"{np.asarray(PERIOD_FIXED, dtype=float).tolist()}."
+        )
     DURATION_BASE = np.asarray(fixed_geometry["duration"], dtype=float)
     T0_BASE = np.asarray(fixed_geometry["t0"], dtype=float)
     B_BASE = np.asarray(fixed_geometry["b"], dtype=float)

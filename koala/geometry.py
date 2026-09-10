@@ -125,6 +125,7 @@ from .artifacts import _update_checkpoint_hash
 def _geometry_chain_quality(grouped_samples):
     """Return exact-MCMC quality metrics for white-light science sites."""
     aliases = {
+        "period": ("period_0", "period"),
         "t0": ("t0_0", "t0"),
         "b": ("b_0", "b"),
         "duration": ("logD_0", "duration_0", "duration", "logD"),
@@ -147,6 +148,10 @@ def _geometry_chain_quality(grouped_samples):
         values = jnp.asarray(grouped_samples[name], dtype=jnp.float64)
         if values.ndim < 2:
             values = values.reshape((1, values.shape[0]))
+        if float(jnp.nanstd(values)) == 0.0:
+            # A parameter fixed by its specification is a deterministic
+            # site; it has no chain quality to gate on.
+            continue
         site_ess = numpyro.diagnostics.effective_sample_size(values)
         ess_values = np.asarray(jax.device_get(site_ess), dtype=float)
         ess[label] = (
@@ -298,7 +303,7 @@ def _selected_geometry_primitives(samples, num_planets):
         names.extend(
             f"{base}_{planet_index}"
             for base in (
-                "t0", "rors", "_b", "logD", "log_a_rs", "duration",
+                "period", "t0", "rors", "_b", "logD", "log_a_rs", "duration",
                 "b", "a_rs", "cos_i", "inc",
             )
         )

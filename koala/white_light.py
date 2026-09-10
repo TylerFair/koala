@@ -252,6 +252,69 @@ def _white_light_fingerprint_config(cfg):
     return {key: value for key, value in cfg.items() if key != "gp_solver"}
 
 
+def _whitelight_geometry_sites(
+    specs, n_planets, param_method, *, period, t0, b, rors, duration, a_rs,
+    engine_supports_specs=True,
+):
+    """Map each latent white-light geometry site to its starting value.
+
+    Bare-number specifications keep the historical latent coordinates
+    (``t0_i``, ``rors_i``, ``_b_i`` and ``logD_i`` or ``log_a_rs_i``).  An
+    explicit free specification samples the physical site directly
+    (``b_i``, ``duration_i``, ``a_rs_i``); a fixed one has no latent site;
+    a free ``period`` adds ``period_i``.
+    """
+    sites = {}
+
+    def _spec(name, index):
+        if not specs or name not in specs:
+            return None
+        return specs[name][index]
+
+    def _explicit(spec):
+        return engine_supports_specs and spec is not None and spec.explicit
+
+    for i in range(n_planets):
+        period_spec = _spec('period', i)
+        if engine_supports_specs and period_spec is not None and period_spec.free:
+            sites[f'period_{i}'] = period[i]
+        if param_method == 'a_rs':
+            a_rs_spec = _spec('a_rs', i)
+            if _explicit(a_rs_spec):
+                if a_rs_spec.free:
+                    sites[f'a_rs_{i}'] = a_rs[i]
+            else:
+                sites[f'log_a_rs_{i}'] = jnp.log(a_rs[i])
+        else:
+            duration_spec = _spec('duration', i)
+            if _explicit(duration_spec):
+                if duration_spec.free:
+                    sites[f'duration_{i}'] = duration[i]
+            else:
+                sites[f'logD_{i}'] = jnp.log(duration[i])
+        b_spec = _spec('b', i)
+        if _explicit(b_spec):
+            if b_spec.free:
+                sites[f'b_{i}'] = b[i]
+        else:
+            sites[f'_b_{i}'] = b[i]
+        t0_spec = _spec('t0', i)
+        if not (_explicit(t0_spec) and t0_spec.fixed):
+            sites[f't0_{i}'] = t0[i]
+        rors_spec = _spec('rprs', i)
+        if not (_explicit(rors_spec) and rors_spec.fixed):
+            sites[f'rors_{i}'] = rors[i]
+    return sites
+
+
+def _planet_site_array(mapping, stem, n_planets):
+    """Stack ``{stem}_{i}`` for every planet, or return None if any is missing."""
+    names = [f"{stem}_{i}" for i in range(n_planets)]
+    if not all(name in mapping for name in names):
+        return None
+    return jnp.array([mapping[name] for name in names])
+
+
 def _save_whitelight_gp_database(path, wl_flux, products):
     """Write the legacy GP handoff schema consumed by spectroscopy."""
     frame = pd.DataFrame({
@@ -331,6 +394,7 @@ def run_white_light_stage(
     whitelight_sigma,
     whitelight_trend_parameterization,
     whitelight_two_spot_ordering,
+    planet_parameter_specs=None,
 ):
     is_gp_detrending = 'gp' in detrending_type
     gp_solver = None
@@ -338,6 +402,15 @@ def run_white_light_stage(
         validate_gp_times(data.wl_time)
         gp_solver = resolve_gp_solver(cfg.get('gp_solver'))
         print(f"White-light GP solver: {gp_solver}")
+    # Latent white-light geometry sites and their starting values, resolved
+    # from the parameter specifications (bare numbers keep the historical
+    # logD / _b / log_a_rs coordinates).
+    geometry_sites = _whitelight_geometry_sites(
+        planet_parameter_specs, n_planets, param_method,
+        period=PERIOD_FIXED, t0=PRIOR_T0, b=PRIOR_B, rors=PRIOR_RPRS,
+        duration=PRIOR_DUR, a_rs=HARMONICA_A_RS,
+        engine_supports_specs=(transit_engine == 'jaxoplanet'),
+    )
     _engine_wl_kw = dict(_engine_wl_kw)
     _engine_wl_kw.update(
         gp_solver=gp_solver,
@@ -498,15 +571,7 @@ def run_white_light_stage(
                         PRIOR_RPRS,
                     )
 
-            for i in range(n_planets):
-                if param_method == 'a_rs':
-                    init_params_wl[f'log_a_rs_{i}'] = jnp.log(HARMONICA_A_RS[i])
-                    init_params_wl[f'_b_{i}'] = PRIOR_B[i]
-                else:
-                    init_params_wl[f'logD_{i}'] = jnp.log(PRIOR_DUR[i])
-                    init_params_wl[f'_b_{i}'] = PRIOR_B[i]
-                init_params_wl[f't0_{i}'] = PRIOR_T0[i]
-                init_params_wl[f'rors_{i}'] = PRIOR_RPRS[i]
+            init_params_wl.update(geometry_sites)
 
             for surface_name in (
                 'eclipse_depth', 'dayside_flux', 'nightside_flux',
@@ -633,9 +698,13 @@ def run_white_light_stage(
                 params_eval["b"] = _ensure_len("b", PRIOR_B)
                 params_eval["rors"] = _ensure_len("rors", PRIOR_RPRS)
 
+                if all(f"period_{i}" in init_params for i in range(n_planets_eval)):
+                    params_eval["period"] = jnp.array([init_params[f"period_{i}"] for i in range(n_planets_eval)])
                 if all(f"t0_{i}" in init_params for i in range(n_planets_eval)):
                     params_eval["t0"] = jnp.array([init_params[f"t0_{i}"] for i in range(n_planets_eval)])
-                if all(f"_b_{i}" in init_params for i in range(n_planets_eval)):
+                if all(f"b_{i}" in init_params for i in range(n_planets_eval)):
+                    params_eval["b"] = jnp.array([init_params[f"b_{i}"] for i in range(n_planets_eval)])
+                elif all(f"_b_{i}" in init_params for i in range(n_planets_eval)):
                     params_eval["b"] = jnp.array([jnp.abs(init_params[f"_b_{i}"]) for i in range(n_planets_eval)])
                 if all(f"rors_{i}" in init_params for i in range(n_planets_eval)):
                     params_eval["rors"] = jnp.array([init_params[f"rors_{i}"] for i in range(n_planets_eval)])
@@ -696,8 +765,24 @@ def run_white_light_stage(
                         params_eval["u2_ld"] = U_mu_wl[1]
                 else:
                     params_eval["duration"] = _ensure_len("duration", PRIOR_DUR)
-                    if all(f"logD_{i}" in init_params for i in range(n_planets_eval)):
+                    if all(f"duration_{i}" in init_params for i in range(n_planets_eval)):
+                        params_eval["duration"] = jnp.array([init_params[f"duration_{i}"] for i in range(n_planets_eval)])
+                    elif all(f"logD_{i}" in init_params for i in range(n_planets_eval)):
                         params_eval["duration"] = jnp.array([jnp.exp(init_params[f"logD_{i}"]) for i in range(n_planets_eval)])
+                    if param_method == 'a_rs':
+                        if all(f"a_rs_{i}" in init_params for i in range(n_planets_eval)):
+                            params_eval["a_rs"] = jnp.array([init_params[f"a_rs_{i}"] for i in range(n_planets_eval)])
+                        elif all(f"log_a_rs_{i}" in init_params for i in range(n_planets_eval)):
+                            params_eval["a_rs"] = jnp.array([jnp.exp(init_params[f"log_a_rs_{i}"]) for i in range(n_planets_eval)])
+                        if "a_rs" in params_eval:
+                            params_eval["duration"] = harmonica_duration_from_geometry(
+                                params_eval["period"],
+                                params_eval["a_rs"],
+                                params_eval["b"],
+                                params_eval["rors"],
+                                ecc=hyper_params_wl['ecc'],
+                                omega=hyper_params_wl['omega'],
+                            )
 
                 return _attach_surface_eval_metadata(params_eval, surface_config)
 
@@ -778,6 +863,8 @@ def run_white_light_stage(
                 have_log_a_rs = have_all("log_a_rs")
                 have_logD = have_all("logD")
 
+                if have_all("period"):
+                    p["period"] = jnp.array([p[f"period_{i}"] for i in range(n_planets)])
                 if have_all("t0"):
                     p["t0"] = jnp.array([p[f"t0_{i}"] for i in range(n_planets)])
                 if have_all("b"):
@@ -907,6 +994,8 @@ def run_white_light_stage(
                     return arr
 
                 params_complete["period"] = _ensure_len(params_complete.get("period", PERIOD_FIXED), n_planets_sanity)
+                if all(f'period_{i}' in init_params_wl for i in range(n_planets_sanity)):
+                    params_complete["period"] = jnp.array([init_params_wl[f'period_{i}'] for i in range(n_planets_sanity)])
                 params_complete["duration"] = _ensure_len(params_complete.get("duration", PRIOR_DUR), n_planets_sanity)
                 params_complete["t0"] = _ensure_len(params_complete.get("t0", PRIOR_T0), n_planets_sanity)
                 params_complete["b"] = _ensure_len(params_complete.get("b", PRIOR_B), n_planets_sanity)
@@ -990,10 +1079,13 @@ def run_white_light_stage(
                 keys = jax.random.split(key_sanity, num=3)
 
                 if n_planets_sanity == 1:
-                    if param_method == 'a_rs':
-                        _opt_sites = ["log_a_rs_0", "t0_0", "_b_0"]
-                    else:
-                        _opt_sites = ["logD_0", "t0_0", "_b_0"]
+                    _opt_sites = [
+                        name for name in (
+                            "period_0", "log_a_rs_0", "a_rs_0", "logD_0",
+                            "duration_0", "t0_0", "_b_0", "b_0",
+                        )
+                        if name in geometry_sites
+                    ] or None
                 else:
                     _opt_sites = None
                 if uses_surface_model:
@@ -1006,7 +1098,7 @@ def run_white_light_stage(
                     )
                     soln = stage1(keys[0], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
 
-                stage2_sites = ["rors_0"]
+                stage2_sites = ["rors_0"] if "rors_0" in geometry_sites else []
                 if wl_ld_mode != "fixed":
                     if transit_engine == 'harmonica':
                         stage2_sites.extend(["c1", "c2"])
@@ -1021,7 +1113,7 @@ def run_white_light_stage(
                         stage2_sites.extend(_power2_ld_optimization_sites(
                             whitelight_ld_parameterization
                         ))
-                if n_planets_sanity != 1:
+                if n_planets_sanity != 1 or not stage2_sites:
                     stage2_sites = None
 
                 if not uses_surface_model:
@@ -1298,9 +1390,7 @@ def run_white_light_stage(
             inf_data = az.from_dict(posterior=wl_samples_grouped)
             print(az.summary(inf_data, var_names=None, round_to=7))
 
-            bestfit_params_wl = {
-                'period': PERIOD_FIXED,
-            }
+            bestfit_params_wl = {}
             def set_param_stats(name, data_samples, axis=0):
                 med, low, high = get_asym_errors(data_samples, axis=axis)
                 bestfit_params_wl[name] = med
@@ -1345,6 +1435,20 @@ def run_white_light_stage(
                     bestfit_params_wl['u2_ld'] = bestfit_params_wl['u2']
             set_fixed_param_stats('ecc', HARMONICA_ECC)
             set_fixed_param_stats('omega', HARMONICA_OMEGA)
+            period_draws = _planet_site_array(wl_samples, 'period', n_planets)
+            if period_draws is not None:
+                # (n_planets, draws) -> (draws, n_planets)
+                period_draws = period_draws.T
+                set_param_stats('period', period_draws, axis=0)
+                bestfit_params_wl['period_err'] = jnp.std(period_draws, axis=0)
+                print(
+                    "White-light period posterior (median, -err, +err): "
+                    f"{np.asarray(bestfit_params_wl['period']).tolist()}, "
+                    f"{np.asarray(bestfit_params_wl['period_err_low']).tolist()}, "
+                    f"{np.asarray(bestfit_params_wl['period_err_high']).tolist()}"
+                )
+            else:
+                set_fixed_param_stats('period', PERIOD_FIXED)
             for surface_name in (
                 'eclipse_depth', 'dayside_flux', 'nightside_flux',
                 'hotspot_offset', 'stellar_spot_contrast',
@@ -1469,7 +1573,7 @@ def run_white_light_stage(
                 set_param_stats('GP_log_rho', wl_samples['GP_log_rho'])
 
             wl_handoff_geometry = _geometry_from_white_light_medians(
-                bestfit_params_wl, PERIOD_FIXED
+                bestfit_params_wl, bestfit_params_wl['period']
             )
             wl_handoff_payload = {
                 "estimator": "posterior_median",
@@ -1688,6 +1792,9 @@ def run_white_light_stage(
                 row = {
                     'planet_id': i,
                     'period': bestfit_params_wl['period'][i],
+                    'period_err': bestfit_params_wl['period_err'][i],
+                    'period_err_low': bestfit_params_wl['period_err_low'][i],
+                    'period_err_high': bestfit_params_wl['period_err_high'][i],
                     'duration': bestfit_params_wl['duration'][i],
                     't0': bestfit_params_wl['t0'][i],
                     'b': bestfit_params_wl['b'][i],

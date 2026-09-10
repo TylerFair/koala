@@ -1023,6 +1023,7 @@ def plot_harmonica_transmission_posterior(
 
 
 _CORNER_LABELS = {
+    "period": r"$P$ [d]",
     "t0": r"$t_0$ [d]",
     "rors": r"$R_p/R_\star$",
     "b": r"$b$",
@@ -1053,7 +1054,7 @@ _CORNER_LABELS = {
     "GP_log_rho": r"$\ln\rho_\mathrm{GP}$",
 }
 _CORNER_ORDER = (
-    "t0", "rors", "b", "duration", "a_rs", "c1", "c2", "u1", "u2", "c", "v",
+    "period", "t0", "rors", "b", "duration", "a_rs", "c1", "c2", "u1", "u2", "c", "v",
     "v2", "v3", "v4", "A", "tau", "spot_amp", "spot_mu", "spot_sigma",
     "spot_amp2", "spot_mu2", "spot_sigma2", "t_jump", "jump", "width",
     "error", "GP_log_sigma", "GP_log_rho",

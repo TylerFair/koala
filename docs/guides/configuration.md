@@ -71,6 +71,46 @@ template trends take initial guesses through `spot_amp`, `spot_center`,
 `spot_amp_2`, `spot_center_2`, `spot_width_2`, for a second spot) and
 `jump_guess` or `t_jump_guess`.
 
+## Parameter priors
+
+Every orbital entry of `planet` (`period`, `t0`, `b`, `rprs`, `duration`
+or `a_rs`, `ecc`, `omega`) accepts one of three forms:
+
+```yaml
+planet:
+  name: WASP-39
+  period: 4.05528043                          # bare number: today's default
+  t0: [free, uniform, 59786.9, 59787.2]       # list form
+  b: {mode: free, prior: gaussian, mu: 0.45, sigma: 0.05}   # mapping form
+  duration: [free, truncated_gaussian, 0.117, 0.005, 0.05, 0.3]
+  rprs: 0.1457
+  ecc: [fixed, 0.0]
+```
+
+A bare number keeps the historical behaviour: `period`, `ecc`, and
+`omega` are fixed, the others are free with the built-in wide priors and
+the number is the starting point. The list forms are `[fixed, value]`,
+`[free, uniform, low, high]`, `[free, gaussian, mu, sigma]`, and
+`[free, truncated_gaussian, mu, sigma, low, high]`; the mapping form uses
+the same names (`mode`, `prior`, `value`, `mu`, `sigma`, `low`, `high`).
+For several planets give one entry per planet. `ecc` and `omega` may only
+be fixed, and explicit priors need `flags.transit_engine: jaxoplanet`.
+
+A free `period` is sampled in the white-light fit (it appears in the
+best-fit CSV and the corner plot) and then held at its posterior median
+for the spectroscopic stages, like `t0`, `b`, and `duration`. When one
+time series spans several transits every epoch `t0 + n * period` is
+masked as in transit, so a free period constrains the ephemeris:
+
+```yaml
+planet:
+  period: [free, gaussian, 4.05528043, 0.001]
+  t0: [free, uniform, 59786.9, 59787.2]
+```
+
+Stacking separate FITS files into one series is not done by Koala; the
+input must already be a single time series.
+
 Other accepted `flags` keys, shown in context by the example files:
 `fit_geometry`, `transit_engine`, `analysis_stage`, `random_seed`,
 `spectro_chunk_size` (alias `vmap_chunk`), `need_lowres`,

@@ -1,7 +1,10 @@
 """Configuration loading, validation, and option resolution."""
 
 import difflib
+import numbers
 import warnings
+from dataclasses import dataclass
+import numpy as np
 import yaml
 import jax
 import jax.numpy as jnp
@@ -13,6 +16,299 @@ from .constants import *
 
 class UnknownFlagWarning(UserWarning):
     """A ``flags`` entry is not consumed by the current configuration API."""
+
+
+@dataclass(frozen=True)
+class ParameterSpec:
+    """How one ``planet`` parameter enters the white-light fit.
+
+    ``mode`` is ``'fixed'`` or ``'free'``.  A free parameter written as a bare
+    number keeps ``prior=None``, which means the engine's historical default
+    prior; an explicit ``[free, prior, ...]`` form sets ``prior`` to
+    ``'uniform'`` (``low``/``high``), ``'gaussian'`` (``mu``/``sigma``) or
+    ``'truncated_gaussian'`` (all four).  ``value`` holds the fixed value or
+    the bare-number initial guess.
+    """
+
+    name: str
+    mode: str
+    prior: str = None
+    value: float = None
+    mu: float = None
+    sigma: float = None
+    low: float = None
+    high: float = None
+    explicit: bool = False
+
+    @property
+    def free(self):
+        return self.mode == 'free'
+
+    @property
+    def fixed(self):
+        return self.mode == 'fixed'
+
+    @property
+    def explicit_prior(self):
+        """True when a free parameter carries a user-specified prior."""
+        return self.free and self.prior is not None
+
+    @property
+    def center(self):
+        """Representative value: fixed value, prior mean, or interval midpoint."""
+        if self.value is not None:
+            return float(self.value)
+        if self.prior in {'gaussian', 'truncated_gaussian'}:
+            return float(self.mu)
+        return 0.5 * (float(self.low) + float(self.high))
+
+    def describe(self):
+        if self.fixed:
+            return f"fixed at {self.value!r}"
+        if self.prior is None:
+            return f"free (default prior, initial value {self.value!r})"
+        if self.prior == 'uniform':
+            return f"free, uniform({self.low!r}, {self.high!r})"
+        if self.prior == 'gaussian':
+            return f"free, gaussian(mu={self.mu!r}, sigma={self.sigma!r})"
+        return (
+            f"free, truncated_gaussian(mu={self.mu!r}, sigma={self.sigma!r}, "
+            f"low={self.low!r}, high={self.high!r})"
+        )
+
+
+def _is_number(value):
+    return isinstance(value, numbers.Real) and not isinstance(value, bool)
+
+
+def _spec_number(key, label, value):
+    if not _is_number(value):
+        raise ValueError(
+            f"planet.{key}: {label} must be a number, received {value!r}."
+        )
+    value = float(value)
+    if not np.isfinite(value):
+        raise ValueError(f"planet.{key}: {label} must be finite.")
+    return value
+
+
+def _finish_free_spec(key, prior, fields):
+    """Validate the prior fields of an explicit free specification."""
+    if prior not in PARAMETER_SPEC_PRIORS:
+        raise ValueError(
+            f"planet.{key}: unknown prior {prior!r}; expected one of "
+            f"{list(PARAMETER_SPEC_PRIORS)}."
+        )
+    mu = sigma = low = high = None
+    if prior in {'gaussian', 'truncated_gaussian'}:
+        mu = _spec_number(key, 'mu', fields['mu'])
+        sigma = _spec_number(key, 'sigma', fields['sigma'])
+        if sigma <= 0.0:
+            raise ValueError(f"planet.{key}: sigma must be > 0, received {sigma!r}.")
+    if prior in {'uniform', 'truncated_gaussian'}:
+        low = _spec_number(key, 'low', fields['low'])
+        high = _spec_number(key, 'high', fields['high'])
+        if low >= high:
+            raise ValueError(
+                f"planet.{key}: prior bounds require low < high, received "
+                f"low={low!r}, high={high!r}."
+            )
+    if key in PLANET_PARAMETERS_FIXED_ONLY:
+        raise ValueError(
+            f"planet.{key} may only be fixed for now; write "
+            f"[fixed, <value>] or a bare number."
+        )
+    return ParameterSpec(
+        key, 'free', prior, None, mu, sigma, low, high, explicit=True,
+    )
+
+
+_LIST_FORMS = {
+    'uniform': '[free, uniform, low, high]',
+    'gaussian': '[free, gaussian, mu, sigma]',
+    'truncated_gaussian': '[free, truncated_gaussian, mu, sigma, low, high]',
+}
+
+
+def _parse_list_spec(key, raw):
+    mode = str(raw[0]).strip().lower()
+    if mode not in PARAMETER_SPEC_MODES:
+        raise ValueError(
+            f"planet.{key}: unknown mode {raw[0]!r}; expected 'fixed' or 'free'."
+        )
+    if mode == 'fixed':
+        if len(raw) != 2:
+            raise ValueError(
+                f"planet.{key}: the fixed form is [fixed, value], received {raw!r}."
+            )
+        return ParameterSpec(
+            key, 'fixed', None, _spec_number(key, 'value', raw[1]), explicit=True,
+        )
+    if len(raw) < 2:
+        raise ValueError(
+            f"planet.{key}: the free form is [free, prior, ...], received {raw!r}."
+        )
+    prior = str(raw[1]).strip().lower()
+    if prior not in _LIST_FORMS:
+        raise ValueError(
+            f"planet.{key}: unknown prior {raw[1]!r}; expected one of "
+            f"{list(PARAMETER_SPEC_PRIORS)}."
+        )
+    arity = {'uniform': 4, 'gaussian': 4, 'truncated_gaussian': 6}[prior]
+    if len(raw) != arity:
+        raise ValueError(
+            f"planet.{key}: expected {_LIST_FORMS[prior]}, received {raw!r}."
+        )
+    values = raw[2:]
+    if prior == 'uniform':
+        fields = {'low': values[0], 'high': values[1]}
+    elif prior == 'gaussian':
+        fields = {'mu': values[0], 'sigma': values[1]}
+    else:
+        fields = {'mu': values[0], 'sigma': values[1], 'low': values[2], 'high': values[3]}
+    return _finish_free_spec(key, prior, fields)
+
+
+_DICT_FIELD_ALIASES = {
+    'lo': 'low', 'min': 'low', 'lower': 'low',
+    'hi': 'high', 'max': 'high', 'upper': 'high',
+    'mean': 'mu', 'loc': 'mu', 'std': 'sigma', 'scale': 'sigma',
+}
+
+
+def _parse_dict_spec(key, raw):
+    fields = {}
+    for name, value in raw.items():
+        canonical = _DICT_FIELD_ALIASES.get(str(name).lower(), str(name).lower())
+        fields[canonical] = value
+    if 'mode' not in fields:
+        raise ValueError(
+            f"planet.{key}: a mapping specification needs 'mode' "
+            "('fixed' or 'free')."
+        )
+    mode = str(fields.pop('mode')).strip().lower()
+    if mode not in PARAMETER_SPEC_MODES:
+        raise ValueError(
+            f"planet.{key}: unknown mode {mode!r}; expected 'fixed' or 'free'."
+        )
+    if mode == 'fixed':
+        unexpected = set(fields) - {'value'}
+        if unexpected or 'value' not in fields:
+            raise ValueError(
+                f"planet.{key}: the fixed mapping form is "
+                "{mode: fixed, value: <number>}."
+            )
+        return ParameterSpec(
+            key, 'fixed', None, _spec_number(key, 'value', fields['value']),
+            explicit=True,
+        )
+    if 'prior' not in fields:
+        raise ValueError(
+            f"planet.{key}: a free mapping needs 'prior' ('uniform', "
+            "'gaussian' or 'truncated_gaussian')."
+        )
+    prior = str(fields.pop('prior')).strip().lower()
+    required = {
+        'uniform': {'low', 'high'},
+        'gaussian': {'mu', 'sigma'},
+        'truncated_gaussian': {'mu', 'sigma', 'low', 'high'},
+    }.get(prior)
+    if required is None:
+        raise ValueError(
+            f"planet.{key}: unknown prior {prior!r}; expected one of "
+            f"{list(PARAMETER_SPEC_PRIORS)}."
+        )
+    missing = required - set(fields)
+    unexpected = set(fields) - required
+    if missing or unexpected:
+        raise ValueError(
+            f"planet.{key}: prior '{prior}' takes exactly {sorted(required)}; "
+            f"missing {sorted(missing)}, unexpected {sorted(unexpected)}."
+        )
+    return _finish_free_spec(key, prior, fields)
+
+
+def parse_parameter_spec(key, raw):
+    """Parse one bare-number, list, or mapping parameter specification."""
+    if _is_number(raw):
+        mode = 'fixed' if key in PLANET_PARAMETERS_FIXED_BY_DEFAULT else 'free'
+        return ParameterSpec(key, mode, None, _spec_number(key, 'value', raw))
+    if isinstance(raw, (list, tuple)):
+        if not raw or not isinstance(raw[0], str):
+            raise ValueError(
+                f"planet.{key}: expected [fixed, value] or [free, prior, ...], "
+                f"received {list(raw)!r}."
+            )
+        return _parse_list_spec(key, list(raw))
+    if isinstance(raw, dict):
+        return _parse_dict_spec(key, raw)
+    raise ValueError(
+        f"planet.{key}: expected a number, [fixed, value], "
+        f"[free, prior, ...] or a mapping, received {raw!r}."
+    )
+
+
+def _parse_parameter_entries(key, raw):
+    """Return one specification per planet for a ``planet`` block entry."""
+    if isinstance(raw, (list, tuple)) and raw and not isinstance(raw[0], str):
+        return tuple(parse_parameter_spec(key, item) for item in raw)
+    return (parse_parameter_spec(key, raw),)
+
+
+def parse_planet_parameter_specs(planet_cfg):
+    """Parse every orbital entry of ``planet`` into per-planet specifications.
+
+    Returns ``{name: (ParameterSpec, ...)}`` with one entry per planet for
+    each of ``PLANET_PARAMETER_KEYS`` present in the block (``ecc`` and
+    ``omega`` default to fixed zero).  Scalars are broadcast to the number of
+    planets, which is taken from ``period`` when present.
+    """
+    entries = {}
+    for key in PLANET_PARAMETER_KEYS:
+        if key in planet_cfg:
+            entries[key] = _parse_parameter_entries(key, planet_cfg[key])
+    for key in ('ecc', 'omega'):
+        entries.setdefault(key, (ParameterSpec(key, 'fixed', None, 0.0),))
+    if 'period' in entries:
+        n_planets = len(entries['period'])
+    else:
+        n_planets = max(len(specs) for specs in entries.values())
+    resolved = {}
+    for key, specs in entries.items():
+        if len(specs) == 1 and n_planets > 1:
+            specs = specs * n_planets
+        if len(specs) != n_planets:
+            raise ValueError(
+                f"planet.{key} must be scalar or length {n_planets}, "
+                f"got {len(specs)} entries."
+            )
+        resolved[key] = tuple(specs)
+    return resolved
+
+
+def planet_parameter_centers(specs, key, default=None):
+    """Return the representative value of ``key`` for every planet."""
+    if key not in specs:
+        if default is None:
+            raise KeyError(f"planet.{key} is not configured.")
+        n_planets = len(next(iter(specs.values())))
+        return np.full(n_planets, float(default), dtype=np.float64)
+    return np.asarray([spec.center for spec in specs[key]], dtype=np.float64)
+
+
+def describe_planet_parameter_specs(specs):
+    """One human-readable line per configured parameter."""
+    lines = []
+    for key, entries in specs.items():
+        described = [spec.describe() for spec in entries]
+        if len(set(described)) == 1:
+            lines.append(f"planet.{key}: {described[0]}")
+        else:
+            lines.append(
+                f"planet.{key}: "
+                + "; ".join(f"planet {i}: {text}" for i, text in enumerate(described))
+            )
+    return lines
 
 
 def _validate_flag_keys(flags):
