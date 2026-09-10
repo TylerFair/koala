@@ -236,6 +236,37 @@ def _jax_backend_available(platform):
         return False
 
 
+def _concrete_gpu_backend():
+    """Return the concrete GPU backend name JAX exposes, or None.
+
+    Newer JAX releases reject the ``'gpu'`` alias in ``jax_platform_name``
+    and require ``'cuda'`` or ``'rocm'``; older ones accept either.
+    """
+    for name in ('cuda', 'rocm'):
+        if _jax_backend_available(name):
+            return name
+    if _jax_backend_available('gpu'):
+        return 'gpu'
+    return None
+
+
+def _set_jax_platform(platform):
+    """Set the JAX default platform, tolerating already-initialised JAX."""
+    try:
+        jax.config.update('jax_platform_name', platform)
+    except Exception as exc:
+        warnings.warn(
+            f"Could not set jax_platform_name={platform!r}: {exc}",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+    try:
+        numpyro.set_platform(platform)
+    except Exception:
+        # numpyro.set_platform only repeats the jax.config.update above.
+        pass
+
+
 def resolve_host_device(requested):
     """Pick the JAX/numpyro platform for ``host_device``.
 
@@ -243,16 +274,18 @@ def resolve_host_device(requested):
     only when JAX can actually initialise one; otherwise the run falls
     back to CPU with a warning instead of raising. This covers the common
     case where CUDA is installed but the CPU-only ``jax`` wheel is.
+    Returns ``'gpu'`` or ``'cpu'``.
     """
     requested = (requested or 'auto').lower()
-    if requested not in {'gpu', 'cpu', 'auto', 'cuda'}:
+    if requested not in {'gpu', 'cpu', 'auto', 'cuda', 'rocm'}:
         raise ValueError(
             f"host_device must be 'gpu', 'cpu' or 'auto', got {requested!r}"
         )
-    if requested == 'cuda':
+    if requested in {'cuda', 'rocm'}:
         requested = 'gpu'
     want_gpu = requested in {'gpu', 'auto'}
-    if want_gpu and _jax_backend_available('gpu'):
+    concrete = _concrete_gpu_backend() if want_gpu else None
+    if concrete is not None:
         platform = 'gpu'
     else:
         if requested == 'gpu':
@@ -266,15 +299,8 @@ def resolve_host_device(requested):
                 stacklevel=2,
             )
         platform = 'cpu'
-    try:
-        jax.config.update('jax_platform_name', platform)
-    except Exception as exc:  # pragma: no cover - defensive
-        warnings.warn(
-            f"Could not set jax_platform_name={platform!r}: {exc}",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-    numpyro.set_platform(platform)
+        concrete = 'cpu'
+    _set_jax_platform(concrete)
     # jax.default_backend() reports the plugin name ('cuda' or 'rocm'),
     # never the 'gpu' alias, so compare after mapping it back.
     actual = _GPU_BACKEND_ALIASES.get(jax.default_backend(), jax.default_backend())
