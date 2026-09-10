@@ -30,12 +30,12 @@ exotic-ld @ git+https://github.com/Exo-TiC/ExoTiC-LD.git@ef7eba2d5ec32818b031714
 # ExoTiC-LD 3.2 uses pkg_resources, removed in setuptools 81.
 setuptools<81
 
-# Diagnostics and publication-style plots
+# Diagnostics and publication-style plots. SciencePlots and cmcrameri are
+# optional (pip install "koala-jwst[plots]"); plotting falls back to plain
+# Matplotlib without them.
 matplotlib
 corner
 arviz
-SciencePlots
-cmcrameri
 
 # ExoTEDRF is not required; spectral binning is included in koala.binning.
 # Test tools and Sphinx dependencies are separate from runtime requirements.

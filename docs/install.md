@@ -38,6 +38,17 @@ included in the repository, with no submodule checkout needed.
 Koala reads exoTEDRF, SPARTA, and Eureka! products directly and includes its
 own binning utilities; none of those pipelines needs to be installed.
 
+Publication-style figures can optionally use SciencePlots and the cmcrameri
+colour maps:
+
+```bash
+python -m pip install -e ".[plots]"
+```
+
+Without them Koala uses a plain Matplotlib serif style. The SciencePlots
+style renders text with LaTeX when a TeX install (`latex` and `dvipng`) is
+on the PATH and silently uses Matplotlib's own text rendering otherwise.
+
 tinygp is installed from the Koala fork at a validated commit rather than
 from PyPI, because no PyPI release yet contains the parallel associative-scan
 quasiseparable solver that Koala uses for Gaussian-process trends on GPUs.

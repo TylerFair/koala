@@ -8,6 +8,8 @@ fallback so plotting remains available in the base scientific environment.
 from __future__ import annotations
 
 import re
+import shutil
+import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -152,11 +154,38 @@ def model_palette_colors(count: int) -> list:
     return [fallback(index % fallback.N) for index in range(count)]
 
 
+def _latex_toolchain_available() -> bool:
+    """Return True when Matplotlib's ``text.usetex`` can actually render."""
+    return all(shutil.which(tool) for tool in ("latex", "dvipng")) or bool(
+        shutil.which("latex") and shutil.which("gs")
+    )
+
+
+def _apply_science_style() -> bool:
+    """Apply the SciencePlots style if it is installed and usable."""
+    if scienceplots is None:
+        return False
+    try:
+        plt.style.use(["science", "nature"])
+    except Exception as exc:  # pragma: no cover - environment-specific.
+        warnings.warn(
+            f"SciencePlots is installed but its style could not be applied "
+            f"({exc}); using the Matplotlib serif fallback.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        plt.rcdefaults()
+        return False
+    if plt.rcParams.get("text.usetex", False) and not _latex_toolchain_available():
+        # The ``science`` style renders text with LaTeX, which crashes the
+        # first savefig on machines without a TeX install.
+        plt.rcParams["text.usetex"] = False
+    return True
+
+
 def apply_publication_style() -> None:
     """Apply the reference ``science``/``nature`` style or serif fallback."""
-    if scienceplots is not None:
-        plt.style.use(["science", "nature"])
-    else:
+    if not _apply_science_style():
         plt.rcParams.update(
             {
                 "font.family": "serif",
