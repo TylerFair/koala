@@ -7,6 +7,7 @@ fallback so plotting remains available in the base scientific environment.
 
 from __future__ import annotations
 
+import importlib
 import re
 import shutil
 import warnings
@@ -166,6 +167,10 @@ def _apply_science_style() -> bool:
     if scienceplots is None:
         return False
     try:
+        if "science" not in plt.style.available:
+            # Importing arviz calls matplotlib.style.reload_library(), which
+            # discards the styles SciencePlots registered at import time.
+            importlib.reload(scienceplots)
         plt.style.use(["science", "nature"])
     except Exception as exc:  # pragma: no cover - environment-specific.
         warnings.warn(

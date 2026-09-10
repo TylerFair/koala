@@ -2038,12 +2038,12 @@ def _run_high_resolution_stage_hook(
     if plots_mode == 'full':
         plot_noise_binning_robust(
             residuals_hr, _hr_dt_sec,
-            f"{output_dir}/36_{hr_artifact_stem}_noisebin.png",
+            f"{output_dir}/33_{hr_artifact_stem}_noisebin.png",
             title=f"High-Res Noise Binning ({hr_bin_str})",
         )
     save_noise_binning_data(
         residuals_hr,
-        f"{output_dir}/36_{hr_artifact_stem}_noisebin.csv",
+        f"{output_dir}/33_{hr_artifact_stem}_noisebin.csv",
     )
 
     median_total_error_hr = np.nanmedian(samples_hr['total_error'], axis=0)
