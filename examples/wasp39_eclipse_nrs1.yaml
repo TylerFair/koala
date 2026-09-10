@@ -1,5 +1,5 @@
 # WASP-39 b NIRSpec/G395H NRS1 secondary eclipse.
-# Supply the matching extracted FITS file. Times must be MJD TDB.
+# Supply the matching extracted spectra (exoTEDRF, SPARTA, or Eureka!). Times must be BMJD_TDB.
 planet:
   name: WASP-39
   period: 4.05528043
@@ -21,7 +21,7 @@ instrument: NIRSPEC/G395H
 nrs: 1
 path: /path/to/wasp39
 input_dir: FITS
-fits_file: WASP-39_eclipse_nrs1_box_spectra_fullres.fits
+input_file: WASP-39_eclipse_nrs1_box_spectra_fullres.fits
 output_dir: results/WASP-39_ECLIPSE_G395H_NRS1_R300
 wavelength_masks: [3.0178, 3.0190, 3.4970, 3.4990]
 

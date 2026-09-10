@@ -26,7 +26,7 @@ nrs: 1
 
 path: '/path/to/work'
 input_dir: 'FITS'
-fits_file: 'WASP-6_nrs1_box_spectra_fullres_PRISM.fits'
+input_file: 'WASP-6_nrs1_box_spectra_fullres_PRISM.fits'
 output_dir: 'WASP-6_PRISM_NRS1'
 
 resolution:

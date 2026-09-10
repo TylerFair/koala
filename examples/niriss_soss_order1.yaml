@@ -24,7 +24,7 @@ order: 1
 
 path: '.'
 input_dir: 'examples/data'
-fits_file: 'WASP-39_soss_binned8.fits'
+input_file: 'WASP-39_soss_binned8.fits'
 output_dir: 'results/WASP-39_SOSS_ORDER1'
 
 resolution:

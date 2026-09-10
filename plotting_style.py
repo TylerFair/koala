@@ -284,7 +284,7 @@ def format_instrument_stamp(label: str | None) -> str:
     if "NIRSPEC" in upper:
         idx = upper.index("NIRSPEC")
         grating = next(
-            (token.upper() for token in tokens[idx + 1 :] if re.fullmatch(r"G[0-9]{3}[HM]|PRISM", token.upper())),
+            (token.upper() for token in tokens[idx + 1 :] if re.fullmatch(r"G[0-9]{3}[HM](-F0[7-9]0|-F100)?|PRISM", token.upper())),
             "",
         )
         detector = next(
@@ -293,6 +293,13 @@ def format_instrument_stamp(label: str | None) -> str:
         )
         mode = "/".join(part for part in (grating, detector) if part)
         return " ".join(part for part in ("JWST NIRSpec", mode) if part)
+    if "NIRCAM" in upper:
+        idx = upper.index("NIRCAM")
+        filt = next(
+            (token.upper() for token in tokens[idx + 1 :] if re.fullmatch(r"F[0-9]{3}W2?", token.upper())),
+            "",
+        )
+        return " ".join(part for part in ("JWST NIRCam", filt) if part)
     if "MIRI" in upper:
         return "JWST MIRI/LRS" if "LRS" in upper else "JWST MIRI"
     return Path(str(label)).stem.replace("_", " ")

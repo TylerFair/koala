@@ -1,4 +1,4 @@
-# WASP-121 b, NIRSpec/G395H NRS1. Supply the matching extracted FITS file.
+# WASP-121 b, NIRSpec/G395H NRS1. Supply the matching extracted spectra.
 
 planet:
   name: WASP-121
@@ -23,7 +23,7 @@ nrs: 1
 
 path: /path/to/work
 input_dir: FITS
-fits_file: WASP-121_nrs1_box_spectra_fullres_G395H.fits
+input_file: WASP-121_nrs1_box_spectra_fullres_G395H.fits
 output_dir: results/WASP-121_G395H_NRS1
 
 resolution:

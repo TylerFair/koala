@@ -372,33 +372,20 @@ def _run_low_resolution_stage_hook(
                 data.wavelengths_lr,
                 data.wavelengths_err_lr,
                 instrument,
-                order=order if instrument == 'NIRISS/SOSS' else None,
+                order=order,
                 output_dir=output_dir,
                 cache_label=lr_bin_str,
             )
         else:
-            if instrument in [
-                'NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM',
-                'NIRSPEC/G140H', 'NIRSPEC/G235H', 'MIRI/LRS',
-            ]:
-                U_mu_lr = get_limb_darkening(
-                    sld,
-                    data.wavelengths_lr,
-                    data.wavelengths_err_lr,
-                    instrument,
-                    ld_profile=ld_profile,
-                    ld_mu_min=(stellar_cfg.get('ld_mu_min', 0.2) if ld_prior_mode == 'sing' else None),
-                )
-            elif instrument == 'NIRISS/SOSS':
-                U_mu_lr = get_limb_darkening(
-                    sld,
-                    data.wavelengths_lr,
-                    data.wavelengths_err_lr,
-                    instrument,
-                    order=order,
-                    ld_profile=ld_profile,
-                    ld_mu_min=(stellar_cfg.get('ld_mu_min', 0.2) if ld_prior_mode == 'sing' else None),
-                )
+            U_mu_lr = get_limb_darkening(
+                sld,
+                data.wavelengths_lr,
+                data.wavelengths_err_lr,
+                instrument,
+                order=order,
+                ld_profile=ld_profile,
+                ld_mu_min=(stellar_cfg.get('ld_mu_min', 0.2) if ld_prior_mode == 'sing' else None),
+            )
             U_sigma_lr = None
             sing_model_c_lr = None
             if ld_prior_mode == 'sing':
@@ -1490,15 +1477,12 @@ def _run_high_resolution_stage_hook(
         elif ld_prior_mode == 'stellarprior':
             U_mu_hr_init, U_sigma_hr_init = get_or_build_power2_ld_prior(
                 stellar_cfg, wl_hr, data.wavelengths_err_hr, instrument,
-                order=order if instrument == 'NIRISS/SOSS' else None,
+                order=order,
                 output_dir=output_dir,
                 cache_label=hr_bin_str,
             )
         else:
-            if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'NIRSPEC/G140H', 'NIRSPEC/G235H', 'MIRI/LRS']:
-                U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, ld_profile=ld_profile, ld_mu_min=(stellar_cfg.get('ld_mu_min', 0.2) if ld_prior_mode == 'sing' else None))
-            elif instrument == 'NIRISS/SOSS':
-                U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order, ld_profile=ld_profile, ld_mu_min=(stellar_cfg.get('ld_mu_min', 0.2) if ld_prior_mode == 'sing' else None))
+            U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order, ld_profile=ld_profile, ld_mu_min=(stellar_cfg.get('ld_mu_min', 0.2) if ld_prior_mode == 'sing' else None))
             U_sigma_hr_init = None
             if ld_prior_mode == 'sing':
                 U_mu_hr_init, U_sigma_hr_init = build_sing_ld_prior(U_mu_hr_init, flags, stellar_cfg)

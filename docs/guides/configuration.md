@@ -29,7 +29,7 @@ order: 1
 
 path: /path/to/analysis
 input_dir: FITS
-fits_file: WASP-39_box_spectra_fullres.fits
+input_file: WASP-39_box_spectra_fullres.fits
 output_dir: WASP-39_SOSS_ORDER1
 
 resolution:
@@ -56,8 +56,9 @@ python fit_jwst.py -c config.yaml
 |---|---|
 | `planet` | `period`, `t0`, `b`, `rprs`, and either `duration` or `a_rs`. |
 | `stellar` | Stellar parameters for limb darkening; the three `*_sigma` fields are required for `ld_prior: stellarprior`. |
-| `instrument` | `NIRISS/SOSS` with `order: 1` or `2`; `NIRSPEC/G395H`, `G395M`, `PRISM`, `G140H`, or `G235H` with `nrs: 1` or `2`; or `MIRI/LRS` with neither. |
-| `path`, `input_dir`, `fits_file` | The input is read from `path/input_dir/fits_file`. |
+| `instrument` | One of the [supported modes](../quickstart.md#supported-modes): `NIRISS/SOSS` with `order: 1` or `2`; a `NIRSPEC/...` mode with `nrs: 1` or `2`; `NIRCAM/F322W2`, `NIRCAM/F444W`, or `MIRI/LRS` with neither. |
+| `path`, `input_dir`, `input_file` | The input is read from `path/input_dir/input_file` (`fits_file` is an accepted alias). |
+| `input_format` | `auto` (default) sniffs the file; or `exotedrf`, `sparta`, `eureka`. See [Input formats](../quickstart.md#input-formats). |
 | `output_dir` | Result directory, relative to `path` unless absolute. |
 | `resolution` | `high` is the final grid: a resolving power, `native`, or `reference` (with `reference_grid`). `low` is an optional coarse stage; omit it to skip that stage. |
 | `flags.detrending_type` | The systematics trend; see the [Introduction](../concepts.md) for the list. |
@@ -108,7 +109,7 @@ planet:
   t0: [free, uniform, 59786.9, 59787.2]
 ```
 
-Stacking separate FITS files into one series is not done by Koala; the
+Stacking separate input files into one series is not done by Koala; the
 input must already be a single time series.
 
 Other accepted `flags` keys, shown in context by the example files:

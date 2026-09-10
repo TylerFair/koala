@@ -185,6 +185,7 @@ from .sampling import (
     _spectro_sampler_swap_order, _resolve_parallel_chunk_job,
     get_samples_chunked, _run_sampling_stage,
 )
+from .instruments import normalize_instrument, resolve_detector, detector_label
 from .limb_darkening import (
     _power2_ld_initial_sites, _power2_ld_optimization_sites,
     _clip_ld_initial_values, _quadratic_uniform_initial_sites,
@@ -500,12 +501,10 @@ def main():
 def run(cfg, config_path=None):
     flags = cfg.get('flags', {})
     _validate_flag_keys(flags)
-    instrument = cfg['instrument']
-    if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'NIRSPEC/G140H', 'NIRSPEC/G235H']:
-        nrs = cfg['nrs']
-    elif instrument == 'NIRISS/SOSS':
-        order = cfg['order']
-    
+    instrument = normalize_instrument(cfg['instrument'])
+    cfg['instrument'] = instrument
+    nrs, order = resolve_detector(instrument, cfg)
+
     planet_cfg = cfg['planet']
     stellar_cfg = cfg['stellar']
     if 'period' not in planet_cfg:
@@ -567,7 +566,10 @@ def run(cfg, config_path=None):
     base_path = cfg.get('path', '.')
     input_dir = os.path.join(base_path, cfg.get('input_dir', planet_str + '_NIRSPEC'))
     output_dir = os.path.join(base_path, cfg.get('output_dir', planet_str + '_RESULTS'))
-    fits_file = os.path.join(input_dir, cfg.get('fits_file'))
+    input_file = cfg.get('input_file', cfg.get('fits_file'))
+    if input_file is None:
+        raise KeyError("'input_file' (or the older 'fits_file') is required.")
+    fits_file = os.path.join(input_dir, input_file)
     if not os.path.exists(output_dir): os.makedirs(output_dir, exist_ok=True)
     plots_mode = str(flags.get('plots', 'full')).strip().lower()
     if plots_mode not in {'full', 'minimal'}:
@@ -1057,12 +1059,7 @@ def run(cfg, config_path=None):
             (len(np.atleast_1d(wavelengths)), 2),
         )
 
-    if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'NIRSPEC/G140H', 'NIRSPEC/G235H']:
-        mini_instrument = f'nrs{nrs}'
-    elif instrument == 'NIRISS/SOSS':
-        mini_instrument = f'order{order}'
-    else:
-        mini_instrument = ''
+    mini_instrument = detector_label(instrument, nrs=nrs, order=order)
 
     instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
     lr_label = 'no' if low_resolution_bins is None else str(low_resolution_bins)

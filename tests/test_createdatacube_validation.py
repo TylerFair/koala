@@ -4,12 +4,16 @@ import pytest
 import createdatacube
 
 
-@pytest.mark.parametrize('instrument', ['NIRISS/SOSS', 'NIRSPEC/G395H', 'MIRI/LRS'])
+@pytest.mark.parametrize('instrument', [
+    'NIRISS/SOSS', 'NIRSPEC/G395H', 'NIRSPEC/G235M', 'NIRSPEC/G140M-F070',
+    'NIRCAM/F322W2', 'NIRCAM/F444W', 'MIRI/LRS',
+])
 def test_fits_readers_return_native_endian_arrays_for_jax(tmp_path, instrument):
     from astropy.io import fits
     import jax.numpy as jnp
+    from koala.instruments import data_wavelength_range
 
-    lower, upper = (6., 10.) if instrument == 'MIRI/LRS' else (3., 4.)
+    lower, upper = (3., 4.) if instrument == 'NIRISS/SOSS' else data_wavelength_range(instrument)
     wave = np.linspace(lower, upper, 30)
     flux = np.full((4, 30), 100.)
     hdus = [fits.PrimaryHDU()] + [fits.ImageHDU(a) for a in (
@@ -29,6 +33,42 @@ def test_fits_readers_return_native_endian_arrays_for_jax(tmp_path, instrument):
     for values in result:
         assert values.dtype.isnative
         np.testing.assert_array_equal(np.asarray(jnp.asarray(values)), values)
+    assert len(result[0]) == 20, 'the 5-pixel edge trim and instrument window keep the interior'
+
+
+def test_instrument_registry_matches_exotic_ld_modes():
+    from koala.instruments import (
+        SUPPORTED_INSTRUMENTS, ld_mode_and_bounds, normalize_instrument,
+        resolve_detector, detector_label,
+    )
+
+    expected = {
+        'JWST_NIRSpec_Prism', 'JWST_NIRSpec_G395H', 'JWST_NIRSpec_G395M',
+        'JWST_NIRSpec_G235H', 'JWST_NIRSpec_G235M', 'JWST_NIRSpec_G140H-f100',
+        'JWST_NIRSpec_G140M-f100', 'JWST_NIRSpec_G140H-f070',
+        'JWST_NIRSpec_G140M-f070', 'JWST_NIRISS_SOSSo1', 'JWST_NIRISS_SOSSo2',
+        'JWST_NIRCam_F322W2', 'JWST_NIRCam_F444', 'JWST_MIRI_LRS',
+    }
+    modes = set()
+    for name in SUPPORTED_INSTRUMENTS:
+        orders = (1, 2) if name == 'NIRISS/SOSS' else (None,)
+        for order in orders:
+            mode, lo, hi = ld_mode_and_bounds(name, order)
+            assert lo < hi
+            modes.add(mode)
+    assert modes == expected
+
+    assert normalize_instrument('nirspec/g140h-f100') == 'NIRSPEC/G140H'
+    assert normalize_instrument('NIRCAM/F444') == 'NIRCAM/F444W'
+    with pytest.raises(ValueError):
+        normalize_instrument('MIRI/MRS')
+    assert resolve_detector('NIRSPEC/G235M', {'nrs': 2}) == (2, None)
+    assert resolve_detector('NIRISS/SOSS', {'order': 2}) == (None, 2)
+    assert resolve_detector('NIRCAM/F322W2', {}) == (None, None)
+    with pytest.raises(KeyError):
+        resolve_detector('NIRSPEC/G395H', {})
+    assert detector_label('NIRCAM/F444W') == ''
+    assert detector_label('NIRSPEC/PRISM', nrs=1) == 'nrs1'
 
 
 def test_process_filters_invalid_integrations_globally_before_binning(monkeypatch):
@@ -71,7 +111,7 @@ def test_process_filters_invalid_integrations_globally_before_binning(monkeypatc
             "flux_err_hr": transposed_err.copy(),
         }
 
-    monkeypatch.setattr(createdatacube, "unpack_nirspec_exotedrf", fake_unpack)
+    monkeypatch.setattr(createdatacube, "unpack_exotedrf_spectra", fake_unpack)
     monkeypatch.setattr(createdatacube, "bin_spectroscopy_data", fake_bin)
 
     cfg = {

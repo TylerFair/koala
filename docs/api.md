@@ -26,6 +26,9 @@ The implementation is organized under `koala`:
   writes, and the shared `ArtifactSet` load/compute/manifest protocol.
 - `koala.sampling` and `koala.geometry`: MCMC/chunk orchestration and the
   validated white-light geometry handoff.
+- `koala.instruments`: the registry of supported modes (ExoTiC-LD mode,
+  wavelength windows, detector key).
+- `koala.readers`: exoTEDRF, SPARTA, and Eureka! readers and format detection.
 - `koala.limb_darkening`: stellar, uniform, and Sing limb-darkening priors.
 - `koala.white_light` and `koala.spectroscopy`: the inference stages;
   `run_spectroscopic_stage` dispatches the low- and high-resolution stage

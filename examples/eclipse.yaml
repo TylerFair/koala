@@ -19,7 +19,7 @@ instrument: NIRSPEC/G395M
 nrs: 1
 path: .
 input_dir: examples/data/generated
-fits_file: synthetic_eclipse.fits
+input_file: synthetic_eclipse.fits
 output_dir: results/synthetic_eclipse
 
 resolution:

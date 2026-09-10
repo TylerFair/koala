@@ -28,6 +28,7 @@ import matplotlib as mpl
 from jaxoplanet.light_curves import limb_dark_light_curve
 from jaxoplanet.orbits.transit import TransitOrbit
 from exotic_ld import StellarLimbDarkening
+from .instruments import ld_mode_and_bounds
 from plotting import (
     plot_harmonica_limb_spectra,
     plot_harmonica_transmission_posterior,
@@ -277,23 +278,8 @@ def _validate_whitelight_optimized_start(
 
 
 def _get_ld_mode_bounds(instrument, order=None):
-    if instrument == 'NIRSPEC/G395H':
-        return "JWST_NIRSpec_G395H", 28700.0, 51700.0
-    elif instrument == 'NIRSPEC/G235H':
-        return "JWST_NIRSpec_G235H", 17000.0, 30600.0
-    elif instrument == 'NIRSPEC/G140H':
-        return "JWST_NIRSpec_G140H-f100", 10000.0, 18000.0
-    elif instrument == 'NIRSPEC/G395M':
-        return "JWST_NIRSpec_G395M", 28700.0, 51700.0
-    elif instrument == 'NIRSPEC/PRISM':
-        return "JWST_NIRSpec_Prism", 5000.0, 55000.0
-    elif instrument == 'NIRISS/SOSS':
-        if order == 2:
-            return f"JWST_NIRISS_SOSSo{order}", 6300.0, 8500.0
-        return f"JWST_NIRISS_SOSSo{order}", 8300.0, 28100.0
-    elif instrument == 'MIRI/LRS':
-        return 'JWST_MIRI_LRS', 50000.0, 120000.0
-    raise ValueError(f"Unsupported instrument for LD: {instrument}")
+    """ExoTiC-LD mode and wavelength bounds (angstroms) for a Koala instrument."""
+    return ld_mode_and_bounds(instrument, order)
 
 
 def _clip_ld_range(intended_min, intended_max, wl_min, wl_max):

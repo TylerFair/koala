@@ -17,7 +17,9 @@ transmission spectrum with diagnostic plots and per-channel checks.
   <img src="docs/_static/soss_wasp39_spectrum.png" width="760" alt="A fitted JWST NIRISS/SOSS transmission spectrum for WASP-39 b">
 </p>
 
-The code supports NIRISS/SOSS, NIRSpec, and MIRI/LRS time series, several limb-darkening
+The code supports every JWST time-series mode (NIRISS/SOSS, all NIRSpec gratings and
+PRISM, NIRCam grism, MIRI/LRS), reads exoTEDRF, SPARTA, and Eureka! products with
+automatic format detection, and offers several limb-darkening
 and instrumental-trend models, GPU-parallel exact inference, resumable runs,
 and predictive model stacking. Start with the supplied configurations rather
 than building a model from scratch.
@@ -81,7 +83,7 @@ for those two steps, then follow **[Fit your first transit](https://koala-jwst.r
 - [Run Gaussian-process trends](docs/guides/gaussian_processes.md)
 
 The [documentation](https://koala-jwst.readthedocs.io/) also covers
-NIRSpec and MIRI modes, secondary eclipses, and the optional Harmonica
+NIRSpec, NIRCam, and MIRI modes, secondary eclipses, and the optional Harmonica
 asymmetric-transit model.
 
 ## Citation and license

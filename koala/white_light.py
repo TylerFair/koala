@@ -144,6 +144,7 @@ from .sampling import (
     _spectro_sampler_swap_order, _resolve_parallel_chunk_job,
     get_samples_chunked, _run_sampling_stage,
 )
+from .readers import MJD_OFFSET
 from .limb_darkening import (
     _power2_ld_initial_sites, _power2_ld_optimization_sites,
     _clip_ld_initial_values, _quadratic_uniform_initial_sites,
@@ -422,15 +423,12 @@ def run_white_light_stage(
     elif ld_prior_mode == 'stellarprior':
         U_mu_wl, U_sigma_wl = get_or_build_power2_ld_prior(
             stellar_cfg, data.wavelengths_unbinned, 0.0, instrument,
-            order=order if instrument == 'NIRISS/SOSS' else None,
+            order=order,
             output_dir=output_dir,
             cache_label='whitelight'
         )
     else:
-        if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'MIRI/LRS', 'NIRSPEC/G140H', 'NIRSPEC/G235H']:
-            U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned,0.0, instrument, ld_profile=ld_profile, ld_mu_min=(stellar_cfg.get('ld_mu_min', 0.2) if ld_prior_mode == 'sing' else None))
-        elif instrument == 'NIRISS/SOSS':
-            U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order, ld_profile=ld_profile, ld_mu_min=(stellar_cfg.get('ld_mu_min', 0.2) if ld_prior_mode == 'sing' else None))
+        U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order, ld_profile=ld_profile, ld_mu_min=(stellar_cfg.get('ld_mu_min', 0.2) if ld_prior_mode == 'sing' else None))
         U_sigma_wl = None
 
     wl_mask_path = f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy'
@@ -1797,6 +1795,7 @@ def run_white_light_stage(
                     'period_err_high': bestfit_params_wl['period_err_high'][i],
                     'duration': bestfit_params_wl['duration'][i],
                     't0': bestfit_params_wl['t0'][i],
+                    't0_bjd_tdb': float(bestfit_params_wl['t0'][i]) + MJD_OFFSET,
                     'b': bestfit_params_wl['b'][i],
                     'rors': bestfit_params_wl['rors'][i],
                     'depths': bestfit_params_wl['depths'][i],

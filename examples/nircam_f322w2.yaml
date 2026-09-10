@@ -1,5 +1,5 @@
-# HAT-P-18 b, NIRSpec/G395M NRS1. Same model as the SOSS example, but shows
-# detector selection and how to mask a bad stretch of the time series.
+# HAT-P-18 b, NIRCam/F322W2 grism time series. Same model as the G395M example;
+# NIRCam has no detector or order key.
 
 planet:
   name: HAT-P-18
@@ -19,13 +19,12 @@ stellar:
   ld_model: "stagger"
   ld_data_path: "../exotic_ld_data"
 
-instrument: 'NIRSPEC/G395M'
-nrs: 1                    # detector: 1 or 2
+instrument: 'NIRCAM/F322W2'   # or NIRCAM/F444W
 
 path: '/path/to/work'
 input_dir: 'FITS'
-input_file: 'HAT-P-18_nrs1_box_spectra_fullres_G395M.fits'
-output_dir: 'HAT-P-18_G395M_NRS1'
+input_file: 'HAT-P-18_box_spectra_fullres_F322W2.fits'
+output_dir: 'HAT-P-18_F322W2'
 
 resolution:
   low: 20

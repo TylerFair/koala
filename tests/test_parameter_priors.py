@@ -346,7 +346,7 @@ def test_process_spectroscopy_data_masks_all_epochs(monkeypatch):
             "flux_hr": transposed.copy(), "flux_err_hr": native_flux_err.T.copy(),
         }
 
-    monkeypatch.setattr(createdatacube, "unpack_nirspec_exotedrf", fake_unpack)
+    monkeypatch.setattr(createdatacube, "unpack_exotedrf_spectra", fake_unpack)
     monkeypatch.setattr(createdatacube, "bin_spectroscopy_data", fake_bin)
 
     cfg = {

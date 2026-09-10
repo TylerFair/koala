@@ -5,6 +5,10 @@ import jax
 import jax.numpy as jnp
 import pickle
 from koala.binning import bin_at_resolution, bin_at_pixel
+from koala.readers import read_spectra
+from koala.instruments import (
+    normalize_instrument, resolve_detector, detector_key, data_wavelength_range,
+)
 from astropy.io import fits
 import matplotlib.pyplot as plt
 jax.config.update('jax_enable_x64', True)
@@ -66,156 +70,87 @@ def apply_wavelength_masks(wave, wave_err, fluxcube, fluxcube_err, mask_ranges):
 
     return wave, wave_err, fluxcube, fluxcube_err
 
-def unpack_niriss_exotedrf(infile, order, trim_start, trim_end, wl_min_o1=None, wl_max_o1=None, wl_min_o2=None, wl_max_o2=None, wavelength_masks=None):    
+SOSS_ORDER2_RANGE = (0.6, 0.85)
 
-    bjd = fits.getdata(infile, 9)
-    wave = fits.getdata(infile, 1 + 4 * (order - 1))
-    wave_err = fits.getdata(infile, 2 + 4 * (order - 1))
-    fluxcube = fits.getdata(infile, 3 + 4 * (order - 1))
-    fluxcube_err = fits.getdata(infile, 4 + 4 * (order -1))
-    wave = wave[5:-5]
-    wave_err = wave_err[5:-5]
-    fluxcube = fluxcube[:, 5:-5]
-    fluxcube_err = fluxcube_err[:, 5:-5]
-    
+
+def _finalize_spectra(wave, wave_err, bjd, fluxcube, fluxcube_err, instrument, order,
+                      trim_start, trim_end, wl_min=None, wl_max=None, wavelength_masks=None):
+    """Apply Koala's common post-read steps to a spectra cube.
+
+    Integrations are trimmed with ``trim_start``/``trim_end``, wavelengths are
+    restricted to the instrument window (``SOSS_ORDER2_RANGE`` for SOSS order 2)
+    and to the optional ``wl_min``/``wl_max`` filter, ``wavelength_masks`` are
+    removed, and everything is returned as ascending, native-endian float64.
+    """
     start = 0 if (trim_start is None) else int(trim_start)
-    stop  = None if (trim_end in (None, 0)) else -int(trim_end)
-
-    fluxcube     = fluxcube[start:stop, :]
-    fluxcube_err = fluxcube_err[start:stop, :]
-    bjd            = bjd[start:stop]   # keep time aligned!
-
+    stop = None if (trim_end in (None, 0)) else -int(trim_end)
+    fluxcube, fluxcube_err = fluxcube[start:stop, :], fluxcube_err[start:stop, :]
+    bjd = bjd[start:stop]
 
     if order == 2:
-        ii = np.where((wave >= 0.6) & (wave <= 0.85))[0]
-        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        data_range = SOSS_ORDER2_RANGE
+    elif order is not None:
+        data_range = None
+    else:
+        data_range = data_wavelength_range(instrument)
+    if data_range is not None:
+        ii = np.where((wave >= data_range[0]) & (wave <= data_range[1]))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:, ii]
         wave, wave_err = wave[ii], wave_err[ii]
-
-    if wl_min_o1 is not None and wl_max_o1 is not None and order == 1:
-        ii = np.where((wave >= wl_min_o1) & (wave <= wl_max_o1))[0]
-        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
-        wave, wave_err = wave[ii], wave_err[ii]
-    
-    if wl_min_o2 is not None and wl_max_o2 is not None and order == 2:
-        ii = np.where((wave >= wl_min_o2) & (wave <= wl_max_o2))[0]
-        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
-        wave, wave_err = wave[ii], wave_err[ii]
-
-    # Apply custom wavelength masks
-    if wavelength_masks is not None and len(wavelength_masks) > 0:
-        print(f"Applying wavelength masks for NIRISS order {order}:")
-        wave, wave_err, fluxcube, fluxcube_err = apply_wavelength_masks(
-            wave, wave_err, fluxcube, fluxcube_err, wavelength_masks
-        )
-
-    # FITS stores big-endian arrays; JAX requires native-endian numeric input.
-    wavelength = np.asarray(wave, dtype=np.float64)
-    wavelength_err = np.asarray(wave_err, dtype=np.float64)
-    t = np.asarray(bjd, dtype=np.float64)
-    fluxcube = np.asarray(fluxcube, dtype=np.float64)
-    fluxcube_err = np.asarray(fluxcube_err, dtype=np.float64)
-
-    return wavelength,wavelength_err, t, fluxcube, fluxcube_err
-
-def unpack_nirspec_exotedrf(infile, instrument, trim_start, trim_end, wl_min=None, wl_max=None, wavelength_masks=None):
-    bjd = fits.getdata(infile, 5)
-    wave = fits.getdata(infile, 1)
-    wave_err = fits.getdata(infile, 2)
-    fluxcube = fits.getdata(infile, 3)
-    fluxcube_err = fits.getdata(infile, 4)
-    wave = wave[5:-5]
-    wave_err = wave_err[5:-5]
-    fluxcube = fluxcube[:, 5:-5]
-    fluxcube_err = fluxcube_err[:, 5:-5]
-
-    start = 0 if (trim_start is None) else int(trim_start)
-    stop  = None if (trim_end in (None, 0)) else -int(trim_end)
-
-    fluxcube     = fluxcube[start:stop, :]
-    fluxcube_err = fluxcube_err[start:stop, :]
-    bjd            = bjd[start:stop]   # keep time aligned!
-
-
-    if instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/G395H':
-        ii = np.where((wave >= 2.9) & (wave <= 5.0))[0]
-        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
-        wave, wave_err = wave[ii], wave_err[ii]
-    if instrument == 'NIRSPEC/PRISM':
-        ii = np.where((wave >= 0.6) & (wave <= 5.0))[0]
-        fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
-        wave, wave_err = wave[ii], wave_err[ii]
-    if instrument == 'NIRSPEC/G140H':
-        ii = np.where((wave >= 1.0) & (wave <= 1.8))[0]
-        fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
-        wave, wave_err = wave[ii], wave_err[ii]
+    ii = np.argsort(wave, kind='stable')
+    wave, wave_err = wave[ii], wave_err[ii]
+    fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:, ii]
 
     if wl_min is not None and wl_max is not None:
         ii = np.where((wave >= wl_min) & (wave <= wl_max))[0]
-        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:, ii]
         wave, wave_err = wave[ii], wave_err[ii]
 
-    # Apply custom wavelength masks
     if wavelength_masks is not None and len(wavelength_masks) > 0:
-        print(f"Applying wavelength masks for {instrument}:")
+        label = f"NIRISS order {order}" if order is not None else instrument
+        print(f"Applying wavelength masks for {label}:")
         wave, wave_err, fluxcube, fluxcube_err = apply_wavelength_masks(
             wave, wave_err, fluxcube, fluxcube_err, wavelength_masks
         )
 
-    # FITS stores big-endian arrays; JAX requires native-endian numeric input.
-    wavelength = np.asarray(wave, dtype=np.float64)
-    wavelength_err = np.asarray(wave_err, dtype=np.float64)
-    t = np.asarray(bjd, dtype=np.float64)
-    fluxcube = np.asarray(fluxcube, dtype=np.float64)
-    fluxcube_err = np.asarray(fluxcube_err, dtype=np.float64)
-    return wavelength, wavelength_err,  t, fluxcube, fluxcube_err
-
-def unpack_miri_exotedrf(infile, trim_start, trim_end, wl_min=None, wl_max=None, wavelength_masks=None):
-
-    bjd = fits.getdata(infile, 5)
-    wave = fits.getdata(infile, 1)
-    wave_err = fits.getdata(infile, 2)
-    fluxcube = fits.getdata(infile, 3)
-    fluxcube_err = fits.getdata(infile, 4)
-    wave = wave[5:-5]
-    wave_err = wave_err[5:-5]
-    fluxcube = fluxcube[:, 5:-5]
-    fluxcube_err = fluxcube_err[:, 5:-5]
-
-
-    start = 0 if (trim_start is None) else int(trim_start)
-    stop  = None if (trim_end in (None, 0)) else -int(trim_end)
-
-    fluxcube     = fluxcube[start:stop, :]
-    fluxcube_err = fluxcube_err[start:stop, :]
-    bjd            = bjd[start:stop]   # keep time aligned!
-
-
-    ii = np.where((wave > 5) & (wave <= 12))[0]
-    fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
-    wave, wave_err = wave[ii], wave_err[ii]
-    ii = np.argsort(wave)
-    wave, wave_err = wave[ii], wave_err[ii]
-    fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
-
-    if wl_min is not None and wl_max is not None:
-        ii = np.where((wave >= wl_min) & (wave <= wl_max))[0]
-        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
-        wave, wave_err = wave[ii], wave_err[ii]
-
-    # Apply custom wavelength masks
-    if wavelength_masks is not None and len(wavelength_masks) > 0:
-        print(f"Applying wavelength masks for MIRI/LRS:")
-        wave, wave_err, fluxcube, fluxcube_err = apply_wavelength_masks(
-            wave, wave_err, fluxcube, fluxcube_err, wavelength_masks
-        )
-
-    # FITS stores big-endian arrays; JAX requires native-endian numeric input.
     wavelength = np.asarray(wave, dtype=np.float64)
     wavelength_err = np.asarray(wave_err, dtype=np.float64)
     t = np.asarray(bjd, dtype=np.float64)
     fluxcube = np.asarray(fluxcube, dtype=np.float64)
     fluxcube_err = np.asarray(fluxcube_err, dtype=np.float64)
     return wavelength, wavelength_err, t, fluxcube, fluxcube_err
+
+
+def load_spectra(infile, instrument, trim_start, trim_end, order=None, input_format='auto',
+                 wl_min=None, wl_max=None, wavelength_masks=None):
+    """Read ``infile`` in any supported product format and post-process it.
+
+    ``input_format`` is ``'auto'`` (sniff the file), ``'exotedrf'``, ``'sparta'``,
+    or ``'eureka'``; see ``koala.readers``. Returns the same five arrays as
+    ``unpack_exotedrf_spectra``.
+    """
+    _, raw = read_spectra(infile, input_format=input_format, order=order)
+    return _finalize_spectra(*raw, instrument, order, trim_start, trim_end,
+                             wl_min=wl_min, wl_max=wl_max, wavelength_masks=wavelength_masks)
+
+
+def unpack_niriss_exotedrf(infile, order, trim_start, trim_end, wl_min_o1=None, wl_max_o1=None, wl_min_o2=None, wl_max_o2=None, wavelength_masks=None, input_format='exotedrf'):
+    """Read one NIRISS/SOSS order from an extracted-spectra product."""
+    wl_min, wl_max = (wl_min_o1, wl_max_o1) if order == 1 else (wl_min_o2, wl_max_o2)
+    return load_spectra(infile, 'NIRISS/SOSS', trim_start, trim_end, order=order,
+                        input_format=input_format, wl_min=wl_min, wl_max=wl_max,
+                        wavelength_masks=wavelength_masks)
+
+
+def unpack_exotedrf_spectra(infile, instrument, trim_start, trim_end, wl_min=None, wl_max=None, wavelength_masks=None, input_format='exotedrf'):
+    """Read a NIRSpec, NIRCam, or MIRI extracted-spectra product.
+
+    The wavelength window kept for ``instrument`` comes from ``koala.instruments``.
+    """
+    return load_spectra(infile, instrument, trim_start, trim_end, order=None,
+                        input_format=input_format, wl_min=wl_min, wl_max=wl_max,
+                        wavelength_masks=wavelength_masks)
+
 
 class SpectroData:
     """Simple container for dot notation access."""
@@ -235,7 +170,6 @@ class SpectroData:
     def save_whitelight_csv(self, output_path):
         df = pd.DataFrame({'time': self.wl_time, 'flux': self.wl_flux, 'flux_err': self.wl_flux_err})
         df.to_csv(output_path, index=False)
-
 
 def _filter_invalid_spectroscopic_integrations(time, flux, flux_err):
     """Remove integrations that cannot define a valid Gaussian likelihood.
@@ -404,20 +338,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
                 wavelengths, flux_transposed, flux_err_transposed, low_res, method='average'
             )
-        if cfg['instrument'] == 'NIRSPEC/G395M' or cfg['instrument'] == 'NIRSPEC/G395H':
-            # Trim edge wavelengths for low-res based on detector
-            if nrs == 1:
-                # NRS1: clip wavelengths < 2.9 microns
-                valid_lr = (wl_lr >= 2.9) & (wl_lr <= 5.0)
-            elif nrs == 2:
-                # NRS2: clip wavelengths > 5.0 microns
-                valid_lr = wl_lr <= 5.0
-        elif cfg['instrument'] == 'NIRSPEC/PRISM':
-            valid_lr = (wl_lr >= 0.5) & (wl_lr <= 5.0)
-        elif cfg['instrument'] == 'NIRSPEC/G140H':
-            valid_lr = (wl_lr >= 1.0) & (wl_lr <= 1.8)
-        else:
-            valid_lr = np.ones(len(wl_lr), dtype=bool)
+        valid_lr = _instrument_wavelength_mask(cfg['instrument'], wl_lr)
         wl_lr = wl_lr[valid_lr]
         wl_err_lr = wl_err_lr[valid_lr]
         flux_lr = flux_lr[valid_lr]
@@ -446,20 +367,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
                 wavelengths, flux_transposed, flux_err_transposed, high_res, method='average'
             )
-        if cfg['instrument'] == 'NIRSPEC/G395H' or cfg['instrument'] == 'NIRSPEC/G395M':
-            # Trim edge wavelengths for high-res based on detector
-            if nrs == 1:
-                # NRS1: clip wavelengths < 2.9 microns
-                valid_hr = (wl_hr >= 2.9) & (wl_hr<= 5.0)
-            elif nrs == 2:
-                # NRS2: clip wavelengths > 5.0 microns
-                valid_hr = wl_hr <= 5.0
-        elif cfg['instrument'] == 'NIRSPEC/PRISM':
-            valid_hr = (wl_hr >= 0.5) & (wl_hr <= 5.0)
-        elif cfg['instrument'] == 'NIRSPEC/G140H':
-            valid_hr = (wl_hr >= 1.0) & (wl_hr <= 1.8)
-        else:
-            valid_hr = np.ones(len(wl_hr), dtype=bool) 
+        valid_hr = _instrument_wavelength_mask(cfg['instrument'], wl_hr)
         wl_hr = wl_hr[valid_hr]
         wl_err_hr = wl_err_hr[valid_hr]
         flux_hr = flux_hr[valid_hr]
@@ -515,43 +423,10 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         else:
             wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_pixel(
             wavelengths, flux_transposed, flux_err_transposed, pixels.get('low'))
-                  # Trim edge wavelengths based on detector
-        if cfg['instrument'] == 'NIRSPEC/G395H' or cfg['instrument'] == 'NIRSPEC/G395M':
-            if nrs == 1:
-            # NRS1: clip wavelengths < 2.9 microns
-                valid_hr = (wl_hr >= 2.9) & (wl_hr <= 5.0)
-                wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
-                flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
+        valid_lr = _instrument_wavelength_mask(cfg['instrument'], wl_lr)
+        wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
+        flux_lr, flux_err_lr = flux_lr[valid_lr], flux_err_lr[valid_lr]
 
-                valid_lr = (wl_lr >= 2.9) & (wl_lr <= 5.0)
-                wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
-                flux_lr, flux_err_lr = flux_lr[valid_lr], flux_err_lr[valid_lr]
-            elif nrs == 2:
-          # NRS2: clip wavelengths > 5.0 microns
-                valid_hr = wl_hr <= 5.0
-                wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
-                flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
-
-                valid_lr = wl_lr <= 5.0
-                wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
-        elif cfg['instrument'] == 'NIRSPEC/PRISM':
-            valid_hr = (wl_hr >= 0.5) & (wl_hr <= 5.0)
-            wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
-            flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
-
-            valid_lr = (wl_lr >= 0.5) & (wl_lr <= 5.0)
-            wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
-            flux_lr, flux_err_lr = flux_lr[valid_lr], flux_err_lr[valid_lr] 
-       
-        elif cfg['instrument'] == 'NIRSPEC/G140H':
-            valid_hr = (wl_hr >= 1.0) & (wl_hr <= 1.8)
-            wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
-            flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
-
-            valid_lr = (wl_lr >= 1.0) & (wl_lr <= 1.8)
-            wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
-            flux_lr, flux_err_lr = flux_lr[valid_lr], flux_err_lr[valid_lr]
-        
         n_lr = min(len(wl_lr), flux_lr.shape[0], flux_err_lr.shape[0], len(wl_err_lr))
         wl_lr, wl_err_lr = wl_lr[:n_lr], wl_err_lr[:n_lr]
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
@@ -569,7 +444,10 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         else:
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_pixel(
                 wavelengths, flux_transposed, flux_err_transposed, pixels.get('high'))
-            
+        valid_hr = _instrument_wavelength_mask(cfg['instrument'], wl_hr)
+        wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
+        flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
+
         n_hr = min(len(wl_hr), flux_hr.shape[0], flux_err_hr.shape[0], len(wl_err_hr))
         wl_hr, wl_err_hr = wl_hr[:n_hr], wl_err_hr[:n_hr]
         flux_hr, flux_err_hr = flux_hr[:n_hr, :], flux_err_hr[:n_hr, :]
@@ -669,6 +547,25 @@ def _resolve_transit_ephemeris(planet_cfg, transit_ephemeris=None):
     return t0s, durations, periods
 
 
+def _instrument_wavelength_mask(instrument, wavelengths):
+    """Boolean mask keeping binned channels inside the instrument's wavelength window."""
+    wavelengths = np.asarray(wavelengths, dtype=float)
+    data_range = data_wavelength_range(instrument)
+    if data_range is None:
+        return np.ones(len(wavelengths), dtype=bool)
+    return (wavelengths >= data_range[0]) & (wavelengths <= data_range[1])
+
+
+def unpack_nirspec_exotedrf(infile, instrument, trim_start, trim_end, **kwargs):
+    """Backwards-compatible alias of :func:`unpack_exotedrf_spectra`."""
+    return unpack_exotedrf_spectra(infile, instrument, trim_start, trim_end, **kwargs)
+
+
+def unpack_miri_exotedrf(infile, trim_start, trim_end, **kwargs):
+    """Backwards-compatible alias of :func:`unpack_exotedrf_spectra` for MIRI/LRS."""
+    return unpack_exotedrf_spectra(infile, 'MIRI/LRS', trim_start, trim_end, **kwargs)
+
+
 def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start=None, mask_end=None, mask_integrations_start=None, mask_integrations_end=None, transit_ephemeris=None):
     """Main function to process spectroscopy data.
 
@@ -691,22 +588,15 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     # Get wavelength masks from config
     wavelength_masks = cfg.get('wavelength_masks', None)
 
-    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM' or instrument == 'NIRSPEC/G140H':
-        nrs = cfg['nrs']
-        planet_cfg = cfg['planet']
-        prior_duration = planet_cfg['duration']
-        prior_t0 = planet_cfg['t0']
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_nirspec_exotedrf(fits_file, instrument, mask_integrations_start, mask_integrations_end, wl_min=wl_min, wl_max=wl_max, wavelength_masks=wavelength_masks)
-        mini_instrument = nrs
-    elif instrument == 'NIRISS/SOSS':
-        order = cfg['order']
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_niriss_exotedrf(fits_file, order, mask_integrations_start, mask_integrations_end, wl_min_o1=wl_min_o1, wl_max_o1=wl_max_o1, wl_min_o2=wl_min_o2, wl_max_o2=wl_max_o2, wavelength_masks=wavelength_masks)
+    instrument = normalize_instrument(instrument)
+    nrs, order = resolve_detector(instrument, cfg)
+    input_format = cfg.get('input_format', 'auto')
+    if detector_key(instrument) == 'order':
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_niriss_exotedrf(fits_file, order, mask_integrations_start, mask_integrations_end, wl_min_o1=wl_min_o1, wl_max_o1=wl_max_o1, wl_min_o2=wl_min_o2, wl_max_o2=wl_max_o2, wavelength_masks=wavelength_masks, input_format=input_format)
         mini_instrument = order
-    elif instrument == 'MIRI/LRS':
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_miri_exotedrf(fits_file, mask_integrations_start, mask_integrations_end, wl_min=wl_min, wl_max=wl_max, wavelength_masks=wavelength_masks)
-        mini_instrument = ''
     else:
-        raise NotImplementedError(f'Instrument {instrument} not implemented yet')
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_exotedrf_spectra(fits_file, instrument, mask_integrations_start, mask_integrations_end, wl_min=wl_min, wl_max=wl_max, wavelength_masks=wavelength_masks, input_format=input_format)
+        mini_instrument = nrs if nrs is not None else ''
     
     wavelengths = np.array(wavelengths)
     wavelengths_err = np.array(wavelengths_err)

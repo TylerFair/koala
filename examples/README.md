@@ -8,7 +8,7 @@ cp examples/niriss_soss_order1.yaml my_transit.yaml
 python fit_jwst.py -c my_transit.yaml
 ```
 
-The SOSS example reads the bundled `data/WASP-39_soss_binned8.fits` and downloads the ExoTiC-LD files it needs on first use. The other examples expect your own extracted FITS file: point `path`, `input_dir`, `fits_file`, and `stellar.ld_data_path` at your local copies before running.
+The SOSS example reads the bundled `data/WASP-39_soss_binned8.fits` and downloads the ExoTiC-LD files it needs on first use. The other examples expect your own extracted spectra from exoTEDRF, SPARTA, or Eureka! (the format is detected automatically): point `path`, `input_dir`, `input_file`, and `stellar.ld_data_path` at your local copies before running.
 
 | Example | Use it for |
 |---|---|

@@ -10,7 +10,9 @@ YAML file; it fits the white-light transit, carries the shared geometry into
 every wavelength channel, and writes a transmission spectrum. JAXoplanet fits
 also support [eclipses, phase curves, and stellar spots](guides/phase_curves.md).
 
-Koala supports NIRISS/SOSS, NIRSpec, and MIRI/LRS observations, with
+Koala supports every JWST time-series mode (NIRISS/SOSS, all NIRSpec gratings
+and PRISM, NIRCam grism, MIRI/LRS) and reads exoTEDRF, SPARTA, and Eureka!
+products, detecting the format automatically. It offers
 GPU-parallel inference, resumable runs, and predictive model stacking.
 
 ```{image} _static/soss_wasp39_spectrum.png
@@ -48,7 +50,7 @@ data, and cluster environments.
 ## The workflow
 
 1. Start from the example for your instrument and point it at an extracted
-   box-spectrum FITS file.
+   exoTEDRF, SPARTA, or Eureka! spectral time series.
 2. Inspect the white-light fit and residuals before trusting the spectrum.
 3. Choose a trend and limb-darkening treatment supported by the data.
 4. Resume, compare, or stack models without changing the basic workflow.

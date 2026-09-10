@@ -99,7 +99,7 @@ plt.show()
 | Goal | Change |
 |---|---|
 | Fit SOSS order 2 | `order: 2` |
-| Fit NIRSpec or MIRI | Set `instrument`, `nrs`, and `fits_file`; see [Supported modes](../quickstart.md#supported-modes) |
+| Fit NIRSpec, NIRCam, or MIRI | Set `instrument`, `nrs` (NIRSpec only), and `input_file`; see [Supported modes](../quickstart.md#supported-modes) |
 | Use native wavelength bins | `resolution.high: native` |
 | Change the resolving power | Set `resolution.high` to an integer such as `20` or `300` |
 | Use a supplied wavelength grid | `resolution.high: reference` with `reference_grid` |

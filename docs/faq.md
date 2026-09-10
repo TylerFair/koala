@@ -2,10 +2,11 @@
 
 ## What data does Koala expect?
 
-An extracted box-spectrum FITS time series containing time, wavelength, flux,
-and uncertainty arrays in the structure read by `SpectroData`. Koala fits
-light curves; it does not start from raw detector ramps. Start from the
-example for your observing mode and set `path`, `input_dir`, and `fits_file`.
+An extracted spectroscopic time series from exoTEDRF (box-spectrum FITS),
+SPARTA (pickle), or Eureka! (Stage 3 or 4 HDF5); the format is detected
+automatically. Koala fits light curves; it does not start from raw detector
+ramps. Start from the example for your observing mode and set `path`,
+`input_dir`, and `input_file`.
 
 ## Do I need a GPU?
 

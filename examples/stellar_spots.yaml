@@ -25,7 +25,7 @@ instrument: NIRSPEC/G395M
 nrs: 1
 path: .
 input_dir: examples/data/generated
-fits_file: synthetic_stellar_spots.fits
+input_file: synthetic_stellar_spots.fits
 output_dir: results/synthetic_stellar_spots
 
 resolution:

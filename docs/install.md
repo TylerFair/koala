@@ -35,8 +35,8 @@ There is no separate Harmonica installation step. It provides `harmonica.jax.har
 Python build dependencies automatically; the required Eigen headers are
 included in the repository, with no submodule checkout needed.
 
-Koala reads ExoTEDRF box-spectrum FITS files directly with Astropy and includes
-its own NumPy binning utilities; installing ExoTEDRF is not required.
+Koala reads exoTEDRF, SPARTA, and Eureka! products directly and includes its
+own binning utilities; none of those pipelines needs to be installed.
 
 tinygp is installed from the Koala fork at a validated commit rather than
 from PyPI, because no PyPI release yet contains the parallel associative-scan
