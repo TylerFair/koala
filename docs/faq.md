@@ -2,11 +2,17 @@
 
 ## What data does Koala expect?
 
-An extracted spectroscopic time series from exoTEDRF (box-spectrum FITS),
-SPARTA (pickle), or Eureka! (Stage 3 or 4 HDF5); the format is detected
-automatically. Koala fits light curves; it does not start from raw detector
-ramps. Start from the example for your observing mode and set `path`,
-`input_dir`, and `input_file`.
+A spectroscopic time series that has already been extracted from the
+detector images by a reduction pipeline. Koala reads three products and
+detects which one it has been given:
+
+- exoTEDRF `*_box_spectra_fullres.fits`,
+- SPARTA `gather_and_filter.py` pickles,
+- Eureka! Stage 3 `*_SpecData.h5` or Stage 4 `*_LCData.h5`.
+
+Set `path`, `input_dir`, and `input_file` to the file, and `instrument`
+(plus `nrs` or `order` where the mode needs it). Times are BMJD_TDB.
+Koala does not start from raw ramps or stack several files into one series.
 
 ## Do I need a GPU?
 
