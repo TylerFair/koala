@@ -1,6 +1,5 @@
 # Synthetic rocky-planet secondary eclipse ("ROCKY-1 b") with MIRI/LRS.
-# The orbit and the fit setup mirror the JWST/MIRI 15 micron eclipse analysis
-# of GJ 3929 b (arXiv:2508.12516). Generate the input from the repo root with:
+# Generate the synthetic input from the repo root with:
 #   python tools/example_phase_curves.py eclipse
 planet:
   # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.

@@ -1,12 +1,9 @@
 # Rocky-planet secondary eclipse with MIRI/LRS
 
 This tutorial fits a fully synthetic MIRI/LRS eclipse of a rocky planet,
-"ROCKY-1 b". Its orbital properties and prior choices are inspired by the
-GJ 3929 b analysis ([arXiv:2508.12516](https://arxiv.org/abs/2508.12516)),
-but the observations are generated locally: a flat 100 ppm eclipse in
-14 channels from 5.5 to 11.5 µm, with 120 ppm Gaussian noise per point per
-channel. The real study used MIRI 15 µm photometry; these are synthetic
-MIRI/LRS-style spectra, not that planet's observed data.
+"ROCKY-1 b". The observations are generated locally: a flat 100 ppm eclipse
+in 14 channels from 5.5 to 11.5 µm, with 120 ppm Gaussian noise per point
+per channel.
 
 The workflow is **fit white light → fix geometry → fit native-channel depths**.
 The spectral stage also fits a baseline and noise for each channel. No
@@ -19,8 +16,7 @@ so it can be copied directly:
 
 ```yaml
 # Synthetic rocky-planet secondary eclipse ("ROCKY-1 b") with MIRI/LRS.
-# The orbit and the fit setup mirror the JWST/MIRI 15 micron eclipse analysis
-# of GJ 3929 b (arXiv:2508.12516). Generate the input from the repo root with:
+# Generate the synthetic input from the repo root with:
 #   python tools/example_phase_curves.py eclipse
 planet:
   # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
@@ -76,19 +72,16 @@ is fitted and what is held is visible at a glance:
   give the secondary-eclipse mid-time instead of `t0`; koala derives the
   transit epoch as `eclipse_time - period / 2` for the circular orbit and
   reports both. The uniform range spans ±0.085 d (about two hours) around
-  the predicted time, as in the GJ 3929 b analysis, so the fit locates the
-  eclipse rather than assuming its timing.
+  the predicted time, allowing the fit to recover the eclipse timing.
 - **`eclipse_depth_ppm` is free, uniform from 0 to 1000 ppm.** A wide flat
   prior lets the data set the depth and keeps the posterior honest when the
   eclipse is marginal. The injected depth is 100 ppm in every channel.
-- **`a_rs` and `b` are gaussian, from the literature.** The scaled semi-major
-  axis is 17.04 ± 0.5 and the impact parameter 0.208 ± 0.15, the latter
-  truncated to 0 to 1; these are the paper's a/R* and inclination
-  (89.3 ± 0.5°, with b = a/R* cos i). They set the eclipse duration and
-  shape, which an eclipse alone constrains weakly, so the prior does the work.
-- **`period` and `rprs` are fixed.** The period is known to far better
-  precision than one visit can improve, and the radius ratio only enters an
-  eclipse through the shape of ingress and egress.
+- **`a_rs` and `b` have gaussian priors.** The scaled semi-major axis is
+  17.04 ± 0.5 and the impact parameter 0.208 ± 0.15, the latter truncated
+  to 0 to 1. These synthetic geometry parameters set the eclipse duration
+  and shape, which a shallow eclipse alone constrains weakly.
+- **`period` and `rprs` are fixed at their injected values.** The radius
+  ratio enters the eclipse through the shape of ingress and egress.
 
 In white light, `b` and `a_rs` are free, so their priors must be informative.
 For spectroscopy, koala fixes the orbit to the white-light posterior-median

@@ -27,10 +27,9 @@ B = 0.25
 RPRS = 0.1
 NOISE_PPM = 120.0
 
-# Synthetic rocky planet "ROCKY-1 b" for the eclipse scenario. The orbit and
-# the fit setup mirror the JWST/MIRI 15 micron eclipse analysis of GJ 3929 b
-# (arXiv:2508.12516): P = 2.6162644 d, a/R* = 17.04, i = 89.3 deg
-# (b = a/R* cos i = 0.208), Rp/R* = 0.0318, and an eclipse depth of 100 ppm.
+# Synthetic rocky planet "ROCKY-1 b" for the eclipse scenario:
+# P = 2.6162644 d, a/R* = 17.04, b = 0.208, Rp/R* = 0.0318,
+# and a flat eclipse depth of 100 ppm.
 ROCKY_PERIOD = 2.6162644
 ROCKY_T0 = 60_000.0
 ROCKY_ECLIPSE_TIME = ROCKY_T0 + 0.5 * ROCKY_PERIOD   # 60001.3081322, circular orbit

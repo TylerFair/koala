@@ -18,7 +18,7 @@ The SOSS example reads the bundled `data/WASP-39_soss_binned8.fits` and download
 | `nirspec_prism.yaml` | Native-grid PRISM with an exponential ramp and small GPU batches |
 | `harmonica_soss_order1.yaml` | Asymmetric-ingress/egress fitting |
 | `limb_darkening_stack.yaml` | Repeating one fit under several limb-darkening choices |
-| `eclipse.yaml` | A generated rocky-planet MIRI/LRS eclipse, set up like the GJ 3929 b analysis |
+| `eclipse.yaml` | A synthetic rocky-planet MIRI/LRS eclipse |
 | `stellar_spots.yaml` | A generated transit with physical rotating Starry spots |
 | `plot_spectrum.py` | Reading and plotting a spectrum CSV |
 
