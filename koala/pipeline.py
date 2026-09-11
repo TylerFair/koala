@@ -1367,6 +1367,13 @@ def run(cfg, config_path=None):
                     np.array(wl_time_good), t_jump, width
                 )
     valid = None
+    if uses_surface_model:
+        from .surface import _spectroscopic_surface_config
+        surface_config = _spectroscopic_surface_config(
+            surface_config, planet_parameter_specs,
+        )
+        _engine_spectro_kw = {**_engine_spectro_kw, 'surface_config': surface_config}
+
     _stage_result = run_low_resolution_stage(
         A_RS_BASE=locals().get('A_RS_BASE'),
         B_BASE=locals().get('B_BASE'),

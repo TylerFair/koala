@@ -1106,7 +1106,7 @@ def _corner_columns(samples):
     out_cols, labels = [], []
     for name in sorted(columns, key=lambda n: (rank(n), n)):
         arr = columns[name]
-        if not np.all(np.isfinite(arr)) or np.nanstd(arr) == 0:
+        if not np.all(np.isfinite(arr)) or np.all(arr == arr[0]):
             continue
         stem, suffix = name, ""
         if "_" in name and name.rsplit("_", 1)[1].isdigit():

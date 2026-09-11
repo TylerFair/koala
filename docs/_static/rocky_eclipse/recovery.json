@@ -1,0 +1,19 @@
+{
+  "white_light_depth_ppm_q16_q50_q84": [
+    87.41714442001769,
+    94.63048896557582,
+    101.69232605196053
+  ],
+  "eclipse_time_offset_minutes_q16_q50_q84": [
+    -0.8374326705093844,
+    0.1306232123170048,
+    1.1466093741075025
+  ],
+  "white_light_residual_rms_ppm": 32.5108462322271,
+  "native_channels": 14,
+  "minimum_channel_depth_ess": 975.6634286653092,
+  "spectral_divergences": 0,
+  "channels_containing_truth_in_68pct_interval": 11,
+  "median_channel_interval_half_width_ppm": 25.02167319010184,
+  "spectroscopic_geometry": "conditional on white-light posterior-median geometry"
+}

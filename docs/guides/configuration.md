@@ -66,7 +66,7 @@ python fit_jwst.py -c config.yaml
 | `flags.light_curve_model` | `transit`, `eclipse`, or `phase_curve`; see [Eclipses, phase curves, and stellar spots](phase_curves.md). |
 | `host_device` | `gpu` for a full run; `cpu` for checks and the bundled example. |
 
-### Excluding data
+## Excluding data
 
 Two optional keys drop data before any fitting. Each is a list of
 `[first, last]` pairs, and both ends of every pair are included in the

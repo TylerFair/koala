@@ -148,9 +148,12 @@ def _geometry_chain_quality(grouped_samples):
         values = jnp.asarray(grouped_samples[name], dtype=jnp.float64)
         if values.ndim < 2:
             values = values.reshape((1, values.shape[0]))
-        if float(jnp.nanstd(values)) == 0.0:
+        if bool(jnp.all(jnp.isfinite(values))) and bool(
+            jnp.all(values == values[0, 0])
+        ):
             # A parameter fixed by its specification is a deterministic
-            # site; it has no chain quality to gate on.
+            # site; it has no chain quality to gate on. Compare draws
+            # directly: reduction roundoff can give a constant a nonzero std.
             continue
         site_ess = numpyro.diagnostics.effective_sample_size(values)
         ess_values = np.asarray(jax.device_get(site_ess), dtype=float)

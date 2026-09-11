@@ -97,6 +97,21 @@ def test_whitelight_geometry_quality_uses_required_sites():
 
 
 
+def test_geometry_quality_ignores_nonbinary_fixed_period():
+    rng = np.random.default_rng(7)
+    grouped = {
+        "period": np.full((1, 1000, 1), 2.6162644),
+        "t0_0": rng.normal(size=(1, 1000)),
+        "_eclipse_depth_0": rng.normal(1e-4, 1e-5, size=(1, 1000)),
+    }
+    ess, _ = _geometry_chain_quality(grouped)
+    assert set(ess) == {"t0", "eclipse_depth_0"}
+    # Resolve even tiny real variation; no tolerance should erase it.
+    grouped["period"][0, 0, 0] = np.nextafter(2.6162644, np.inf)
+    ess, _ = _geometry_chain_quality(grouped)
+    assert "period" in ess
+
+
 def test_geometry_handoff_round_trip_and_tamper_invalidation(tmp_path):
     path = tmp_path / "whitelight_geometry_handoff.json"
     posterior_fingerprint = "posterior-target-123"

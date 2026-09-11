@@ -218,6 +218,19 @@ def _attach_surface_eval_metadata(params, surface_config):
     return out
 
 
+def _spectroscopic_surface_config(surface_config, parameter_specs):
+    """Resolve radius freedom after white-light orbital geometry is handed off.
+
+    The white-light flag describes all orbital parameters. Spectroscopy holds
+    those at the handoff and only the radius specification controls whether
+    the channel model needs variable geometry.
+    """
+    config = dict(surface_config)
+    if config.get("model", "transit") != "transit" or config.get("spots"):
+        config["fit_geometry"] = any(spec.free for spec in parameter_specs["rprs"])
+    return config
+
+
 def _seed_surface_spectroscopic_init(init_params, surface_config, num_lcs):
     """Seed every free surface latent at its physical user prior center."""
     if not surface_config:

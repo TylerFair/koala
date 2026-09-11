@@ -58,3 +58,11 @@ def test_plot_whitelight_corner_skips_degenerate_input(tmp_path):
     out = tmp_path / "corner.png"
     assert plot_whitelight_corner({"c": np.ones(50)}, str(out)) is None
     assert not out.exists()
+
+
+def test_corner_excludes_fixed_nonbinary_period():
+    samples = _samples(n=1000)
+    samples['period'] = np.full(1000, 2.6162644)
+    columns, labels = _corner_columns(samples)
+    assert len(columns) == 9
+    assert labels[0].startswith('$t_0$')

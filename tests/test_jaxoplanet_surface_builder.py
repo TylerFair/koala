@@ -74,6 +74,26 @@ def _fake_surface(params, time, **kwargs):
     return jnp.full_like(time, amplitude)
 
 
+def test_spectroscopic_eclipse_honors_fixed_radius_with_free_white_geometry(monkeypatch):
+    from koala.surface import _spectroscopic_surface_config
+
+    monkeypatch.setattr("models.jaxoplanet.surface.compute_surface_model", _fake_surface)
+    white_config = _surface_config("eclipse", free_geometry=True)
+    config = _spectroscopic_surface_config(white_config, _geometry_specs(free=True))
+    assert white_config["fit_geometry"] is True
+    assert config["fit_geometry"] is False
+    model = create_vectorized_model(ld_mode="fixed", param_method="a_rs", surface_config=config)
+    trace = handlers.trace(handlers.seed(model, jax.random.PRNGKey(2))).get_trace(
+        jnp.linspace(.4, .6, 7), jnp.full((2, 7), 2e-4),
+        mu_t0=jnp.array([0.0]), mu_b=jnp.array([0.2]),
+        mu_depths=jnp.array([0.01]), PERIOD=jnp.array([1.0]),
+        mu_a_rs=jnp.array([8.0]), ld_fixed=jnp.array([[0.3, 0.2], [0.3, 0.2]]),
+    )
+    assert trace['rors']['type'] == 'deterministic'
+    np.testing.assert_allclose(trace['rors']['value'], np.full((2, 1), .1))
+    assert trace['_eclipse_depth_0']['type'] == 'sample'
+
+
 def test_vectorized_eclipse_exposes_channel_planet_sites(monkeypatch):
     monkeypatch.setattr("models.jaxoplanet.surface.compute_surface_model", _fake_surface)
     model = create_vectorized_model(
@@ -211,6 +231,7 @@ def test_checkpoint_manifest_serializes_surface_array_signature(tmp_path):
             "model": "eclipse",
             "fit_geometry": False,
             "eclipse_depth": np.array([9e-4]),
+            "eclipse_depth_spec": _surface_config("eclipse")["eclipse_depth_spec"],
             "spots": (),
         },
     }
@@ -220,6 +241,9 @@ def test_checkpoint_manifest_serializes_surface_array_signature(tmp_path):
     with open(path, "r", encoding="utf-8") as stream:
         payload = json.load(stream)
     assert payload["checkpoint_signature"]["surface_config"]["eclipse_depth"] == [9e-4]
+    spec = payload["checkpoint_signature"]["surface_config"]["eclipse_depth_spec"][0]
+    assert spec["prior"] == "gaussian"
+    np.testing.assert_allclose(spec["value"], 8e-4)
     # The normalized in-memory payload also compares equal on resume.
     assert _write_or_validate_checkpoint_manifest(
         tmp_path, "lr", "lr_deadbeef", "deadbeef", signature,

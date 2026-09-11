@@ -4,6 +4,7 @@ import os
 import sys
 import glob
 import csv
+import dataclasses
 import json
 import pickle
 import hashlib
@@ -664,6 +665,8 @@ def _write_or_validate_checkpoint_manifest(
     # Parsed geometry and emission values can be NumPy/JAX arrays, while the
     # manifest is portable JSON rather than a pickle.
     def _json_compatible(value):
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            return _json_compatible(dataclasses.asdict(value))
         if isinstance(value, dict):
             return {
                 str(key): _json_compatible(item)

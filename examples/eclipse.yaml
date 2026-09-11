@@ -38,6 +38,8 @@ flags:
   ld_prior: fixed
   random_seed: 20260904
   spectro_chunk_size: 4
+  # The recovery shown in the tutorial uses 4,000 retained draws per channel.
+  highres_num_samples: 4000
 
 outlier_clip:
   whitelight_sigma: 5
