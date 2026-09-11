@@ -177,20 +177,3 @@ spectral posterior. Jitter is also sampled but is omitted from this plot.
 
 [White-light corner PDF](../_static/rocky_eclipse/white_light_corner.pdf) ·
 [Channel corner PDF](../_static/rocky_eclipse/channel_corner.pdf)
-
-## Sampling checks
-
-White light retained 2,000 draws, extending the same warmed chain from
-1,000 draws when timing ESS was 224. The extension raised it to 401,
-passing the ESS ≥ 400 threshold without restarting. The white-light depth
-ESS was 2,394, with zero divergences and no tree-depth saturation.
-
-Spectroscopy retained 4,000 draws per channel. All 14 channels passed with
-independent NUTS, zero divergences, and minimum depth ESS **976**; no sampler
-fallback was needed. The saved samples confirm a constant radius ratio of
-0.0318 in every spectral draw. Each fit uses one chain, so these checks do
-not provide an independent-chain convergence comparison.
-
-[Channel diagnostics CSV](../_static/rocky_eclipse/channel_diagnostics.csv) ·
-[White-light diagnostics](../_static/rocky_eclipse/whitelight_diagnostics.json) ·
-[Recovery summary](../_static/rocky_eclipse/recovery.json)
