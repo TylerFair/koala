@@ -26,14 +26,19 @@ def _jaxoplanet(**kwargs):
     return jaxoplanet_factory(**kwargs)
 
 
+def _harmonica(**kwargs):
+    kwargs.setdefault("parameter_priors", SPECS)
+    return harmonica_factory(**kwargs)
+
+
 _jaxoplanet.__name__ = "jaxoplanet_factory"
-FACTORIES = (_jaxoplanet, harmonica_factory)
+_harmonica.__name__ = "harmonica_factory"
+FACTORIES = (_jaxoplanet, _harmonica)
 GP_TYPES = tuple(kgp.GP_BUILDERS)
 
 
 def _prior():
-    return {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1]),
-            "parameter_priors": SPECS}
+    return {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1])}
 
 
 def _substitutions(detrend_type):

@@ -13,14 +13,12 @@ SPECS = default_planet_specs(period=3.0, t0=1.05, b=0.2, rprs=0.1, duration=0.12
 
 def _trace_default(model_factory, detrend_type):
     kwargs = dict(detrend_type=detrend_type, ld_mode="fixed", ld_profile="quadratic")
-    if model_factory is create_whitelight_model:
-        kwargs["parameter_priors"] = SPECS
+    kwargs["parameter_priors"] = SPECS
     model = model_factory(**kwargs)
     time = jnp.linspace(1.0, 1.1, 64)
     prior = {
         "period": jnp.array([3.0]),
         "u": jnp.array([0.2, 0.1]),
-        "parameter_priors": SPECS,
         "spot_guess": 1.04,
         "spot_guess2": 1.06,
         "t_jump_guess": 1.05,

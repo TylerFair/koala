@@ -373,6 +373,7 @@ def run_white_light_stage(
     _engine_wl_kw.update(
         gp_solver=gp_solver,
         gp_assume_sorted=True,
+        parameter_priors=planet_parameter_specs,
     )
 
     if explicit_ld is not None:
@@ -478,7 +479,6 @@ def run_white_light_stage(
                 'a_rs': HARMONICA_A_RS,
                 'ecc': HARMONICA_ECC,
                 'omega': HARMONICA_OMEGA,
-                'parameter_priors': planet_parameter_specs,
             }
             if '2spot' in detrending_type:
                 hyper_params_wl['spot_guess'] = spot_mu

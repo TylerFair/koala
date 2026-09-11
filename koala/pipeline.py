@@ -940,7 +940,6 @@ def run(cfg, config_path=None):
             'trend_parameterization': whitelight_trend_parameterization,
             'two_spot_ordering': whitelight_two_spot_ordering,
             'surface_config': surface_config,
-            'parameter_priors': planet_parameter_specs,
         }
         _engine_spectro_kw = {
             'jitter_prior': jitter_prior,

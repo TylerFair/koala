@@ -95,6 +95,8 @@ See [Citing Koala](citing.md) for how to reference Koala and the methods your
 configuration uses. Koala is distributed under the BSD 3-Clause License;
 bundled components keep their own licenses.
 
+The name Koala and its acronym were coined by Brandon Park Coy.
+
 ```{toctree}
 :hidden:
 :caption: Getting started

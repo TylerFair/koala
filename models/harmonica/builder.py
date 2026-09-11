@@ -190,10 +190,10 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
                             ld_profile='power2', step_width_mode='free',
                             trend_parameterization='physical',
                             two_spot_ordering='legacy', gp_solver=None,
-                            gp_assume_sorted=False):
+                            gp_assume_sorted=False, parameter_priors=None):
     """Harmonica white-light model with power-2 or fixed quadratic LD.
 
-    Geometry sites come from prior_params['parameter_priors'] (one
+    Geometry sites come from ``parameter_priors`` (one
     koala.config.ParameterSpec per planet and parameter); param_method
     picks whether duration or a_rs is the sampled quantity.
     """
@@ -228,11 +228,10 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_mode='gaussia
         )
         cadence = jnp.median(jnp.diff(jnp.sort(jnp.asarray(t))))
 
-        parameter_priors = prior_params.get('parameter_priors')
         if not parameter_priors:
             raise ValueError(
-                "prior_params['parameter_priors'] is required: every planet "
-                "parameter must carry a {value, prior, ...} specification."
+                "parameter_priors is required: every planet parameter must "
+                "carry a {value, prior, ...} specification (see koala.config)."
             )
         harmonica_ecc = jnp.asarray([s.value for s in parameter_priors['ecc']], dtype=jnp.float64)
         harmonica_omega = jnp.asarray([s.value for s in parameter_priors['omega']], dtype=jnp.float64)

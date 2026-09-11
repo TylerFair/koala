@@ -96,8 +96,7 @@ def test_whitelight_default_emits_legacy_output_sites():
     trace = handlers.trace(handlers.seed(model, jax.random.PRNGKey(2))).get_trace(
         jnp.linspace(-0.03, 0.03, 13), jnp.full(13, 1e-3), y=jnp.ones(13),
         prior_params={"period": np.array([3.0]), "ecc": np.array([0.0]),
-                      "omega": np.array([0.0]), "u": np.array([0.4, 0.1]),
-                      "parameter_priors": specs},
+                      "omega": np.array([0.0]), "u": np.array([0.4, 0.1])},
     )
     for name in ("u", "u1", "u2", "l", "delta"):
         assert trace[name]["type"] == "deterministic"

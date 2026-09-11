@@ -27,7 +27,7 @@ input_file: synthetic_eclipse.fits
 output_dir: results/synthetic_eclipse
 
 resolution:
-  low: 20
+  # The synthetic file has 14 channels (R ~ 18), so no coarse low stage.
   high: native
 
 flags:

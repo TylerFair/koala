@@ -28,8 +28,7 @@ SPECS = default_planet_specs(period=3.0, t0=1.0, b=0.25, rprs=0.095, duration=0.
 def _case(n=200):
     t = jnp.linspace(0.88, 1.18, n)
     yerr = jnp.full(n, 7.5e-4)
-    prior = {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1]),
-             "parameter_priors": SPECS}
+    prior = {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1])}
     init = {
         "t0_0": jnp.array(1.0),
         "rors_0": jnp.array(0.095),
