@@ -70,4 +70,6 @@ For externally supplied bin edges, use `high: reference` with `resolution.refere
 You can also fit order 2, which is stored separately in the same FITS file.
 Set `order: 2` and choose another output directory.
 Compare the residuals and fitted light curves before attributing structure in either spectrum to the atmosphere.
-If the spectrum changes with the model, the [limb-darkening](../tutorials/limb_darkening.md) and [trend](../tutorials/systematics.md) tutorials show how to investigate those choices.
+
+The [trend reference](../tutorials/systematics.md) covers polynomials, exponential ramps, Gaussian processes and spot crossings.
+The [limb-darkening reference](../tutorials/limb_darkening.md) covers quadratic and power-2 laws with fixed, Gaussian, uniform and atmosphere-based coefficient priors.

@@ -23,7 +23,7 @@ Choose the example closest to your observation:
 - `nirspec_g395m.yaml` selects a NIRSpec detector and masks an integration interval.
 - `nirspec_g395h.yaml` fits G395H/NRS1 with a quadratic baseline.
 - `nirspec_prism.yaml` fits native-grid PRISM with an exponential ramp and small GPU batches.
-- The [Harmonica tutorial](../docs/tutorials/harmonica.md) fits an asymmetric planetary boundary.
+- The [Harmonica case study](../docs/case_studies/harmonica.md) fits an asymmetric planetary boundary.
 - `limb_darkening_stack.yaml` compares limb-darkening choices for the same observation.
 - `eclipse.yaml` fits a synthetic rocky-planet MIRI/LRS eclipse.
 - `phase_curve.yaml` fits a generated thermal phase curve.

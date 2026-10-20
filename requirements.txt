@@ -4,8 +4,9 @@
 # appropriate JAX CUDA extra as described in docs/install.md.
 
 # JAX computation, inference, optimization, and transit models
-jax>=0.5.3
-jaxlib>=0.5.3
+# Keep CPU and CUDA installs on the numerical stack validated in CI.
+jax==0.6.2
+jaxlib==0.6.2
 jaxoplanet>=0.1.0,<0.2
 numpyro>=0.15.3
 numpyro-ext>=0.0.4
@@ -34,7 +35,8 @@ setuptools<81
 # Matplotlib without them.
 matplotlib
 corner
-arviz
+# Diagnostics use the InferenceData API retained by ArviZ 0.x.
+arviz<1
 
 # ExoTEDRF is not required; spectral binning is included in koala.binning.
 # Test tools and Sphinx dependencies are separate from runtime requirements.

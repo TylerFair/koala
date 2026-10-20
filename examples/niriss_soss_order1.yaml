@@ -15,29 +15,20 @@ stellar:
   teff: 5509
   logg: 4.22
   feh: 0.04
-  teff_sigma: 28          # used only by ld_prior: stellarprior
-  logg_sigma: 0.07
-  feh_sigma: 0.02
   ld_model: "stagger"     # stellar models give the limb-darkening starting values
   ld_data_path: "exotic_ld_data"  # downloaded automatically on first use
 
 instrument: 'NIRISS/SOSS'
 order: 1
 
-path: '.'
 input_dir: 'examples/data'
 input_file: 'WASP-39_soss_binned8.fits'
 output_dir: 'results/WASP-39_SOSS_ORDER1'
 
 resolution:
-  low: 20                           # optional coarse bridge/check; remove to skip it
   high: 100                          # constant resolving power; no grid file needed
 
 flags:
   detrending_type: 'linear'
-
-outlier_clip:
-  whitelight_sigma: 5
-  spectroscopic_sigma: 5
 
 host_device: "cpu"                    # portable default; use "gpu" for production

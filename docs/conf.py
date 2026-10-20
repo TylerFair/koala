@@ -24,7 +24,6 @@ master_doc = "index"
 language = "en"
 exclude_patterns = ["_build"]
 
-# Same theme family as the jaxoplanet documentation.
 html_theme = "sphinx_book_theme"
 html_title = "Koala documentation"
 html_logo = "_static/koala_logo.png"

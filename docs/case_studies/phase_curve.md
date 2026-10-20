@@ -72,3 +72,6 @@ The model places no limit on the day/night contrast or positivity of the planet 
 A nightside consistent with zero, or even below zero, is allowed and should be read as an upper limit.
 If your observation covers only an eclipse, it generally cannot determine both phase coefficients.
 Use the [uniform eclipse model](rocky_eclipse.md) for that case.
+
+The [trend reference](../tutorials/systematics.md) covers polynomials, exponential ramps, Gaussian processes and spot crossings.
+The [limb-darkening reference](../tutorials/limb_darkening.md) covers quadratic and power-2 laws with fixed, Gaussian, uniform and atmosphere-based coefficient priors.

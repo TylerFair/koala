@@ -1,33 +1,7 @@
 # Configuration
 
-One YAML file describes an observation and its fit.
-Let's start with the bundled SOSS example and look at the choices you'll need to make for your own visit:
-
-```bash
-cp examples/niriss_soss_order1.yaml wasp39.yaml
-koala -c wasp39.yaml
-```
-
-## Set up the observation
-
-First, set the input filename, instrument, and detector or order.
-The base `path` anchors the input and output directories.
-Choose a separate output directory when you change the analysis so you can compare the results.
-
-The input reader recognizes exoTEDRF, SPARTA, and Eureka! products automatically.
-Times should be barycentric TDB.
-Full BJD arrays are converted to BMJD, but epochs in the configuration need to use the [matching origin](tutorials/planet_parameters.md#transit-and-eclipse-times).
-
-Then set the planet parameters and their priors.
-Each value is either fixed or a starting point for a free parameter.
-The [planet and orbit tutorial](tutorials/planet_parameters.md) explains the prior syntax.
-The bundled example uses quadratic limb darkening with independent uniform priors on $u_1+u_2$ in $(-1,2)$ and $u_1-u_2$ in $(-2,2)$.
-
-::::{dropdown} The complete SOSS configuration
-```{literalinclude} ../examples/niriss_soss_order1.yaml
-:language: yaml
-```
-::::
+One YAML file describes a fit. For a complete starting example, see [your first fit](quickstart.md).
+The tables below list configuration keys; [planet parameters](tutorials/planet_parameters.md) explains priors and time conventions.
 
 ## Choose the wavelength grid
 
@@ -149,8 +123,8 @@ MIRI/MRS and imaging modes are not supported.
 | `resolution.reference_grid_lr` | CSV path | Grid for `low: reference`. |
 | `pixels.high`, `pixels.low` | Pixel count or `reference` | Alternative binning by detector-column count when `resolution` is absent. |
 | `pixels.reference_grid`, `pixels.reference_grid_lr` | CSV paths | Reference grids for pixel-mode stages. |
-| `outlier_clip.whitelight_sigma` | Default 4 | White-light clipping threshold. Bundled example uses 5. |
-| `outlier_clip.spectroscopic_sigma` | Default 4 | Spectroscopic clipping threshold. Bundled example uses 5. |
+| `outlier_clip.whitelight_sigma` | Default 4 | White-light clipping threshold. |
+| `outlier_clip.spectroscopic_sigma` | Default 4 | Spectroscopic clipping threshold. |
 | `outlier_clip.mask_integrations_start` | Count | Remove integrations from the start. |
 | `outlier_clip.mask_integrations_end` | Count | Remove integrations from the end. |
 
@@ -199,7 +173,10 @@ See [white-light trend priors](tutorials/systematics.md#white-light-trend-priors
 | `ld_data_path` | Directory | Downloaded atmosphere and throughput data. |
 | `ld_interpolate_type` | Default `trilinear` | ExoTiC-LD interpolation choice. |
 | `ld_coefficients` | Two numbers | Explicit coefficients for the chosen law. |
-| `ld_prior_min_sigma` | Coefficient-prior scale floor | Minimum width for atmosphere-derived marginal coefficient priors. |
+| `ld_prior_model` | `ld_model`, or `stagger` if absent | Atmosphere grid for stellar-uncertainty priors. |
+| `ld_prior_n_grid` | Default 9 | Grid points per stellar parameter for atmosphere-derived priors. |
+| `ld_prior_nsigma` | Default 5 | Half-range of that grid in stellar standard deviations. |
+| `ld_prior_min_sigma` | Default `1e-4` | Minimum width for atmosphere-derived marginal coefficient priors. |
 | `ld_mu_min` | Minimum µ | Cut the extreme limb from Sing profile calibration. |
 | `ld_prior_cache` | Default `true` | Cache atmosphere-derived priors. |
 | `ld_prior_cache_dir` | Default `.koala_cache/ld_prior` | Prior-cache directory. |
@@ -246,7 +223,7 @@ See [white-light trend priors](tutorials/systematics.md#white-light-trend-priors
 | `num_chains` | Default 4 | Independent chains vectorized on one device. |
 | `whitelight_num_chains`, `lowres_num_chains`, `highres_num_chains` | Positive integer | Override the chain count for a stage. |
 | `spectro_chunk_size` | `auto` or positive integer | Channels resident together. Alias `vmap_chunk`. GPU jaxoplanet independent sampling defaults to `auto`, balances batch padding, and retains memory headroom. CPU independent sampling defaults to one channel per host device (`cpu_host_devices`), or 40 on one device. |
-| `cpu_host_devices` | Allocated cores | CPU runs of `koala` or `python -m koala` give JAX one host device per core and split independent-sampler channels across them. `1` keeps a single device. GPU runs are unchanged. |
+| `cpu_host_devices` | Allocated cores | CPU runs of `koala`, `python -m koala` or `koala.fit` give JAX one host device per core and split independent-sampler channels across them. `1` keeps a single device. GPU runs are unchanged. |
 | `chunk_mode` | `serial`, `parallel`, `combine` | Process batches locally, split across jobs, or combine completed batches. |
 | `chunk_parallel_job_count` | Integer | Number of jobs for parallel chunk mode. |
 | `chunk_parallel_job_index` | Integer | This job's zero-based index. |
@@ -275,4 +252,4 @@ See [white-light trend priors](tutorials/systematics.md#white-light-trend-priors
 | `harmonica_spectro_fit_jitter` | Default `true` | Fit spectroscopic extra white noise. |
 | `harmonica_spectro_odd_frac_sigma` | Default 0.1 | Width of the odd-harmonic fractional prior. |
 
-The [Harmonica tutorial](tutorials/harmonica.md) shows the boundary and limb outputs.
+The [Harmonica reference](tutorials/harmonica.md) describes boundary and limb products.

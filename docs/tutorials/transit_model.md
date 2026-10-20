@@ -40,7 +40,7 @@ Their depths can differ even though they use the same orbit.
 
 ## Choose the wavelength grid
 
-The bundled example first fits a coarse spectrum and then the final grid:
+To fit an optional coarse spectrum before the final grid, use:
 
 ```yaml
 resolution:
