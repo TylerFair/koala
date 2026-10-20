@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+build/
+dist/
+*.so
+*.pyd
+
+# Editors and operating systems
+*.swp
+*.bak
+.DS_Store
+.vimrc
+
+# koala caches and run products
+.koala_cache/
+.matplotlib-cache/
+exotic_ld_data/
+results/
+examples/data/generated/
+*.pkl
+*.npz
+*.h5
+*.hdf5
+
+# Data products (the bundled example extraction is kept)
+*.fits
+!examples/data/*.fits
+*.tgz
+*.tar.gz
+
+# Logs
+*.err
+*.out
+*.log
+
+# Documentation build and archived figure tables
+docs/_build/
+docs/_static/data/runs/*/

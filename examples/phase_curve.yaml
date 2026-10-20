@@ -1,0 +1,47 @@
+# LD default: quadratic / uniform / uplus_uminus; this example selects its treatment explicitly.
+# One-orbit thermal phase curve with a secondary eclipse and transit. Generate
+# its input from the repo root with: python tools/example_phase_curves.py phase_curve
+planet:
+  # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
+  name: Synthetic-Phase-Curve
+  period: {value: 2.0, prior: fixed}
+  t0: {value: 60000.0, prior: fixed}
+  b: {value: 0.25, prior: fixed}
+  rprs: {value: 0.10, prior: fixed}
+  a_rs: {value: 6.0, prior: fixed}
+  ecc: {value: 0.0, prior: fixed}
+  omega: {value: 0.0, prior: fixed}
+  # Sinusoidal phase curve: planet flux L(phi) = eclipse_depth + C1 (cos phi - 1) + D1 sin phi,
+  # phi = 0 at secondary eclipse. eclipse_depth_ppm is the planet flux at eclipse.
+  eclipse_depth_ppm: {value: 1000.0, prior: uniform, low: 0.0, high: 3000.0}
+  phase_c1_ppm: {value: 350.0, prior: uniform, low: -1500.0, high: 1500.0}
+  phase_d1_ppm: {value: -100.0, prior: uniform, low: -1500.0, high: 1500.0}
+
+stellar:
+  ld_coefficients: [0.3, 0.2]
+
+instrument: NIRSPEC/G395M
+nrs: 1
+path: .
+input_dir: examples/data/generated
+input_file: synthetic_phase_curve.fits
+output_dir: results/synthetic_phase_curve
+
+resolution:
+  low: 20
+  high: native
+
+flags:
+  light_curve_model: phase_curve
+  transit_engine: jaxoplanet
+  detrending_type: linear
+  ld_profile: quadratic
+  ld_prior: fixed
+  random_seed: 20260904
+  spectro_chunk_size: 4
+
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: cpu

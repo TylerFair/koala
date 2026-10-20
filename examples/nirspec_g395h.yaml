@@ -1,0 +1,44 @@
+# LD default: quadratic / uniform / uplus_uminus; this example selects its treatment explicitly.
+# WASP-121 b, NIRSpec/G395H NRS1. Supply the matching extracted spectra.
+
+planet:
+  # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
+  name: WASP-121
+  period: {value: 1.274924762, prior: fixed}
+  duration: {value: 0.11595833333333333, prior: log_uniform, low: 0.01, high: 1.0}
+  t0: {value: 59867.1426, prior: uniform, low: 59867.0926, high: 59867.1926}
+  b: {value: 0.1, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.122551, prior: uniform, low: 0.01, high: 0.5}
+
+stellar:
+  teff: 6827
+  logg: 4.64
+  feh: 0.46
+  teff_sigma: 72
+  logg_sigma: 0.06
+  feh_sigma: 0.05
+  ld_model: stagger
+  ld_data_path: /path/to/exotic_ld_data
+
+instrument: NIRSPEC/G395H
+nrs: 1
+
+path: /path/to/work
+input_dir: FITS
+input_file: WASP-121_nrs1_box_spectra_fullres_G395H.fits
+output_dir: results/WASP-121_G395H_NRS1
+
+resolution:
+  low: 20
+  high: 100
+
+flags:
+  detrending_type: quadratic
+  ld_profile: power2
+  ld_prior: stellarprior
+
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: cpu

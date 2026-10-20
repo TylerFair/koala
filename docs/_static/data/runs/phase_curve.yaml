@@ -1,0 +1,60 @@
+planet:
+  name: Synthetic-Phase-Curve
+  period:
+    value: 2.0
+    prior: fixed
+  t0:
+    value: 60000.0
+    prior: fixed
+  b:
+    value: 0.25
+    prior: fixed
+  rprs:
+    value: 0.1
+    prior: fixed
+  a_rs:
+    value: 6.0
+    prior: fixed
+  ecc:
+    value: 0.0
+    prior: fixed
+  omega:
+    value: 0.0
+    prior: fixed
+  dayside_flux_ppm:
+    value: 1000.0
+    prior: gaussian
+    sigma: 150.0
+  nightside_flux_ppm:
+    value: 300.0
+    prior: gaussian
+    sigma: 75.0
+  hotspot_offset_deg:
+    value: 18.0
+    prior: gaussian
+    sigma: 10.0
+stellar:
+  ld_coefficients:
+  - 0.3
+  - 0.2
+instrument: NIRSPEC/G395M
+nrs: 1
+path: .
+input_dir: examples/data/generated
+input_file: synthetic_phase_curve.fits
+output_dir: results/phase_curve
+resolution:
+  low: 20
+  high: native
+flags:
+  light_curve_model: phase_curve
+  transit_engine: jaxoplanet
+  detrending_type: linear
+  ld_profile: quadratic
+  ld_prior: fixed
+  random_seed: 20260904
+  spectro_chunk_size: 4
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+host_device: cpu

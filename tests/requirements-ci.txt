@@ -1,0 +1,8 @@
+# CPU numerical stack used by the CI validation. Runtime requirements remain in requirements.txt.
+jax==0.6.2
+jaxlib==0.6.2
+jaxoplanet==0.1.0
+numpyro==0.19.0
+equinox==0.13.2
+numpy==2.2.6
+scipy==1.15.3

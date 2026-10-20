@@ -1,0 +1,13 @@
+{
+  "source": "realistic_eclipse_white.csv",
+  "n_integrations": 2000,
+  "injected_epoch_bmjd_tdb": 60001.3081322,
+  "injected_depth_ppm": 70.0,
+  "baseline_tau_days": 0.01609463022315802,
+  "best_epoch_bmjd_tdb": 60001.30982986333,
+  "best_depth_ppm": 66.83987759648856,
+  "conditional_depth_error_ppm": 19.885756160330278,
+  "max_delta_chi2": 11.297622842362731,
+  "baseline_chi2": 2050.783038317344,
+  "method": "Nonnegative depth; baseline timescale estimated outside injected eclipse; conditional timing scan, not a global detection significance."
+}

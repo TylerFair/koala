@@ -1,0 +1,23 @@
+[
+  {
+    "file": "realistic_eclipse_white.csv",
+    "source": "realistic_eclipse.fits",
+    "transformation": "Sum 14 fully finite channels; errors in quadrature; divide by median summed flux. Ten all-NaN channels excluded.",
+    "sha256": "df4dc160a9a65069fd241e8b81780aa3ac9f12adbe5a9f499cd0c98c0840e955",
+    "source_sha256": "1e2946b0825263124263345f06cd5f5e7d049cdc91b22874fdab96053c3e13ec"
+  },
+  {
+    "file": "hatp18_stacked.csv",
+    "source": "hatp18_nrs1_g395m_reference_fitted_sing_uplus_v2_stacked.csv",
+    "transformation": "Exact copy of archived three-candidate stacking output.",
+    "sha256": "ba15375c48588a31f861e753ee150ec7ba227335cb295f4a762ead95dd896854",
+    "source_sha256": "ba15375c48588a31f861e753ee150ec7ba227335cb295f4a762ead95dd896854"
+  },
+  {
+    "file": "wasp94_limbs.csv",
+    "source": "WASP-94_NIRISS_SOSS_order1_R50_limb_spectra_schema_v2_joint.csv",
+    "transformation": "Exact copy of archived schema-v2 joint limb summaries; plotting relabels morning as index one and evening as index two, following the stored angular convention.",
+    "sha256": "b6ad6511fc28bbafcca2241d743cd9cf9346df2dbec51cbdbf51acf224593592",
+    "source_sha256": "b6ad6511fc28bbafcca2241d743cd9cf9346df2dbec51cbdbf51acf224593592"
+  }
+]

@@ -1,0 +1,58 @@
+planet:
+  name: ROCKY-1
+  period:
+    value: 2.6162644
+    prior: fixed
+  eclipse_time:
+    value: 60001.3081322
+    prior: uniform
+    low: 60001.2231322
+    high: 60001.3931322
+  a_rs:
+    value: 17.04
+    prior: gaussian
+    sigma: 0.5
+  b:
+    value: 0.208
+    prior: gaussian
+    sigma: 0.15
+    low: 0.0
+    high: 1.0
+  rprs:
+    value: 0.0318
+    prior: fixed
+  ecc:
+    value: 0.0
+    prior: fixed
+  omega:
+    value: 0.0
+    prior: fixed
+  eclipse_depth_ppm:
+    value: 100.0
+    prior: uniform
+    low: 0.0
+    high: 1000.0
+stellar:
+  ld_coefficients:
+  - 0.0
+  - 0.0
+instrument: MIRI/LRS
+path: .
+input_dir: examples/data/generated
+input_file: synthetic_eclipse.fits
+output_dir: results/eclipse
+resolution:
+  high: native
+flags:
+  light_curve_model: eclipse
+  transit_engine: jaxoplanet
+  detrending_type: linear
+  ld_profile: quadratic
+  ld_prior: fixed
+  random_seed: 20260904
+  spectro_chunk_size: 4
+  highres_num_samples: 4000
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+host_device: cpu

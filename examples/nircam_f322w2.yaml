@@ -1,0 +1,47 @@
+# LD default: quadratic / uniform / uplus_uminus; this example selects its treatment explicitly.
+# HAT-P-18 b, NIRCam/F322W2 grism time series. Same model as the G395M example;
+# NIRCam has no detector or order key.
+
+planet:
+  # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
+  name: HAT-P-18
+  period: {value: 5.50802941, prior: fixed}
+  duration: {value: 0.10999998, prior: log_uniform, low: 0.01, high: 1.0}
+  t0: {value: 60795.39, prior: uniform, low: 60795.34, high: 60795.44}
+  b: {value: 0.148, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.1356, prior: uniform, low: 0.01, high: 0.5}
+
+stellar:
+  teff: 4710
+  logg: 4.17
+  feh: 0.06
+  teff_sigma: 238
+  logg_sigma: 0.58
+  feh_sigma: 0.08
+  ld_model: "stagger"
+  ld_data_path: "../exotic_ld_data"
+
+instrument: 'NIRCAM/F322W2'   # or NIRCAM/F444W
+
+path: '/path/to/work'
+input_dir: 'FITS'
+input_file: 'HAT-P-18_box_spectra_fullres_F322W2.fits'
+output_dir: 'HAT-P-18_F322W2'
+
+resolution:
+  low: 20
+  high: 'reference'
+  reference_grid: 'prism_template.csv'
+
+flags:
+  detrending_type: 'linear'
+  ld_profile: 'power2'
+  ld_prior: 'stellarprior'
+  mask_start: 60795.15    # drop cadences between these times (BMJD_TDB)
+  mask_end: 60795.26
+
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+
+host_device: "gpu"

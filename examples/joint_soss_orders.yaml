@@ -1,0 +1,13 @@
+# Run from the repository root: python -m koala -c examples/joint_soss_orders.yaml
+joint:
+  members: [joint_soss_order1.yaml, joint_soss_order2.yaml]
+  apply_to: []
+  shared: [a_rs, b]
+  visits: auto
+planet:
+  a_rs: {value: 11.5, prior: uniform, low: 5.0, high: 25.0}
+  b: {value: 0.45, prior: uniform, low: 0.0, high: 1.0}
+output_dir: ../results/WASP-39_joint
+host_device: cpu
+flags:
+  cpu_host_devices: 1       # one device suffices for this small CPU example

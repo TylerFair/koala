@@ -1,0 +1,54 @@
+[build-system]
+requires = [
+    "setuptools>=77",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "koala-jwst"
+version = "0.1.0"
+description = "JAX and NumPyro analysis of JWST transit light curves and spectra"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Tyler Fairnington"}]
+license = "BSD-3-Clause AND MIT"
+license-files = [
+    "LICENSE",
+    "licenses/*.txt",
+    "models/jaxoplanet/JAXOPLANET_LICENSE",
+    "models/harmonica/HARMONICA_LICENSE",
+]
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+docs = [
+    "sphinx>=8,<9",
+    "myst-parser>=4,<5",
+    "sphinx-book-theme>=1.1",
+    "sphinx-copybutton",
+    "sphinx-design",
+]
+test = ["pytest"]
+plots = ["SciencePlots", "cmcrameri"]
+
+[project.scripts]
+koala = "koala.cli:main"
+
+[project.urls]
+Repository = "https://github.com/TylerFair/koala"
+Documentation = "https://koala-jwst.readthedocs.io/"
+
+[tool.setuptools]
+include-package-data = false
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+markers = [
+    "slow: measured CPU test runtime exceeds approximately 30 seconds",
+    "gpu: requires a CUDA device",
+    "harmonica: exercises the bundled Harmonica C++ extension",
+]

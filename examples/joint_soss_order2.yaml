@@ -1,0 +1,48 @@
+# Coarse SOSS member for joint_soss_orders.yaml. All integrations are retained.
+# koala's default limb darkening (quadratic, wide uniform priors); stellar models download on first use.
+planet:
+  name: WASP-39
+  period:
+    value: 4.05528043
+    prior: fixed
+  duration:
+    value: 0.11693087
+    prior: log_uniform
+    low: 0.01
+    high: 1.0
+  t0:
+    value: 59787.055
+    prior: uniform
+    low: 59787.005
+    high: 59787.105
+  b:
+    value: 0.4498
+    prior: uniform
+    low: 0.0
+    high: 1.5
+  rprs:
+    value: 0.1457
+    prior: uniform
+    low: 0.01
+    high: 0.5
+stellar:
+  teff: 5509
+  logg: 4.22
+  feh: 0.04
+  ld_model: stagger
+  ld_data_path: exotic_ld_data
+instrument: NIRISS/SOSS
+order: 2
+path: .
+input_dir: examples/data
+input_file: WASP-39_soss_binned8.fits
+output_dir: results/WASP-39_SOSS_ORDER1
+resolution:
+  high: 5
+flags:
+  detrending_type: linear
+  plots: minimal
+outlier_clip:
+  whitelight_sigma: 5
+  spectroscopic_sigma: 5
+host_device: cpu

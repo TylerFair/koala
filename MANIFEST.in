@@ -1,0 +1,4 @@
+include README.md LICENSE requirements.txt
+recursive-include koala *.py
+recursive-include licenses *.txt
+global-exclude .DS_Store *.pyc
