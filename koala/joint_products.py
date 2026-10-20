@@ -25,6 +25,32 @@ def collect_joint_spectra(output_dir):
     return combined.sort_values('wavelength', kind='stable').reset_index(drop=True)
 
 
+# Hybrid wavelength axis for spectra that include MIRI: log over 0.6-3 um, linear over 3-5 um
+# (NIRSpec), log over 5-12 um, taking 22%, 56% and 22% of the width.
+_HYBRID = (0.6, 3.0, 5.0, 12.0)
+_HYBRID_WIDTHS = (0.22, 0.56, 0.22)
+
+
+def _hybrid_forward(wavelength):
+    start, first, second, end = _HYBRID
+    left, middle, right = _HYBRID_WIDTHS
+    wavelength = np.clip(np.asarray(wavelength, dtype=float), 1e-3, None)
+    return np.where(
+        wavelength <= first, left * np.log(wavelength / start) / np.log(first / start),
+        np.where(wavelength <= second, left + middle * (wavelength - first) / (second - first),
+                 left + middle + right * np.log(wavelength / second) / np.log(end / second)))
+
+
+def _hybrid_inverse(position):
+    start, first, second, end = _HYBRID
+    left, middle, right = _HYBRID_WIDTHS
+    position = np.asarray(position, dtype=float)
+    return np.where(
+        position <= left, start * (first / start) ** (position / left),
+        np.where(position <= left + middle, first + (position - left) / middle * (second - first),
+                 second * (end / second) ** ((position - left - middle) / right)))
+
+
 def _limit_to_bulk(ax, wavelength, value, error):
     """Show the central 98% of points; mark the few beyond it at the panel edge.
 
@@ -53,7 +79,7 @@ def plot_joint_spectra(output_dir):
         save_figure, style_axis,
     )
     import matplotlib.pyplot as plt
-    from matplotlib.ticker import FixedLocator, NullLocator, ScalarFormatter
+    from matplotlib.ticker import FixedLocator, NullLocator
 
     table = collect_joint_spectra(output_dir)
     if table is None or table['dataset'].nunique() < 2:
@@ -79,14 +105,14 @@ def plot_joint_spectra(output_dir):
     low = float(np.nanmin(out.wavelength - out.wavelength_err))
     high = float(np.nanmax(out.wavelength + out.wavelength_err))
     if high > 5.5:
-        # MIRI reaches 12 um; a log axis keeps the near-infrared readable.
-        bottom.set_xscale('log')
-        bottom.set_xlim(low * 0.97, high * 1.03)
-        ticks = [t for t in (0.6, 0.8, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12) if low <= t <= high]
+        # MIRI reaches 12 um: log over 0.6-3 um, linear over 3-5 um, log over 5-12 um.
+        bottom.set_xscale('function', functions=(_hybrid_forward, _hybrid_inverse))
+        bottom.set_xlim(min(low, 0.58), max(high, 12.0))
+        ticks = [t for t in (1.0, 2.0, 3.0, 4.0, 5.0, 10.0) if low <= t <= max(high, 12.0)]
         for ax in (top, bottom):
             ax.xaxis.set_major_locator(FixedLocator(ticks))
             ax.xaxis.set_minor_locator(NullLocator())
-            ax.xaxis.set_major_formatter(ScalarFormatter())
+        bottom.set_xticklabels([f'{t:g}' for t in ticks])
         for ax in (top, bottom):
             style_axis(ax, x_locator=False)
     else:
