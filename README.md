@@ -19,15 +19,12 @@ Clone the repository to get koala and the example data:
 ```bash
 git clone https://github.com/TylerFair/koala.git
 cd koala
-python -m pip install -e .
+python -m pip install .
 ```
 
-You'll need Python 3.10 or later and a C++ compiler for Harmonica (see [installation](https://koala-jwst.readthedocs.io/en/latest/install.html) for GPU and cluster setup).
+Start here: [Installation](https://koala-jwst.readthedocs.io/en/latest/install.html) → [Your first fit](https://koala-jwst.readthedocs.io/en/latest/quickstart.html) → [Case studies](https://koala-jwst.readthedocs.io/en/latest/case_studies/index.html) → [Reference](https://koala-jwst.readthedocs.io/en/latest/reference/index.html).
 
-## Usage
-
-Start with [your first fit](https://koala-jwst.readthedocs.io/en/latest/quickstart.html) using the bundled WASP-39 b observation.
-The [documentation](https://koala-jwst.readthedocs.io/) has short tutorials on choosing a model and longer case studies for transmission spectra, eclipses, and phase curves.
+The first fit uses the bundled WASP-39 b NIRISS/SOSS observation and runs from a notebook or the command line.
 
 ## Citing
 

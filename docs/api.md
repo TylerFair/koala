@@ -1,6 +1,17 @@
 # Command line and Python
 
-Use the command line for a complete fit.
+In a fresh notebook kernel, before importing JAX:
+
+```python
+import koala
+koala.fit("config.yaml")
+```
+
+`fit` accepts a filename or path object and returns the pipeline result.
+It configures CPU host devices before importing the numerical pipeline and shows progress in the current session.
+Restart the kernel if JAX has already started and you need a different CPU device count.
+
+You can also use the command line for a complete fit.
 The YAML file supplies the data, orbital priors, and model choices:
 
 ```bash
@@ -50,5 +61,6 @@ Model builders and sampler internals are not a versioned public API.
 
 | Function | Behavior |
 |---|---|
+| `koala.fit(config_path)` | Configures CPU host devices, loads the YAML and runs the ordinary or joint pipeline. |
 | `load_config(path)` | Returns the YAML mapping. Raises `ValueError` for an empty, scalar, or sequence document and names a complete starter example. |
 | `parse_parameter_spec(name, mapping)` | Checks a `{value, prior, ...}` entry and returns its value, prior, and bounds. Raises `ValueError` for an invalid entry. |

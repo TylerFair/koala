@@ -13,6 +13,28 @@ Check that the event falls within the observation and that the initial curve ove
 An incorrect time origin can move an eclipse entirely out of the data.
 A more flexible trend won't fix that.
 
+## Installation and cluster setup
+
+Installation needs Git, network access and a C++ compiler for Harmonica.
+The dependency builds fetch pinned sources and their Eigen and pybind11 submodules.
+If a build fails, check that the compiler is available and Git can reach the source repositories.
+Use a fresh virtual environment when changing numerical-library versions.
+The CI constraints in `tests/requirements-ci.txt` record the tested CPU stack, including JAX 0.6.2.
+
+ExoTiC-LD downloads atmosphere and throughput files on first use.
+On compute nodes without network access, populate the cache on a connected machine, copy it, and set `stellar.ld_data_path` to its location.
+Fixed explicit `stellar.ld_coefficients` do not need atmosphere interpolation.
+
+Run fits in a compute allocation. Keep outputs and compilation caches on a filesystem visible to that node.
+For NVIDIA GPUs, use a CUDA wheel compatible with your driver; see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html).
+Check devices inside a GPU allocation with:
+
+```bash
+python -c "import jax; print(jax.devices())"
+```
+
+If a notebook has already initialized JAX, restart its kernel before calling `koala.fit` to configure CPU host devices.
+
 ## Sampling diagnostics
 
 A good-looking light curve does not tell us whether the posterior was sampled well.
@@ -66,7 +88,7 @@ Include the YAML, software versions, relevant log excerpt, and a small input you
 | Emission depth resembles a transit depth | Reading `depths` or `depth00` | Read `eclipse_depth_ppm` in the emission product. |
 | Depth changes with ramp model | Trend absorbs part of the eclipse | Compare simpler trends and, if appropriate, trim settling with `exclude_times`. |
 | Structured residuals | Missing baseline, spot, or extraction feature | Compare justified [trend models](tutorials/systematics.md) with identical masks and priors. |
-| GPU allocation runs on CPU | JAX cannot see the device | Check `jax.devices()` inside the allocation and the [JAX installation](install.md#nvidia-gpus). |
+| GPU allocation runs on CPU | JAX cannot see the device | Check `jax.devices()` inside the allocation and the [JAX installation](install.md). |
 | GPU runs out of memory | Too many channels fitted together | Lower `spectro_chunk_size`. Joint geometry requires all channels in one chunk. |
 | First batch takes much longer | JAX compilation | Let the first shape compile and use a persistent compilation cache. |
 | ExoTiC-LD cannot download files | Compute node has no network | Populate `ld_data_path` on a connected machine and copy the cache. |

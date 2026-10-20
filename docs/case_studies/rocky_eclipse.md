@@ -89,3 +89,7 @@ This changes the orbital assumptions without changing the input file.
 The `eclipse_time` parameter requires a fixed period and zero eccentricity.
 koala derives `t0 = eclipse_time - period / 2`.
 With timing and geometry supplied by the transit analysis, we can concentrate on the depth, baseline, and noise.
+
+The [trend reference](../tutorials/systematics.md) covers polynomials, exponential ramps, Gaussian processes and spot crossings.
+The [limb-darkening reference](../tutorials/limb_darkening.md) covers quadratic and power-2 laws with fixed, Gaussian, uniform and atmosphere-based coefficient priors.
+Stellar limb darkening does not affect the uniform eclipse model.

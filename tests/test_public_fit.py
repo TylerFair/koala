@@ -1,0 +1,37 @@
+"""The notebook entry point prepares devices before loading the pipeline."""
+import subprocess
+import sys
+import textwrap
+
+
+def test_fit_prepares_devices_and_forwards_config(tmp_path):
+    config = tmp_path / 'fit.yaml'
+    config.write_text('host_device: cpu\nflags:\n  cpu_host_devices: 3\n')
+    script = textwrap.dedent('''
+        import os
+        import sys
+        from pathlib import Path
+        from types import ModuleType
+        import koala
+        assert 'jax' not in sys.modules
+        import builtins
+        original_import = builtins.__import__
+        def checked_import(name, *args, **kwargs):
+            if name in ('config', 'pipeline'):
+                assert '--xla_force_host_platform_device_count=3' in os.environ['XLA_FLAGS']
+            return original_import(name, *args, **kwargs)
+        builtins.__import__ = checked_import
+        pipeline = ModuleType('koala.pipeline')
+        def run(cfg, config_path=None):
+            assert cfg['host_device'] == 'cpu'
+            assert config_path == sys.argv[1]
+            return 'pipeline result'
+        pipeline.run = run
+        sys.modules['koala.pipeline'] = pipeline
+        assert koala.fit(Path(sys.argv[1])) == 'pipeline result'
+    ''')
+    import os
+    env = dict(os.environ)
+    env.pop('XLA_FLAGS', None)
+    env.pop('KOALA_CPU_HOST_DEVICES', None)
+    subprocess.run([sys.executable, '-c', script, str(config)], env=env, check=True)
