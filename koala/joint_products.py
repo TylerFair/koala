@@ -1,6 +1,6 @@
 """Combined spectra of a joint run: transit depth and transit time across all datasets.
 
-No JAX imports, so the figure can also be made afterwards from a finished run:
+No JAX imports, so the figures can also be made afterwards from a finished run:
 
     python -m koala.joint_products results/WASP-107_joint
 """
@@ -11,6 +11,34 @@ import numpy as np
 import pandas as pd
 
 
+# Display resolution of the binned joint figure. Spectral channels only, never integrations.
+DISPLAY_RESOLUTION = {'NIRISS': 50.0, 'NIRSpec': 100.0}
+DISPLAY_GROUP = {'MIRI': 2}
+# MIRI/LRS beyond 10 um is too noisy to show next to the near-infrared; the CSVs keep it.
+DISPLAY_MAX_WAVELENGTH = {'MIRI': 10.0}
+
+
+def _instrument(filename):
+    name = filename.upper()
+    if 'MIRI' in name:
+        return 'MIRI'
+    if 'NIRISS' in name or 'SOSS' in name:
+        return 'NIRISS'
+    if 'NIRSPEC' in name:
+        return 'NIRSpec'
+    if 'NIRCAM' in name:
+        return 'NIRCam'
+    return 'other'
+
+
+def _label(filename):
+    """A readable label from a koala output name, e.g. 'NIRSpec G395H nrs1'."""
+    words = Path(filename).name.split('_')[1:]
+    keep = [w for w in words if w and not w.startswith(('Rreference', 'Rnative', 'pix'))
+            and w not in ('time', 'shift.csv') and not (w[0] == 'R' and w[1:].isdigit())]
+    return ' '.join(keep).replace('NIRSPEC', 'NIRSpec').replace('order', 'order ').replace('  ', ' ').strip()
+
+
 def collect_joint_spectra(output_dir):
     """Stack every dataset's timing table under a joint output directory."""
     tables = []
@@ -18,11 +46,62 @@ def collect_joint_spectra(output_dir):
         for path in sorted(member.glob('*_time_shift.csv')):
             table = pd.read_csv(path)
             table.insert(0, 'dataset', member.name)
+            table.insert(1, 'instrument', _instrument(path.name))
+            table.insert(2, 'label', _label(path.name))
             tables.append(table)
     if not tables:
         return None
     combined = pd.concat(tables, ignore_index=True)
     return combined.sort_values('wavelength', kind='stable').reset_index(drop=True)
+
+
+def _edges(part):
+    low = part.wave_lo_um if 'wave_lo_um' in part else part.wavelength - part.wavelength_err
+    high = part.wave_hi_um if 'wave_hi_um' in part else part.wavelength + part.wavelength_err
+    return low.to_numpy(float), high.to_numpy(float)
+
+
+def _groups(low, high, instrument, resolution, group):
+    """Labels for runs of consecutive channels that reach the target width (or count)."""
+    labels, current, start = np.zeros(len(low), dtype=int), 0, 0
+    for i in range(len(low)):
+        labels[i] = current
+        if instrument in resolution:
+            # Close the bin at whichever edge comes nearest the target width lambda / R.
+            target = 0.5 * (high[i] + low[start]) / resolution[instrument]
+            width = high[i] - low[start]
+            wider = high[i + 1] - low[start] if i + 1 < len(low) else np.inf
+            done = abs(width - target) <= abs(wider - target)
+        else:
+            done = i - start + 1 >= group.get(instrument, 1)
+        if done:
+            current, start = current + 1, i + 1
+    return labels
+
+
+def display_bin(table, resolution=None, group=None):
+    """Inverse-variance bin consecutive channels of each dataset, for display only.
+
+    NIRISS channels are combined to about R = 50 and NIRSpec to about R = 100, MIRI channels in
+    pairs. Depth and timing are averaged with their own weights; their correlation is ignored,
+    which is fine for a figure but not for analysis.
+    """
+    resolution = DISPLAY_RESOLUTION if resolution is None else resolution
+    group = DISPLAY_GROUP if group is None else group
+    rows = []
+    for (dataset, instrument), part in table.groupby(['dataset', 'instrument'], sort=False):
+        part = part.sort_values('wavelength')
+        low, high = _edges(part)
+        for _, sub in part.groupby(_groups(low, high, instrument, resolution, group)):
+            sub_low, sub_high = _edges(sub)
+            wd, wt = 1 / sub.depth_err**2, 1 / sub.t0_err_s**2
+            lo, hi = float(sub_low.min()), float(sub_high.max())
+            rows.append(dict(
+                dataset=dataset, instrument=instrument, label=sub.label.iloc[0], channels=len(sub),
+                wavelength=0.5 * (lo + hi), wavelength_err=0.5 * (hi - lo), wave_lo_um=lo, wave_hi_um=hi,
+                depth=float(np.sum(wd * sub.depth) / np.sum(wd)), depth_err=float(np.sum(wd) ** -0.5),
+                dt0_s=float(np.sum(wt * sub.dt0_s) / np.sum(wt)), t0_err_s=float(np.sum(wt) ** -0.5)))
+    return pd.DataFrame(rows).sort_values('wavelength', kind='stable').reset_index(drop=True)
 
 
 # Hybrid wavelength axis for spectra that include MIRI: log over 0.6-3 um, linear over 3-5 um
@@ -55,10 +134,12 @@ def _limit_to_bulk(ax, wavelength, value, error):
     """Show the central 98% of points; mark the few beyond it at the panel edge.
 
     A handful of very noisy channels (e.g. the red end of MIRI/LRS) would otherwise squash the
-    rest of the spectrum. Every value stays in joint_spectrum.csv.
+    rest of the spectrum. Every value stays in the CSV next to the figure.
     """
     from .plotting_style import SPECTRUM_COLOR
-    low, high = np.nanpercentile(value, [1, 99])
+    # The range follows the precise channels, so a few noisy ones cannot swamp a good spectrum.
+    precise = error <= 3 * np.nanmedian(error)
+    low, high = np.nanpercentile(value[precise] if precise.sum() >= 5 else value, [1, 99])
     pad = max(0.12 * (high - low), 2 * float(np.nanmedian(error)))
     low, high = low - pad, high + pad
     ax.set_ylim(low, high)
@@ -68,12 +149,8 @@ def _limit_to_bulk(ax, wavelength, value, error):
                     mfc='white', mec=SPECTRUM_COLOR, mew=1.5, clip_on=False, zorder=3)
 
 
-def plot_joint_spectra(output_dir):
-    """Write joint/joint_spectrum.{png,pdf,csv} when more than one dataset has a timing table.
-
-    The top panel is the transit depth and the bottom panel the offset of each channel's transit
-    time from its visit's white-light time, for every dataset on one wavelength axis.
-    """
+def _draw(table, stem, label=None):
+    """Two panels on one wavelength axis: transit depth, then the transit-time offset."""
     from .plotting_style import (
         DATA_MARKER_STYLE, SPECTRUM_COLOR, ZERO_LINE_COLOR, apply_publication_style,
         save_figure, style_axis,
@@ -81,14 +158,11 @@ def plot_joint_spectra(output_dir):
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FixedLocator, NullLocator
 
-    table = collect_joint_spectra(output_dir)
-    if table is None or table['dataset'].nunique() < 2:
-        return None
-    joint_dir = Path(output_dir) / 'joint'
-    joint_dir.mkdir(parents=True, exist_ok=True)
-    out = table.assign(depth_ppm=table.depth * 1e6, depth_err_ppm=table.depth_err * 1e6)
-    out.to_csv(joint_dir / 'joint_spectrum.csv', index=False)
-
+    limit = table.instrument.map(DISPLAY_MAX_WAVELENGTH).fillna(np.inf) if 'instrument' in table else np.inf
+    out = table.assign(depth_ppm=table.depth * 1e6, depth_err_ppm=table.depth_err * 1e6,
+                       shown=table.wavelength <= limit)
+    out.to_csv(f'{stem}.csv', index=False)
+    out = out[out.shown]
     apply_publication_style()
     fig, (top, bottom) = plt.subplots(
         2, 1, figsize=(10, 7.2), sharex=True, gridspec_kw={'height_ratios': [1.25, 1]},
@@ -101,14 +175,16 @@ def plot_joint_spectra(output_dir):
     top.set_ylabel('Transit depth [ppm]')
     bottom.set_ylabel(r'$t_0 - t_{0,\mathrm{ref}}$ [s]')
     bottom.set_xlabel(r'Wavelength [$\mu$m]')
+    if label:
+        top.text(0.02, 0.95, label, transform=top.transAxes, ha='left', va='top', fontsize=15, color='0.3')
 
     low = float(np.nanmin(out.wavelength - out.wavelength_err))
     high = float(np.nanmax(out.wavelength + out.wavelength_err))
-    if high > 5.5:
-        # MIRI reaches 12 um: log over 0.6-3 um, linear over 3-5 um, log over 5-12 um.
+    if high > 5.5 and low < 3.0:
+        # Near-infrared plus MIRI: log over 0.6-3 um, linear over 3-5 um, log over 5-12 um.
         bottom.set_xscale('function', functions=(_hybrid_forward, _hybrid_inverse))
-        bottom.set_xlim(min(low, 0.58), max(high, 12.0))
-        ticks = [t for t in (1.0, 2.0, 3.0, 4.0, 5.0, 10.0) if low <= t <= max(high, 12.0)]
+        bottom.set_xlim(min(low, 0.58), high)
+        ticks = [t for t in (1.0, 2.0, 3.0, 4.0, 5.0, 10.0) if low <= t <= high * 1.01]
         for ax in (top, bottom):
             ax.xaxis.set_major_locator(FixedLocator(ticks))
             ax.xaxis.set_minor_locator(NullLocator())
@@ -122,9 +198,34 @@ def plot_joint_spectra(output_dir):
             style_axis(ax)
     fig.align_ylabels((top, bottom))
     for extension in ('png', 'pdf'):
-        save_figure(fig, joint_dir / f'joint_spectrum.{extension}', close=False)
+        save_figure(fig, f'{stem}.{extension}', close=False)
     plt.close(fig)
-    return joint_dir / 'joint_spectrum.png'
+    return Path(f'{stem}.png')
+
+
+def plot_joint_spectra(output_dir):
+    """Write depth and timing figures for every finished dataset, and the joint ones for two or more.
+
+    joint/joint_spectrum.*         every channel of every dataset on one wavelength axis;
+    joint/joint_spectrum_binned.*  the same, display-binned (NIRISS R~50, NIRSpec R~100, MIRI pairs);
+    joint/datasets/<dataset>.*     each dataset on its own, in the same style (also written as
+                                   <dataset>/<prefix>_depth_and_t0.* next to its other products).
+    Each figure has a CSV of its values; the `shown` column marks what is plotted.
+    """
+    table = collect_joint_spectra(output_dir)
+    if table is None:
+        return None
+    joint_dir = Path(output_dir) / 'joint'
+    (joint_dir / 'datasets').mkdir(parents=True, exist_ok=True)
+    for dataset, part in table.groupby('dataset', sort=False):
+        figure = _draw(part, str(joint_dir / 'datasets' / dataset), label=part.label.iloc[0])
+        # The same figure next to the dataset's other products.
+        for source in Path(output_dir, dataset).glob('*_time_shift.csv'):
+            _draw(part, str(source).replace('_time_shift.csv', '_depth_and_t0'), label=part.label.iloc[0])
+    if table['dataset'].nunique() < 2:
+        return figure
+    _draw(display_bin(table), str(joint_dir / 'joint_spectrum_binned'))
+    return _draw(table, str(joint_dir / 'joint_spectrum'))
 
 
 if __name__ == '__main__':
