@@ -303,6 +303,11 @@ def run_joint(cfg, config_path=None):
         for key in shared_specs:
             member['planet'][key] = {'value': float(np.median(samples[f'{key}_0'])), 'prior': 'fixed'}
         run(member, config_path=path)
+    try:
+        from .joint_products import plot_joint_spectra
+        plot_joint_spectra(output)
+    except Exception as error:  # the member spectra are already written; this figure is a summary
+        print(f'WARNING: the joint spectrum figure was not written: {error}')
     with open(joint_dir / 'summary.txt', 'a') as stream:
         stream.write(f'Total run time: {time.perf_counter()-started:.1f} s\n')
 
