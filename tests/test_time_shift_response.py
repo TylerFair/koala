@@ -216,3 +216,28 @@ def test_multiplanet_replay_keeps_each_planets_own_orbit_and_radius():
         assert row['antisymmetry_check']<1e-9
         np.testing.assert_allclose(row['d_depth_dRL']+row['d_depth_dRT'],2*r,rtol=1e-9)
     assert rows[0]['time_shift_coefficient']!=rows[1]['time_shift_coefficient']
+
+
+def test_spectroscopic_responses_replay_the_unreduced_model():
+    # The cadence-reduced likelihood has no 'obs' site, so the fit carries a second,
+    # unreduced model for the response; the sampled model must not be replayed.
+    from types import SimpleNamespace
+    from koala.time_shift_response import spectroscopic_responses
+    model=create_vectorized_model(detrend_type='linear',ld_mode='fixed',param_method='a_rs',
+        jaxoplanet_kernel='quadratic_contact_safe',surface_config={'model':'transit','spectro_free_t0':True})
+    t=np.linspace(-.13,.13,301)
+    kw=dict(mu_t0=jnp.array([0.]),mu_b=jnp.array([.35]),mu_a_rs=jnp.array([9.]),PERIOD=jnp.array([4.]),
+            ld_fixed=jnp.array([[.3,.2]]))
+    s=dict(rors=np.full((3,1,1),.12),dt0=np.zeros((3,1,1)),c=np.ones((3,1)),v=np.full((3,1),.001),
+           log_jitter=np.full((3,1),-10.))
+    error=np.full((1,len(t)),.0002)
+
+    def reduced_model(*args, **kwargs):
+        raise AssertionError('the cadence-reduced model was replayed')
+
+    fit=SimpleNamespace(model=reduced_model,response_model=model,time=t,time_shift_model_kwargs=kw,
+                        builder_kwargs={'jaxoplanet_kernel':'quadratic_contact_safe'},ld_mode='fixed',
+                        detrend_type='linear',trend_mode='free')
+    rows,_=spectroscopic_responses(fit,s,error)
+    direct=fitted_bin_response(model,t,error,s,dict(kw),kernel='quadratic_contact_safe')[0]
+    assert rows[0][0]['time_shift_coefficient']==pytest.approx(direct['time_shift_coefficient'],rel=1e-12)
