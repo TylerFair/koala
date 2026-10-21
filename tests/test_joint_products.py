@@ -149,6 +149,60 @@ def _visit(name, start, stop, epoch, depth=.02, dt0=0., depth_err=1e-4, t0_err_s
     })
 
 
+
+def test_datasets_on_the_same_channels_are_binned_and_averaged_channel_by_channel():
+    from koala.joint_products import display_bin, ivw_combine
+    # SOSS channels at R ~ 97, and a G140H visit fitted on the same channels between 1.0 and 1.8 um.
+    soss = _visit('soss_order1', 0.9, 2.8, 2460000., n=110).assign(instrument='NIRISS')
+    g140h = soss[(soss.wavelength > 1.0) & (soss.wavelength < 1.8)].assign(
+        dataset='g140h_nrs1', instrument='NIRSpec', label='g140h_nrs1', t0_bjd=2460100.)
+    table = pd.concat([soss, g140h], ignore_index=True)
+    binned = display_bin(table)
+    soss_bins = binned[binned.dataset == 'soss_order1']
+    shared = soss_bins[(soss_bins.wave_lo_um >= g140h.wave_lo_um.min()) & (soss_bins.wave_hi_um <= g140h.wave_hi_um.max())]
+    # Where G140H has the channels, both datasets keep them unbinned (NIRSpec's R ~ 100), at the
+    # same wavelengths; SOSS alone is binned to R ~ 50 elsewhere.
+    np.testing.assert_array_equal(shared.wave_lo_um, binned[binned.dataset == 'g140h_nrs1'].wave_lo_um)
+    assert (shared.channels == 1).all() and (soss_bins.channels.max() == 2)
+    combined, _ = ivw_combine(table)
+    both = combined[combined.visits == 2]
+    np.testing.assert_allclose(both.wavelength, g140h.wavelength)
+    np.testing.assert_allclose(both.wavelength_err, g140h.wavelength_err)
+    assert (both.channels == 2).all()
+
+
+def test_only_clearly_matching_channels_are_averaged_as_one():
+    from koala.joint_products import ivw_combine
+    soss = _visit('soss_order1', 0.9, 2.8, 2460000., n=110).assign(instrument='NIRISS')
+    g140h = soss[(soss.wavelength > 1.0) & (soss.wavelength < 1.8)].assign(
+        dataset='g140h_nrs1', instrument='NIRSpec', label='g140h_nrs1', t0_bjd=2460100.)
+    width = g140h.wave_hi_um - g140h.wave_lo_um
+    for shift, matched in ((0.1, True), (0.5, False)):
+        moved = g140h.assign(**{c: g140h[c] + shift * width for c in ('wavelength', 'wave_lo_um', 'wave_hi_um')})
+        combined, _ = ivw_combine(pd.concat([soss, moved], ignore_index=True))
+        if matched:
+            # A tenth of a channel apart: one point per channel, holding both visits.
+            assert (combined.visits == 2).sum() == len(g140h)
+            assert (combined[combined.visits == 2].channels == 2).all()
+        else:
+            # Half a channel apart, it is not clear which channels belong together: nothing is averaged.
+            assert combined is None
+
+
+
+def test_ivw_timing_is_shown_relative_to_the_window_between_water_bands():
+    from koala.joint_products import _timing_reference
+    table = _visit('a', 1.0, 2.0, 2460000., n=60)
+    table['dt0_s'] = np.where(table.wavelength > 1.35, 13., 3.)
+    shown, reference = _timing_reference(table)
+    np.testing.assert_allclose(reference, 3.)
+    np.testing.assert_allclose(shown.dt0_s[table.wavelength.between(1.22, 1.30)], 0.)
+    np.testing.assert_allclose(shown.dt0_s[table.wavelength > 1.35], 10.)
+    # Without the window the times are left as they are.
+    far = _visit('b', 3.0, 4.0, 2460000.)
+    shown, reference = _timing_reference(far)
+    assert reference is None and shown is far
+
 def test_ivw_lines_up_visits_before_averaging_them():
     from koala.joint_products import ivw_combine
     # The second visit reads 200 ppm deeper and 6 s later everywhere; the spectra are otherwise flat.

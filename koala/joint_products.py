@@ -19,6 +19,9 @@ DISPLAY_MAX_WAVELENGTH = {'MIRI': 10.0}
 # Changes in each channel's fitted depth and transit time when only the leading (morning) or
 # only the trailing (evening) half of the planet grows by one stellar radius.
 RESPONSE_COLUMNS = ('d_depth_dRL', 'd_depth_dRT', 'd_dt0_dRL_s_per_Rstar', 'd_dt0_dRT_s_per_Rstar')
+# The combined (IVW) timing spectrum is shown relative to its weighted mean over this window (um),
+# between the 1.15 and 1.4 um water bands, when the spectrum covers it.
+TIMING_REFERENCE_UM = (1.22, 1.30)
 EVENING_COLOR = '#c0392b'
 MORNING_COLOR = '#2166ac'
 
@@ -66,77 +69,112 @@ def _edges(part):
     return low.to_numpy(float), high.to_numpy(float)
 
 
-def _groups(low, high, instrument, resolution, group):
-    """Labels for runs of consecutive channels that reach the target width (or count)."""
+def _groups(low, high, target, count):
+    """Labels for runs of consecutive channels that reach the target resolution.
+
+    Where `target` is NaN the run closes after `count` channels instead.
+    """
     labels, current, start = np.zeros(len(low), dtype=int), 0, 0
     for i in range(len(low)):
         labels[i] = current
-        if instrument in resolution:
+        if np.isfinite(target[i]):
             # Close the bin at whichever edge comes nearest the target width lambda / R.
-            target = 0.5 * (high[i] + low[start]) / resolution[instrument]
+            want = 0.5 * (high[i] + low[start]) / target[i]
             width = high[i] - low[start]
             wider = high[i + 1] - low[start] if i + 1 < len(low) else np.inf
-            done = abs(width - target) <= abs(wider - target)
+            done = abs(width - want) <= abs(wider - want)
         else:
-            done = i - start + 1 >= group.get(instrument, 1)
+            done = i - start + 1 >= count[i]
         if done:
             current, start = current + 1, i + 1
     return labels
+
+
+# Channels of two datasets are the same channel when their centres differ by less than this
+# fraction of the narrower width and their widths agree to 25%, as for datasets fitted on one grid.
+SAME_CHANNEL_OFFSET = 0.25
+
+
+def _same_channels(table):
+    """One label per distinct channel; a channel in several datasets gets one label."""
+    low, high = _edges(table)
+    centre, width, datasets = 0.5 * (low + high), high - low, table.dataset.to_numpy()
+    labels, current = np.zeros(len(table), dtype=int), -1
+    for i in np.argsort(centre, kind='stable'):
+        if (current >= 0 and datasets[i] not in members and 0.75 < width[i] / first_width < 1 / 0.75
+                and abs(centre[i] - first_centre) < SAME_CHANNEL_OFFSET * min(width[i], first_width)):
+            members.add(datasets[i])
+        else:
+            current, first_centre, first_width, members = current + 1, centre[i], width[i], {datasets[i]}
+        labels[i] = current
+    return labels
+
+
+def _shared_bins(table, resolution, group):
+    """A display bin for every channel, the same in every dataset that has that channel.
+
+    A joint run fits all datasets on one set of channel edges, so where visits overlap they have
+    the same channels (see SAME_CHANNEL_OFFSET). The bins are built once from the distinct channels
+    of all datasets: consecutive channels are combined until they reach the display resolution of
+    the finest instrument covering them (R ~ 100 where NIRSpec covers a channel, ~50 where only
+    NIRISS does), and MIRI channels in pairs. Bins also end where the set of datasets covering the
+    wavelengths changes, so a bin never mixes a channel that two visits share with one that only
+    one visit has. A channel therefore falls in the same bin in every dataset that has it, and the
+    binned points of overlapping datasets sit at the same wavelengths.
+    """
+    low, high = _edges(table)
+    same = _same_channels(table)
+    channels = pd.DataFrame({'same': same, 'lo': low, 'hi': high}).groupby('same').agg({'lo': 'min', 'hi': 'max'})
+    lo, hi = channels.lo.to_numpy(), channels.hi.to_numpy()
+    centre = 0.5 * (lo + hi)
+    datasets = table.dataset.to_numpy()
+    reach = {name: (low[datasets == name].min(), high[datasets == name].max()) for name in np.unique(datasets)}
+    coverage = [frozenset(name for name, (start, stop) in reach.items() if start <= c <= stop) for c in centre]
+    # The finest display resolution among the datasets covering each channel.
+    instrument = dict(zip(table.dataset, table.instrument))
+    target = np.array([max((resolution[instrument[name]] for name in names if instrument[name] in resolution),
+                           default=np.nan) for names in coverage])
+    count = np.array([min((group.get(instrument[name], 1) for name in names), default=1) for names in coverage])
+    # Stretches of channels covered by the same datasets.
+    stretch = np.cumsum([0] + [coverage[i] != coverage[i - 1] for i in range(1, len(coverage))])
+    labels, offset = np.zeros(len(lo), dtype=int), 0
+    for k in np.unique(stretch):
+        inside = stretch == k
+        labels[inside] = offset + _groups(lo[inside], hi[inside], target[inside], count[inside])
+        offset = labels[inside].max() + 1
+    return labels[same]
 
 
 def display_bin(table, resolution=None, group=None):
     """Inverse-variance bin consecutive channels of each dataset, for display only.
 
     NIRISS channels are combined to about R = 50 and NIRSpec to about R = 100, MIRI channels in
-    pairs. Depth and timing are averaged with their own weights; their correlation is ignored,
-    which is fine for a figure but not for analysis.
+    pairs. Datasets that share channels share bins, at the finer of their resolutions (see
+    `_shared_bins`). Depth and timing are averaged with their own weights; their correlation is
+    ignored, which is fine for a figure but not for analysis.
     """
     resolution = DISPLAY_RESOLUTION if resolution is None else resolution
     group = DISPLAY_GROUP if group is None else group
+    table = table.assign(display_bin=_shared_bins(table, resolution, group))
     rows = []
-    for (dataset, instrument), part in table.groupby(['dataset', 'instrument'], sort=False):
-        part = part.sort_values('wavelength')
-        low, high = _edges(part)
-        for _, sub in part.groupby(_groups(low, high, instrument, resolution, group)):
-            sub_low, sub_high = _edges(sub)
-            wd, wt = 1 / sub.depth_err**2, 1 / sub.t0_err_s**2
-            lo, hi = float(sub_low.min()), float(sub_high.max())
-            row = dict(
-                dataset=dataset, instrument=instrument, label=sub.label.iloc[0], channels=len(sub),
-                wavelength=0.5 * (lo + hi), wavelength_err=0.5 * (hi - lo), wave_lo_um=lo, wave_hi_um=hi,
-                depth=float(np.sum(wd * sub.depth) / np.sum(wd)), depth_err=float(np.sum(wd) ** -0.5),
-                dt0_s=float(np.sum(wt * sub.dt0_s) / np.sum(wt)), t0_err_s=float(np.sum(wt) ** -0.5))
-            for column, weight in zip(RESPONSE_COLUMNS, (wd, wd, wt, wt)):
-                if column in sub:
-                    row[column] = float(np.sum(weight * sub[column]) / np.sum(weight))
-            rows.append(row)
+    for (dataset, instrument, _), sub in table.groupby(['dataset', 'instrument', 'display_bin'], sort=False):
+        sub_low, sub_high = _edges(sub)
+        wd, wt = 1 / sub.depth_err**2, 1 / sub.t0_err_s**2
+        lo, hi = float(sub_low.min()), float(sub_high.max())
+        row = dict(
+            dataset=dataset, instrument=instrument, label=sub.label.iloc[0], channels=len(sub),
+            wavelength=0.5 * (lo + hi), wavelength_err=0.5 * (hi - lo), wave_lo_um=lo, wave_hi_um=hi,
+            depth=float(np.sum(wd * sub.depth) / np.sum(wd)), depth_err=float(np.sum(wd) ** -0.5),
+            dt0_s=float(np.sum(wt * sub.dt0_s) / np.sum(wt)), t0_err_s=float(np.sum(wt) ** -0.5))
+        for column, weight in zip(RESPONSE_COLUMNS, (wd, wd, wt, wt)):
+            if column in sub:
+                row[column] = float(np.sum(weight * sub[column]) / np.sum(weight))
+        rows.append(row)
     return pd.DataFrame(rows).sort_values('wavelength', kind='stable').reset_index(drop=True)
 
 
-# Number of grid bins two visits must share before their relative depth and timing offsets are fitted.
+# Number of display bins two visits must share before their relative depth and timing offsets are fitted.
 IVW_MIN_SHARED_BINS = 3
-
-
-def _ivw_grid(table, resolution, group):
-    """Bin edges at the display resolution of the finest instrument covering each wavelength.
-
-    Instruments without a target resolution (MIRI) use their own channel resolution divided by their
-    display group size, so a stretch covered only by them is binned as in the binned figure.
-    """
-    reach = {}
-    for instrument, part in table.groupby('instrument'):
-        low, high = _edges(part)
-        target = resolution.get(instrument)
-        if target is None:
-            target = float(np.median(part.wavelength / (high - low))) / group.get(instrument, 1)
-        reach[instrument] = (low.min(), high.max(), float(np.clip(np.nan_to_num(target, nan=100.0), 1.0, 1e5)))
-    edges = [min(low for low, _, _ in reach.values())]
-    end = max(high for _, high, _ in reach.values())
-    while edges[-1] < end:
-        here = [target for low, high, target in reach.values() if low <= edges[-1] < high]
-        edges.append(edges[-1] * (1 + 1 / max(here)) if here else
-                     min(low for low, _, _ in reach.values() if low > edges[-1]))
-    return np.array(edges)
 
 
 def _visits(table):
@@ -156,7 +194,7 @@ def _ivw(values, errors):
 def _overlap_offsets(cells, column, error):
     """Per-visit constants that line up overlapping visits, from weighted least squares.
 
-    `cells` has one row per visit and grid bin. In every bin that two or more visits share, the
+    `cells` has one row per visit and display bin. In every bin that two or more visits share, the
     model is value = spectrum(bin) + offset(visit). Visits linked through at least
     IVW_MIN_SHARED_BINS shared bins form a group, whose offsets have zero mean when weighted by each
     visit's precision in the shared bins. A visit that overlaps no other keeps a zero offset.
@@ -206,28 +244,26 @@ def _overlap_offsets(cells, column, error):
 
 
 def ivw_combine(table, resolution=None, group=None):
-    """Average overlapping datasets channel by channel on one wavelength grid, for display.
+    """Average overlapping datasets channel by channel, for display.
 
-    Every channel goes to the bin of a common grid that holds its central wavelength, and all
-    channels of all datasets in a bin are averaged with inverse-variance weights. The grid has the
-    display resolution of the finest instrument covering each wavelength, as in `display_bin`:
-    R ~ 100 where NIRSpec covers it, R ~ 50 where only NIRISS does, MIRI channels in pairs.
+    Channels go to the display bins of `display_bin`, which every dataset with the same channel
+    shares, and all channels of all datasets in a bin are averaged with inverse-variance weights.
+    Identical channels of two visits are therefore always averaged together, and each point sits at
+    the wavelengths of the channels it holds.
     Depths and transit times of different visits can differ by a constant: instruments disagree in
     absolute depth, and each visit's times are measured from its own white-light epoch. Before averaging, each visit's depths and times are shifted by a constant
     fitted where visits overlap (see `_overlap_offsets`); the second table returned lists these
     offsets, their errors and the chi-square of the overlap. As in `display_bin`, depth and time
     are averaged with their own weights and their correlation is ignored. The errors do not include
     the uncertainty of the offsets, which moves a whole visit up or down together. Returns
-    (None, None) when no two visits share a grid bin.
+    (None, None) when no two visits share a display bin.
     """
     resolution = DISPLAY_RESOLUTION if resolution is None else resolution
     group = DISPLAY_GROUP if group is None else group
-    table = table.assign(visit=_visits(table))
-    edges = _ivw_grid(table, resolution, group)
-    table['bin'] = np.clip(np.searchsorted(edges, table.wavelength, side='right') - 1, 0, len(edges) - 2)
+    table = table.assign(visit=_visits(table), bin=_shared_bins(table, resolution, group))
     if not (table.groupby('bin').visit.nunique() > 1).any():
         return None, None
-    # Each visit on the common grid, to measure how the visits line up where they overlap.
+    # Each visit in the display bins, to measure how the visits line up where they overlap.
     cells = []
     for (visit, index), part in table.groupby(['visit', 'bin']):
         depth, depth_err = _ivw(part.depth, part.depth_err)
@@ -245,11 +281,12 @@ def ivw_combine(table, resolution=None, group=None):
         offsets[name.split('_offset')[0] + '_overlap_dof'] = offsets.visit.map(found.dof)
         table[column] = table[column] - table.visit.map(found.offset).fillna(0.0)
     rows = []
-    for index, sub in table.groupby('bin'):
+    for _, sub in table.groupby('bin'):
         wd, wt = 1 / sub.depth_err**2, 1 / sub.t0_err_s**2
         depth, depth_err = _ivw(sub.depth, sub.depth_err)
         dt0, t0_err = _ivw(sub.dt0_s, sub.t0_err_s)
-        lo, hi = float(edges[index]), float(edges[index + 1])
+        sub_low, sub_high = _edges(sub)
+        lo, hi = float(sub_low.min()), float(sub_high.max())
         row = dict(
             dataset='+'.join(sorted(sub.dataset.unique())), instrument='+'.join(sorted(sub.instrument.unique())),
             label=' + '.join(sorted(sub.label.unique())), visits=sub.visit.nunique(), datasets=sub.dataset.nunique(),
@@ -339,7 +376,7 @@ def _wavelength_axis(top, bottom, out):
             style_axis(ax)
 
 
-def _draw(table, stem, label=None):
+def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]', zero_line=True):
     """Two panels on one wavelength axis: transit depth, then the transit-time offset."""
     from .plotting_style import (
         DATA_MARKER_STYLE, SPECTRUM_COLOR, ZERO_LINE_COLOR, apply_publication_style,
@@ -360,9 +397,10 @@ def _draw(table, stem, label=None):
     for ax, value, error in ((top, out.depth_ppm, out.depth_err_ppm), (bottom, out.dt0_s, out.t0_err_s)):
         ax.errorbar(out.wavelength, value, xerr=out.wavelength_err, yerr=error, **style)
         _limit_to_bulk(ax, out.wavelength.to_numpy(), value.to_numpy(), error.to_numpy())
-    bottom.axhline(0, color=ZERO_LINE_COLOR, ls='--', lw=1.0, zorder=0)
+    if zero_line:
+        bottom.axhline(0, color=ZERO_LINE_COLOR, ls='--', lw=1.0, zorder=0)
     top.set_ylabel('Transit depth [ppm]')
-    bottom.set_ylabel(r'$t_0 - t_{0,\mathrm{ref}}$ [s]')
+    bottom.set_ylabel(t0_label)
     bottom.set_xlabel(r'Wavelength [$\mu$m]')
     if label:
         top.text(0.02, 0.95, label, transform=top.transAxes, ha='left', va='top', fontsize=15, color='0.3')
@@ -487,8 +525,8 @@ def plot_joint_spectra(output_dir):
                                    <dataset>/<prefix>_depth_and_t0.* next to its other products).
     joint/limb_spectra.*           morning and evening depths from each channel's depth and time
                                    (see limb_spectra), and limb_spectra_binned.* from the binned ones.
-    joint/joint_spectrum_ivw.*     when visits overlap in wavelength: all datasets averaged on one
-                                   grid (see ivw_combine), with limb_spectra_ivw.* and the fitted
+    joint/joint_spectrum_ivw.*     when visits overlap in wavelength: all datasets averaged channel
+                                   by channel (see ivw_combine), times relative to 1.22-1.30 um, with limb_spectra_ivw.* and the fitted
                                    visit offsets in ivw_offsets.csv.
     Each figure has a CSV of its values; the `shown` column marks what is plotted.
     """
@@ -513,8 +551,25 @@ def plot_joint_spectra(output_dir):
     return _draw(table, str(joint_dir / 'joint_spectrum'))
 
 
+def _timing_reference(table, window=TIMING_REFERENCE_UM):
+    """Transit times relative to their weighted mean over `window`; (table, None) if not covered.
+
+    The constant subtracted and its error are kept in `t0_reference_s` and `t0_reference_err_s`.
+    """
+    inside = table.wavelength.between(*window).to_numpy()
+    if not inside.any():
+        return table, None
+    reference, error = _ivw(table.dt0_s[inside], table.t0_err_s[inside])
+    return table.assign(dt0_s=table.dt0_s - reference, t0_reference_s=reference, t0_reference_err_s=error), reference
+
+
 def plot_ivw_spectra(table, joint_dir):
-    """The combined depth, timing and limb figures of overlapping datasets; None without overlap."""
+    """The combined depth, timing and limb figures of overlapping datasets; None without overlap.
+
+    The timing panel has its zero at the weighted mean over TIMING_REFERENCE_UM when the spectrum
+    covers it. The limb figure keeps the zero of `ivw_combine`, since moving it would assume equal
+    limbs in that window.
+    """
     combined, offsets = ivw_combine(table)
     if combined is None:
         return None
@@ -522,7 +577,12 @@ def plot_ivw_spectra(table, joint_dir):
     limbs = limb_spectra(combined)
     if limbs is not None:
         _draw_limbs(limbs, str(Path(joint_dir) / 'limb_spectra_ivw'))
-    return _draw(combined, str(Path(joint_dir) / 'joint_spectrum_ivw'))
+    shown, reference = _timing_reference(combined)
+    if reference is None:
+        return _draw(combined, str(Path(joint_dir) / 'joint_spectrum_ivw'))
+    low, high = TIMING_REFERENCE_UM
+    return _draw(shown, str(Path(joint_dir) / 'joint_spectrum_ivw'), zero_line=False,
+                 t0_label=f'$t_0 - t_0$({low:.2f}–{high:.2f} $\\mu$m) [s]')
 
 
 if __name__ == '__main__':

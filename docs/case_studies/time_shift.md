@@ -53,7 +53,9 @@ Each contains the ordinary depth spectrum, a `*_time_shift.csv` table and a `*_t
 `joint/datasets/` has a two-panel figure for each member, with the transit depth above and the time offset below.
 With two or more members, `joint/joint_spectrum.png` puts every channel on one wavelength axis, and
 `joint/joint_spectrum_binned.png` shows the same channels combined in wavelength for display.
-When two visits cover the same wavelengths, `joint/joint_spectrum_ivw.png` averages all datasets on one grid with inverse-variance weights.
+When two visits cover the same wavelengths, `joint/joint_spectrum_ivw.png` averages all datasets with inverse-variance weights.
+Datasets fitted on the same channels share display bins, so the same channel of two visits is always averaged together.
+Its timing panel has its zero at the weighted-mean transit time over 1.22-1.30 µm, between the 1.15 and 1.4 µm water bands.
 Each visit is first shifted by a constant depth and time offset fitted where the visits overlap; `joint/ivw_offsets.csv` lists them with the chi-square of the overlap.
 `joint/limb_spectra_ivw.png` gives the morning and evening depths of the combined spectrum.
 These are display products: their errors leave out the uncertainty of the offsets, so a retrieval should fit the members with their own offsets.
