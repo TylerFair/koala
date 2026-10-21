@@ -1293,10 +1293,12 @@ def create_vectorized_model(
                 )
                 return
 
+            # The fused score takes one fixed orbit shared by every channel.
             use_quadratic_score = (
                 free_t0 and resolved_kernel == 'quadratic_contact_safe'
                 and ld_profile == 'quadratic' and n_planets == 1
                 and not joint_geometry and surface_config.get('fit_geometry', True)
+                and all(jnp.size(value) == 1 for value in (PERIOD, a_rs, bs, mu_ecc, mu_omega))
             )
             if use_quadratic_score:
                 from .quadratic_likelihood import log_likelihood
