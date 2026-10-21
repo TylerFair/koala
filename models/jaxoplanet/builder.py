@@ -1301,7 +1301,7 @@ def create_vectorized_model(
                 and all(jnp.size(value) == 1 for value in (PERIOD, a_rs, bs, mu_ecc, mu_omega))
             )
             if use_quadratic_score:
-                from .quadratic_likelihood import log_likelihood
+                from .quadratic_cuda import log_likelihood
 
                 beta = jnp.stack(
                     tuple(params[name] for name in linear_trend_names), axis=1
