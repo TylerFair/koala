@@ -165,10 +165,8 @@ def _flux_at_separation(params, distance, radius, kernel):
     coefficients = params['u']
     if kernel == 'quadratic_contact_safe':
         coefficients = jnp.pad(coefficients, (0, 2-int(jnp.size(coefficients))))
-        bound = params.get('_quadratic_radius_bound')
-        proven = bound is not None and 0 <= float(bound) < .99999
-        from .quadratic_safe import fixed_orbit_evaluator
-        return fixed_orbit_evaluator(not proven)(coefficients, radius, distance)
+        from .quadratic_closed import fixed_orbit_evaluator
+        return fixed_orbit_evaluator()(coefficients, radius, distance)
     return light_curve(coefficients, distance, radius, order=10)
 
 

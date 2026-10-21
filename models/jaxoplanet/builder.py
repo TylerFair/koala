@@ -388,7 +388,7 @@ def create_whitelight_model(
     two_spot_ordering = str(two_spot_ordering).strip().lower()
     if two_spot_ordering != 'legacy':
         raise ValueError("two_spot_ordering must be 'legacy'.")
-    _resolve_builder_kernel(
+    resolved_kernel = _resolve_builder_kernel(
         jaxoplanet_kernel, ld_profile, param_method, ld_mode=ld_mode
     )
     detrend_components = _split_components(detrend_type)
@@ -585,7 +585,7 @@ def create_vectorized_model(
         raise ValueError("jitter_prior_scale and jitter_prior_center must be > 0.")
     if trend_mode not in {'free', 'fixed', 'gaussian_marginalized'}:
         raise ValueError(f"Unknown trend_mode: {trend_mode}")
-    _resolve_builder_kernel(
+    resolved_kernel = _resolve_builder_kernel(
         jaxoplanet_kernel, ld_profile, param_method, ld_mode=ld_mode
     )
     if transit_window not in {'auto', 'off'}:
@@ -1293,33 +1293,65 @@ def create_vectorized_model(
                 )
                 return
 
-            transit_active = jax.vmap(compute_transit_model_window, in_axes=(in_axes, None))(
-                params, t,
+            use_quadratic_score = (
+                free_t0 and resolved_kernel == 'quadratic_contact_safe'
+                and ld_profile == 'quadratic' and n_planets == 1
+                and not joint_geometry and surface_config.get('fit_geometry', True)
             )
-            beta = jnp.stack(
-                tuple(params[name] for name in linear_trend_names), axis=1
-            )
-            design_active = jnp.asarray(
-                resolved_trend_design, dtype=jnp.float64
-            )[indices]
-            trend_active = beta @ design_active.T
-            active_model = apply_systematics(transit_active, trend_active)
-            active_error = error_broadcast[:, indices]
-            active_y = jnp.atleast_2d(
-                jnp.asarray(y, dtype=jnp.float64)
-            )[:, indices]
-            active_log_prob = dist.Normal(
-                active_model, active_error
-            ).log_prob(active_y)
-            if likelihood_mask is not None:
-                active_mask = jnp.asarray(likelihood_mask, dtype=bool)
-                active_mask = jnp.broadcast_to(
-                    active_mask, jnp.shape(jnp.atleast_2d(y))
-                )[:, indices]
-                active_log_prob = jnp.where(
-                    active_mask, active_log_prob, 0.0
+            if use_quadratic_score:
+                from .quadratic_likelihood import log_likelihood
+
+                beta = jnp.stack(
+                    tuple(params[name] for name in linear_trend_names), axis=1
                 )
-            numpyro.factor('obs_active', jnp.sum(active_log_prob))
+                design_active = jnp.asarray(
+                    resolved_trend_design, dtype=jnp.float64
+                )[indices]
+                active_y = jnp.atleast_2d(jnp.asarray(y, dtype=jnp.float64))[:, indices]
+                # Square before gathering, as in the ordinary reduced model.
+                active_variance = (yerr_matrix ** 2)[:, indices]
+                active_mask = (jnp.ones_like(active_y, dtype=bool)
+                    if likelihood_mask is None else jnp.broadcast_to(
+                        jnp.asarray(likelihood_mask, dtype=bool), jnp.shape(jnp.atleast_2d(y))
+                    )[:, indices])
+                theta = jnp.concatenate(
+                    (rors[:, :1], u, params['t0'][:, :1], beta, jitter[:, None]), axis=1
+                )
+                orbit = jnp.stack([
+                    jnp.ravel(value)[0] for value in (PERIOD, a_rs, bs, mu_ecc, mu_omega)
+                ])
+                lane_log_prob = jax.vmap(
+                    log_likelihood, in_axes=(0, None, 0, 0, 0, None, None)
+                )(theta, t[indices], active_y, active_variance, active_mask, design_active, orbit)
+                numpyro.factor('obs_active', jnp.sum(lane_log_prob))
+            else:
+                transit_active = jax.vmap(compute_transit_model_window, in_axes=(in_axes, None))(
+                    params, t,
+                )
+                beta = jnp.stack(
+                    tuple(params[name] for name in linear_trend_names), axis=1
+                )
+                design_active = jnp.asarray(
+                    resolved_trend_design, dtype=jnp.float64
+                )[indices]
+                trend_active = beta @ design_active.T
+                active_model = apply_systematics(transit_active, trend_active)
+                active_error = error_broadcast[:, indices]
+                active_y = jnp.atleast_2d(
+                    jnp.asarray(y, dtype=jnp.float64)
+                )[:, indices]
+                active_log_prob = dist.Normal(
+                    active_model, active_error
+                ).log_prob(active_y)
+                if likelihood_mask is not None:
+                    active_mask = jnp.asarray(likelihood_mask, dtype=bool)
+                    active_mask = jnp.broadcast_to(
+                        active_mask, jnp.shape(jnp.atleast_2d(y))
+                    )[:, indices]
+                    active_log_prob = jnp.where(
+                        active_mask, active_log_prob, 0.0
+                    )
+                numpyro.factor('obs_active', jnp.sum(active_log_prob))
 
             reference_beta = jnp.atleast_2d(jnp.asarray(
                 oot_reference_beta, dtype=jnp.float64
