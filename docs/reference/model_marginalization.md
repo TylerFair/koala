@@ -209,10 +209,15 @@ The Bayesian bootstrap is also accumulated in blocks to limit memory.
 
 ### Transit calculations
 
-The grid's optional quadratic evaluator handles full occultation and almost equal stellar and planetary disks.
-A sine-squared endpoint map regularizes its S1 quadrature, and stable occulted moments preserve small flux differences.
-Expensive equal-disk branches are omitted from compiled fits only when the radius prior rules them out.
-Contact fluxes and derivatives are still tested.
+Quadratic transits use closed-form occulted disk moments and analytic flux derivatives.
+Complete elliptic integrals use eight Bulirsch duplication steps in float64; tests check convergence against twelve steps and independent numerical disk integrals.
+Central transits, exact contacts and full occultation use their analytic limits.
+For fixed shared orbits with a free channel epoch and a sampled linear trend, the Gaussian likelihood accumulates the flux and its parameter derivatives together.
+The orbit calculation, priors and cadence selection are unchanged.
+
+The tests include four derivative values at two extreme contact geometries where the previous quadrature is inaccurate.
+Those values are checked against independent 70-digit boundary integrals at the exact binary64 radius and separation, rather than against the inaccurate quadrature.
+The remaining contact, grazing and prior-boundary tests check both the previous implementation and a converged independent integral.
 
 Long power-2 series can share small compressed table banks across fits and cache them on disk.
 Each geometry and domain is checked for flux and derivative accuracy.
