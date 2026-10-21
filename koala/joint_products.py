@@ -113,6 +113,156 @@ def display_bin(table, resolution=None, group=None):
     return pd.DataFrame(rows).sort_values('wavelength', kind='stable').reset_index(drop=True)
 
 
+# Number of grid bins two visits must share before their relative depth and timing offsets are fitted.
+IVW_MIN_SHARED_BINS = 3
+
+
+def _ivw_grid(table, resolution, group):
+    """Bin edges at the display resolution of the finest instrument covering each wavelength.
+
+    Instruments without a target resolution (MIRI) use their own channel resolution divided by their
+    display group size, so a stretch covered only by them is binned as in the binned figure.
+    """
+    reach = {}
+    for instrument, part in table.groupby('instrument'):
+        low, high = _edges(part)
+        target = resolution.get(instrument)
+        if target is None:
+            target = float(np.median(part.wavelength / (high - low))) / group.get(instrument, 1)
+        reach[instrument] = (low.min(), high.max(), float(np.clip(np.nan_to_num(target, nan=100.0), 1.0, 1e5)))
+    edges = [min(low for low, _, _ in reach.values())]
+    end = max(high for _, high, _ in reach.values())
+    while edges[-1] < end:
+        here = [target for low, high, target in reach.values() if low <= edges[-1] < high]
+        edges.append(edges[-1] * (1 + 1 / max(here)) if here else
+                     min(low for low, _, _ in reach.values() if low > edges[-1]))
+    return np.array(edges)
+
+
+def _visits(table):
+    """One label per visit: datasets from the same exposure share the visit's white-light epoch."""
+    if 't0_bjd' not in table:
+        return table.dataset.to_numpy()
+    epoch = (table.t0_bjd - table.dt0_s / 86400.0).round(4)
+    names = {e: '+'.join(sorted(table.dataset[epoch == e].unique())) for e in epoch.unique()}
+    return epoch.map(names).to_numpy()
+
+
+def _ivw(values, errors):
+    weights = 1.0 / np.asarray(errors, float) ** 2
+    return float(np.sum(weights * values) / np.sum(weights)), float(np.sum(weights) ** -0.5)
+
+
+def _overlap_offsets(cells, column, error):
+    """Per-visit constants that line up overlapping visits, from weighted least squares.
+
+    `cells` has one row per visit and grid bin. In every bin that two or more visits share, the
+    model is value = spectrum(bin) + offset(visit). Visits linked through at least
+    IVW_MIN_SHARED_BINS shared bins form a group, whose offsets have zero mean when weighted by each
+    visit's precision in the shared bins. A visit that overlaps no other keeps a zero offset.
+    """
+    cells = cells[cells.groupby('bin').visit.transform('nunique') > 1]
+    visits = sorted(cells.visit.unique())
+    in_bin = [set(s) for _, s in cells.groupby('bin').visit]
+    parent = {v: v for v in visits}
+
+    def root(v):
+        while parent[v] != v:
+            v = parent[v]
+        return v
+
+    for i, a in enumerate(visits):
+        for b in visits[i + 1:]:
+            if sum(a in s and b in s for s in in_bin) >= IVW_MIN_SHARED_BINS:
+                parent[root(b)] = root(a)
+    rows = []
+    for group in sorted({root(v) for v in visits}):
+        members = [v for v in visits if root(v) == group]
+        if len(members) < 2:
+            continue
+        part = cells[cells.visit.isin(members)]
+        part = part[part.groupby('bin').visit.transform('nunique') > 1]
+        bins = np.array(sorted(part.bin.unique()))
+        # Unknowns: one value per shared bin, then an offset for every visit but the first (zero).
+        design = np.zeros((len(part), len(bins) + len(members) - 1))
+        design[np.arange(len(part)), np.searchsorted(bins, part.bin)] = 1.0
+        for k, visit in enumerate(members[1:]):
+            design[(part.visit == visit).to_numpy(), len(bins) + k] = 1.0
+        value, weight = part[column].to_numpy(), 1.0 / part[error].to_numpy() ** 2
+        normal = design.T @ (design * weight[:, None])
+        solution = np.linalg.solve(normal, design.T @ (weight * value))
+        chi2 = float(np.sum(weight * (value - design @ solution) ** 2))
+        offset = np.concatenate([[0.0], solution[len(bins):]])
+        covariance = np.zeros((len(members), len(members)))
+        covariance[1:, 1:] = np.linalg.inv(normal)[len(bins):, len(bins):]
+        # Move the zero to the precision-weighted mean of the group.
+        precision = np.array([weight[(part.visit == v).to_numpy()].sum() for v in members])
+        centre = np.eye(len(members)) - precision[None, :] / precision.sum()
+        offset, covariance = centre @ offset, centre @ covariance @ centre.T
+        for k, visit in enumerate(members):
+            rows.append(dict(visit=visit, offset=offset[k], offset_err=np.sqrt(max(covariance[k, k], 0.0)),
+                             shared_bins=len(bins), chi2=chi2, dof=len(part) - design.shape[1]))
+    return pd.DataFrame(rows, columns=['visit', 'offset', 'offset_err', 'shared_bins', 'chi2', 'dof'])
+
+
+def ivw_combine(table, resolution=None, group=None):
+    """Average overlapping datasets channel by channel on one wavelength grid, for display.
+
+    Every channel goes to the bin of a common grid that holds its central wavelength, and all
+    channels of all datasets in a bin are averaged with inverse-variance weights. The grid has the
+    display resolution of the finest instrument covering each wavelength, as in `display_bin`:
+    R ~ 100 where NIRSpec covers it, R ~ 50 where only NIRISS does, MIRI channels in pairs.
+    Depths and transit times of different visits can differ by a constant: instruments disagree in
+    absolute depth, and each visit's times are measured from its own white-light epoch. Before averaging, each visit's depths and times are shifted by a constant
+    fitted where visits overlap (see `_overlap_offsets`); the second table returned lists these
+    offsets, their errors and the chi-square of the overlap. As in `display_bin`, depth and time
+    are averaged with their own weights and their correlation is ignored. The errors do not include
+    the uncertainty of the offsets, which moves a whole visit up or down together. Returns
+    (None, None) when no two visits share a grid bin.
+    """
+    resolution = DISPLAY_RESOLUTION if resolution is None else resolution
+    group = DISPLAY_GROUP if group is None else group
+    table = table.assign(visit=_visits(table))
+    edges = _ivw_grid(table, resolution, group)
+    table['bin'] = np.clip(np.searchsorted(edges, table.wavelength, side='right') - 1, 0, len(edges) - 2)
+    if not (table.groupby('bin').visit.nunique() > 1).any():
+        return None, None
+    # Each visit on the common grid, to measure how the visits line up where they overlap.
+    cells = []
+    for (visit, index), part in table.groupby(['visit', 'bin']):
+        depth, depth_err = _ivw(part.depth, part.depth_err)
+        dt0, t0_err = _ivw(part.dt0_s, part.t0_err_s)
+        cells.append(dict(visit=visit, bin=index, depth=depth, depth_err=depth_err, dt0_s=dt0, t0_err_s=t0_err))
+    cells = pd.DataFrame(cells)
+    fitted = {'depth': _overlap_offsets(cells, 'depth', 'depth_err').set_index('visit'),
+              'dt0_s': _overlap_offsets(cells, 'dt0_s', 't0_err_s').set_index('visit')}
+    offsets = pd.DataFrame({'visit': sorted(table.visit.unique())})
+    for column, name, scale in (('depth', 'depth_offset_ppm', 1e6), ('dt0_s', 't0_offset_s', 1.0)):
+        found = fitted[column]
+        offsets[name] = offsets.visit.map(found.offset).fillna(0.0) * scale
+        offsets[name.replace('offset', 'offset_err')] = offsets.visit.map(found.offset_err).fillna(0.0) * scale
+        offsets[name.split('_offset')[0] + '_overlap_chi2'] = offsets.visit.map(found.chi2)
+        offsets[name.split('_offset')[0] + '_overlap_dof'] = offsets.visit.map(found.dof)
+        table[column] = table[column] - table.visit.map(found.offset).fillna(0.0)
+    rows = []
+    for index, sub in table.groupby('bin'):
+        wd, wt = 1 / sub.depth_err**2, 1 / sub.t0_err_s**2
+        depth, depth_err = _ivw(sub.depth, sub.depth_err)
+        dt0, t0_err = _ivw(sub.dt0_s, sub.t0_err_s)
+        lo, hi = float(edges[index]), float(edges[index + 1])
+        row = dict(
+            dataset='+'.join(sorted(sub.dataset.unique())), instrument='+'.join(sorted(sub.instrument.unique())),
+            label=' + '.join(sorted(sub.label.unique())), visits=sub.visit.nunique(), datasets=sub.dataset.nunique(),
+            channels=len(sub),
+            wavelength=0.5 * (lo + hi), wavelength_err=0.5 * (hi - lo), wave_lo_um=lo, wave_hi_um=hi,
+            depth=depth, depth_err=depth_err, dt0_s=dt0, t0_err_s=t0_err)
+        for column, weight in zip(RESPONSE_COLUMNS, (wd, wd, wt, wt)):
+            if column in sub:
+                row[column] = float(np.sum(weight * sub[column]) / np.sum(weight))
+        rows.append(row)
+    return pd.DataFrame(rows).sort_values('wavelength', kind='stable').reset_index(drop=True), offsets
+
+
 # Hybrid wavelength axis for spectra that include MIRI: log over 0.6-3 um, linear over 3-5 um
 # (NIRSpec), log over 5-12 um, taking 22%, 56% and 22% of the width.
 _HYBRID = (0.6, 3.0, 5.0, 12.0)
@@ -342,6 +492,9 @@ def plot_joint_spectra(output_dir):
                                    <dataset>/<prefix>_depth_and_t0.* next to its other products).
     joint/limb_spectra.*           morning and evening depths from each channel's depth and time
                                    (see limb_spectra), and limb_spectra_binned.* from the binned ones.
+    joint/joint_spectrum_ivw.*     when visits overlap in wavelength: all datasets averaged on one
+                                   grid (see ivw_combine), with limb_spectra_ivw.* and the fitted
+                                   visit offsets in ivw_offsets.csv.
     Each figure has a CSV of its values; the `shown` column marks what is plotted.
     """
     table = collect_joint_spectra(output_dir)
@@ -361,7 +514,20 @@ def plot_joint_spectra(output_dir):
     if table['dataset'].nunique() < 2:
         return figure
     _draw(display_bin(table), str(joint_dir / 'joint_spectrum_binned'))
+    plot_ivw_spectra(table, joint_dir)
     return _draw(table, str(joint_dir / 'joint_spectrum'))
+
+
+def plot_ivw_spectra(table, joint_dir):
+    """The combined depth, timing and limb figures of overlapping datasets; None without overlap."""
+    combined, offsets = ivw_combine(table)
+    if combined is None:
+        return None
+    offsets.to_csv(Path(joint_dir) / 'ivw_offsets.csv', index=False)
+    limbs = limb_spectra(combined)
+    if limbs is not None:
+        _draw_limbs(limbs, str(Path(joint_dir) / 'limb_spectra_ivw'))
+    return _draw(combined, str(Path(joint_dir) / 'joint_spectrum_ivw'))
 
 
 if __name__ == '__main__':
