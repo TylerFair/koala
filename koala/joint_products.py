@@ -376,7 +376,7 @@ def _wavelength_axis(top, bottom, out):
             style_axis(ax)
 
 
-def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]', zero_line=True):
+def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]'):
     """Two panels on one wavelength axis: transit depth, then the transit-time offset."""
     from .plotting_style import (
         DATA_MARKER_STYLE, SPECTRUM_COLOR, ZERO_LINE_COLOR, apply_publication_style,
@@ -397,8 +397,7 @@ def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]', z
     for ax, value, error in ((top, out.depth_ppm, out.depth_err_ppm), (bottom, out.dt0_s, out.t0_err_s)):
         ax.errorbar(out.wavelength, value, xerr=out.wavelength_err, yerr=error, **style)
         _limit_to_bulk(ax, out.wavelength.to_numpy(), value.to_numpy(), error.to_numpy())
-    if zero_line:
-        bottom.axhline(0, color=ZERO_LINE_COLOR, ls='--', lw=1.0, zorder=0)
+    bottom.axhline(0, color=ZERO_LINE_COLOR, ls='--', lw=1.0, zorder=0)
     top.set_ylabel('Transit depth [ppm]')
     bottom.set_ylabel(t0_label)
     bottom.set_xlabel(r'Wavelength [$\mu$m]')
@@ -581,7 +580,7 @@ def plot_ivw_spectra(table, joint_dir):
     if reference is None:
         return _draw(combined, str(Path(joint_dir) / 'joint_spectrum_ivw'))
     low, high = TIMING_REFERENCE_UM
-    return _draw(shown, str(Path(joint_dir) / 'joint_spectrum_ivw'), zero_line=False,
+    return _draw(shown, str(Path(joint_dir) / 'joint_spectrum_ivw'),
                  t0_label=f'$t_0 - t_0$({low:.2f}–{high:.2f} $\\mu$m) [s]')
 
 
