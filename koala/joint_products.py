@@ -263,30 +263,23 @@ def ivw_combine(table, resolution=None, group=None):
     return pd.DataFrame(rows).sort_values('wavelength', kind='stable').reset_index(drop=True), offsets
 
 
-# Hybrid wavelength axis for spectra that include MIRI: log over 0.6-3 um, linear over 3-5 um
-# (NIRSpec), log over 5-12 um, taking 22%, 56% and 22% of the width.
-_HYBRID = (0.6, 3.0, 5.0, 12.0)
-_HYBRID_WIDTHS = (0.22, 0.56, 0.22)
+# Wavelength axis for spectra that include MIRI: linear up to 5 um, logarithmic beyond, where a
+# factor e in wavelength takes 1.5 um of axis. MIRI/LRS (5-10 um) then takes about a fifth of a
+# 0.6-10 um axis instead of half of it.
+_LOG_BEYOND = 5.0
+_LOG_WIDTH = 1.5
 
 
 def _hybrid_forward(wavelength):
-    start, first, second, end = _HYBRID
-    left, middle, right = _HYBRID_WIDTHS
     wavelength = np.clip(np.asarray(wavelength, dtype=float), 1e-3, None)
-    return np.where(
-        wavelength <= first, left * np.log(wavelength / start) / np.log(first / start),
-        np.where(wavelength <= second, left + middle * (wavelength - first) / (second - first),
-                 left + middle + right * np.log(wavelength / second) / np.log(end / second)))
+    return np.where(wavelength <= _LOG_BEYOND, wavelength,
+                    _LOG_BEYOND + _LOG_WIDTH * np.log(np.maximum(wavelength, _LOG_BEYOND) / _LOG_BEYOND))
 
 
 def _hybrid_inverse(position):
-    start, first, second, end = _HYBRID
-    left, middle, right = _HYBRID_WIDTHS
     position = np.asarray(position, dtype=float)
-    return np.where(
-        position <= left, start * (first / start) ** (position / left),
-        np.where(position <= left + middle, first + (position - left) / middle * (second - first),
-                 second * (end / second) ** ((position - left - middle) / right)))
+    return np.where(position <= _LOG_BEYOND, position,
+                    _LOG_BEYOND * np.exp((np.maximum(position, _LOG_BEYOND) - _LOG_BEYOND) / _LOG_WIDTH))
 
 
 def _limit_to_bulk(ax, wavelength, value, error):
@@ -324,16 +317,18 @@ def _wavelength_axis(top, bottom, out):
 
     low = float(np.nanmin(out.wavelength - out.wavelength_err))
     high = float(np.nanmax(out.wavelength + out.wavelength_err))
-    if high > 5.5 and low < 3.0:
-        # Near-infrared plus MIRI: log over 0.6-3 um, linear over 3-5 um, log over 5-12 um.
+    if high > 5.5 and low < _LOG_BEYOND:
+        # Near-infrared plus MIRI: linear up to 5 um, logarithmic beyond (see _LOG_BEYOND).
         bottom.set_xscale('function', functions=(_hybrid_forward, _hybrid_inverse))
-        # Reach the 10 um tick when MIRI ends just short of it, so the log part has a scale.
+        # Reach the 10 um tick when MIRI ends just short of it.
         high = max(high, 10.4) if high > 8.0 else high
-        bottom.set_xlim(min(low, 0.58), high)
-        ticks = [t for t in (1.0, 2.0, 3.0, 4.0, 5.0, 10.0) if low <= t <= high * 1.01]
+        bottom.set_xlim(low - 0.02 * (_LOG_BEYOND - low), high)
+        ticks = [t for t in (0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0) if low <= t <= high * 1.01]
         for ax in (top, bottom):
             ax.xaxis.set_major_locator(FixedLocator(ticks))
             ax.xaxis.set_minor_locator(NullLocator())
+            # Mark where the axis turns logarithmic.
+            ax.axvline(_LOG_BEYOND, color='0.75', lw=0.8, ls=':', zorder=0)
         bottom.set_xticklabels([f'{t:g}' for t in ticks])
         for ax in (top, bottom):
             style_axis(ax, x_locator=False)

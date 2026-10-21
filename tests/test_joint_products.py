@@ -73,6 +73,16 @@ def test_long_wavelength_range_uses_log_axis_and_marks_clipped_points(tmp_path):
     assert plot_joint_spectra(tmp_path).exists()
 
 
+def test_miri_axis_is_linear_to_five_microns_and_compressed_beyond():
+    from koala.joint_products import _hybrid_forward, _hybrid_inverse
+    wavelength = np.array([0.6, 2.0, 4.99, 5.0, 6.0, 10.0])
+    position = _hybrid_forward(wavelength)
+    np.testing.assert_allclose(position[:4], wavelength[:4])
+    np.testing.assert_allclose(_hybrid_inverse(position), wavelength)
+    # MIRI/LRS takes about a fifth of a 0.6-10 um axis.
+    assert 0.15 < (_hybrid_forward(10.0) - 5.0) / (_hybrid_forward(10.0) - 0.6) < 0.25
+
+
 def _limb_table(dt0_s, k=0.12, coefficient=2500.0):
     """Channels with the analytic half-disk responses and tiny errors."""
     n = len(dt0_s)
