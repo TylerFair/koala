@@ -69,3 +69,57 @@ def test_long_wavelength_range_uses_log_axis_and_marks_clipped_points(tmp_path):
     path = tmp_path / 'miri' / 'miri_Rreference_time_shift.csv'
     t = pd.read_csv(path); t.loc[2, 'dt0_s'] = -900.; t.to_csv(path, index=False)
     assert plot_joint_spectra(tmp_path).exists()
+
+
+def _limb_table(dt0_s, k=0.12, coefficient=2500.0):
+    """Channels with the analytic half-disk responses and tiny errors."""
+    n = len(dt0_s)
+    return pd.DataFrame({
+        'dataset': 'g395h_nrs1', 'instrument': 'NIRSpec', 'label': 'NIRSpec G395H nrs1',
+        'wavelength': np.linspace(3, 5, n), 'wavelength_err': np.full(n, .01), 'planet': 0,
+        'depth': np.full(n, k**2), 'depth_err': np.full(n, 1e-9),
+        'dt0_s': np.asarray(dt0_s, float), 't0_err_s': np.full(n, 1e-6), 'corr_depth_t0': 0.,
+        'd_depth_dRL': k, 'd_depth_dRT': k, 'd_dt0_dRL_s_per_Rstar': -coefficient,
+        'd_dt0_dRT_s_per_Rstar': coefficient,
+    })
+
+
+def test_limb_depths_recover_the_two_halves():
+    from koala.joint_products import limb_spectra
+    k, coefficient, half_difference = 0.12, 2500.0, 0.002
+    # A planet with R_T = k + e and R_L = k - e has the same depth to first order and a later transit.
+    limbs = limb_spectra(_limb_table([0., 2 * coefficient * half_difference, -2 * coefficient * half_difference]))
+    np.testing.assert_allclose(limbs.depth_evening_ppm, 1e6 * np.array([k, k + half_difference, k - half_difference])**2)
+    np.testing.assert_allclose(limbs.depth_morning_ppm, 1e6 * np.array([k, k - half_difference, k + half_difference])**2)
+    np.testing.assert_allclose(limbs.radius_evening_minus_morning_Rstar, [0, 2 * half_difference, -2 * half_difference],
+                               atol=1e-9)
+
+
+def test_visit_offset_moves_the_limbs_apart_uniformly():
+    from koala.joint_products import limb_spectra
+    table = _limb_table([0., 5., 10.])
+    shifted = limb_spectra(table, offsets={'g395h_nrs1': 5.})
+    np.testing.assert_allclose(shifted.radius_evening_minus_morning_Rstar,
+                               limb_spectra(table).radius_evening_minus_morning_Rstar - 5. / 2500., atol=1e-9)
+
+
+def test_limb_figure_is_written_only_with_radius_responses(tmp_path):
+    _member(tmp_path, 'soss_order1', [1.0, 1.5])
+    plot_joint_spectra(tmp_path)
+    assert not (tmp_path / 'joint' / 'limb_spectra.png').exists()
+    member = tmp_path / 'g395h_nrs1'
+    member.mkdir()
+    _limb_table(np.linspace(-20, 20, 40)).drop(columns=['dataset', 'instrument', 'label']).to_csv(
+        member / 'WASP-107_NIRSPEC_G395H_nrs1_Rreference_time_shift.csv', index=False)
+    plot_joint_spectra(tmp_path)
+    for stem in ('limb_spectra', 'limb_spectra_binned'):
+        assert (tmp_path / 'joint' / f'{stem}.png').exists()
+    saved = pd.read_csv(tmp_path / 'joint' / 'limb_spectra.csv')
+    assert saved.depth_evening_ppm.notna().sum() == 40 and saved.depth_morning_ppm.isna().sum() == 2
+
+
+def test_limb_errors_are_anticorrelated_when_timing_dominates():
+    from koala.joint_products import limb_spectra
+    table = _limb_table([0., 0.]).assign(depth_err=1e-5, t0_err_s=20.)
+    corr = limb_spectra(table).corr_morning_evening
+    assert np.all(corr < -0.9)

@@ -621,6 +621,12 @@ def _spectroscopic_model(geometry, model, inputs, time, ld_coefficients,
         if surface_basis is not None:
             print(f'Prepared exact fixed-geometry surface basis for {label} inference.')
     fit_model = _build_spectroscopic_model(model.create_vectorized_model, **builder_kwargs)
+    # The post-fit time-shift response reads each channel's model light curve from the
+    # 'obs' site, which the exact cadence-reduced likelihood replaces with factors.
+    response_model = fit_model
+    if free_t0 and builder_kwargs.get('cadence_reduction') == 'auto':
+        response_model = _build_spectroscopic_model(
+            model.create_vectorized_model, **{**builder_kwargs, 'cadence_reduction': 'off'})
     fallback_model = None
     fallback_init = None
     if (
@@ -640,7 +646,8 @@ def _spectroscopic_model(geometry, model, inputs, time, ld_coefficients,
         fallback_init.update(_power2_ld_initial_sites(ld_coefficients, 'coefficients'))
 
     return SimpleNamespace(
-        model=fit_model, builder_kwargs=builder_kwargs, surface_basis=surface_basis, time=time,
+        model=fit_model, response_model=response_model, builder_kwargs=builder_kwargs,
+        surface_basis=surface_basis, time=time,
         init_params=init_params, joint_geometry=joint_geometry, ld_mode=ld_mode,
         trend_mode=trend_mode, detrend_type=detrend_type, fallback_model=fallback_model,
         fallback_init=fallback_init, transit_window_indices=transit_window_indices,

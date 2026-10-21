@@ -270,7 +270,7 @@ def spectroscopic_responses(fit, samples, errors, *, ld_profile='quadratic'):
         lane = {k:np.asarray(v)[:, channel:channel+1] for k,v in samples.items()
                 if np.ndim(v) >= 2 and np.shape(v)[1] == np.shape(errors)[0]}
         rows.append(fitted_bin_response(
-            fit.model, fit.time, np.asarray(errors)[channel:channel+1], lane, kw,
+            getattr(fit, 'response_model', None) or fit.model, fit.time, np.asarray(errors)[channel:channel+1], lane, kw,
             kernel=fit.builder_kwargs.get('jaxoplanet_kernel', 'auto'), ld_profile=ld_profile,
             power2_exact=(fit.builder_kwargs.get('power2_evaluation', 'auto') != 'polynomial'
                           and getattr(fit, 'ld_mode', None) != 'interpolated'),
