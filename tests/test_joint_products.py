@@ -203,6 +203,18 @@ def test_ivw_timing_is_shown_relative_to_the_window_between_water_bands():
     shown, reference = _timing_reference(far)
     assert reference is None and shown is far
 
+
+def test_joint_figures_share_the_combined_timing_zero():
+    from koala.joint_products import _common_timing_zero, ivw_combine
+    # The second visit's white-light time is 6 s later, so its times read 6 s earlier everywhere.
+    table = pd.concat([_visit('a', 1.0, 2.0, 2460000., n=140),
+                       _visit('b', 1.5, 2.5, 2460100., dt0=-6., n=100)], ignore_index=True)
+    shown, reference = _common_timing_zero(table)
+    np.testing.assert_allclose(shown.dt0_s, 0., atol=1e-9)
+    combined, _ = ivw_combine(table)
+    np.testing.assert_allclose(reference, combined.dt0_s[combined.wavelength.between(1.22, 1.30)].mean())
+
+
 def test_ivw_lines_up_visits_before_averaging_them():
     from koala.joint_products import ivw_combine
     # The second visit reads 200 ppm deeper and 6 s later everywhere; the spectra are otherwise flat.

@@ -22,6 +22,7 @@ RESPONSE_COLUMNS = ('d_depth_dRL', 'd_depth_dRT', 'd_dt0_dRL_s_per_Rstar', 'd_dt
 # The combined (IVW) timing spectrum is shown relative to its weighted mean over this window (um),
 # between the 1.15 and 1.4 um water bands, when the spectrum covers it.
 TIMING_REFERENCE_UM = (1.22, 1.30)
+_REFERENCE_LABEL = '$t_0 - t_0$({:.2f}–{:.2f} $\\mu$m) [s]'.format(*TIMING_REFERENCE_UM)
 EVENING_COLOR = '#c0392b'
 MORNING_COLOR = '#2166ac'
 
@@ -518,15 +519,16 @@ def _draw_limbs(table, stem):
 def plot_joint_spectra(output_dir):
     """Write depth and timing figures for every finished dataset, and the joint ones for two or more.
 
-    joint/joint_spectrum.*         every channel of every dataset on one wavelength axis;
+    joint/joint_spectrum.*         every channel of every dataset on one wavelength axis, with the
+                                   transit times on the zero of the combined figure;
     joint/joint_spectrum_binned.*  the same, display-binned (NIRISS R~50, NIRSpec R~100, MIRI pairs);
     joint/datasets/<dataset>.*     each dataset on its own, in the same style (also written as
                                    <dataset>/<prefix>_depth_and_t0.* next to its other products).
     joint/limb_spectra.*           morning and evening depths from each channel's depth and time
                                    (see limb_spectra), and limb_spectra_binned.* from the binned ones.
     joint/joint_spectrum_ivw.*     when visits overlap in wavelength: all datasets averaged channel
-                                   by channel (see ivw_combine), times relative to 1.22-1.30 um, with limb_spectra_ivw.* and the fitted
-                                   visit offsets in ivw_offsets.csv.
+                                   by channel (see ivw_combine), on the same timing zero, with
+                                   limb_spectra_ivw.* and the fitted visit offsets in ivw_offsets.csv.
     Each figure has a CSV of its values; the `shown` column marks what is plotted.
     """
     table = collect_joint_spectra(output_dir)
@@ -545,9 +547,11 @@ def plot_joint_spectra(output_dir):
             _draw(part, str(source).replace('_time_shift.csv', '_depth_and_t0'), label=part.label.iloc[0])
     if table['dataset'].nunique() < 2:
         return figure
-    _draw(display_bin(table), str(joint_dir / 'joint_spectrum_binned'))
+    shown, reference = _common_timing_zero(table)
+    label = {} if reference is None else {'t0_label': _REFERENCE_LABEL}
+    _draw(display_bin(shown), str(joint_dir / 'joint_spectrum_binned'), **label)
     plot_ivw_spectra(table, joint_dir)
-    return _draw(table, str(joint_dir / 'joint_spectrum'))
+    return _draw(shown, str(joint_dir / 'joint_spectrum'), **label)
 
 
 def _timing_reference(table, window=TIMING_REFERENCE_UM):
@@ -560,6 +564,25 @@ def _timing_reference(table, window=TIMING_REFERENCE_UM):
         return table, None
     reference, error = _ivw(table.dt0_s[inside], table.t0_err_s[inside])
     return table.assign(dt0_s=table.dt0_s - reference, t0_reference_s=reference, t0_reference_err_s=error), reference
+
+
+def _common_timing_zero(table):
+    """Every visit's transit times on the zero of the combined figure; (table, None) without it.
+
+    Each visit's times are measured from its own white-light time, an average over that visit's
+    band. Overlapping visits are moved by the time offsets fitted in `ivw_combine`, and all times
+    are then shifted by the weighted mean of the combined spectrum over TIMING_REFERENCE_UM.
+    """
+    combined, offsets = ivw_combine(table)
+    shift = np.zeros(len(table))
+    if offsets is not None:
+        shift = pd.Series(_visits(table)).map(offsets.set_index('visit').t0_offset_s).fillna(0.0).to_numpy()
+    aligned = table.assign(dt0_s=table.dt0_s - shift, t0_visit_offset_s=shift)
+    referenced, reference = _timing_reference(aligned if combined is None else combined)
+    if reference is None:
+        return table, None
+    return aligned.assign(dt0_s=aligned.dt0_s - reference, t0_reference_s=reference,
+                          t0_reference_err_s=referenced.t0_reference_err_s.iloc[0]), reference
 
 
 def plot_ivw_spectra(table, joint_dir):
@@ -579,9 +602,7 @@ def plot_ivw_spectra(table, joint_dir):
     shown, reference = _timing_reference(combined)
     if reference is None:
         return _draw(combined, str(Path(joint_dir) / 'joint_spectrum_ivw'))
-    low, high = TIMING_REFERENCE_UM
-    return _draw(shown, str(Path(joint_dir) / 'joint_spectrum_ivw'),
-                 t0_label=f'$t_0 - t_0$({low:.2f}–{high:.2f} $\\mu$m) [s]')
+    return _draw(shown, str(Path(joint_dir) / 'joint_spectrum_ivw'), t0_label=_REFERENCE_LABEL)
 
 
 if __name__ == '__main__':
