@@ -1,4 +1,6 @@
 """The combined depth and timing figure of a joint run."""
+import shutil
+
 import numpy as np
 import pandas as pd
 
@@ -71,6 +73,16 @@ def test_long_wavelength_range_uses_log_axis_and_marks_clipped_points(tmp_path):
     assert plot_joint_spectra(tmp_path).exists()
 
 
+def test_miri_axis_is_linear_to_five_microns_and_compressed_beyond():
+    from koala.joint_products import _hybrid_forward, _hybrid_inverse
+    wavelength = np.array([0.6, 2.0, 4.99, 5.0, 6.0, 10.0])
+    position = _hybrid_forward(wavelength)
+    np.testing.assert_allclose(position[:4], wavelength[:4])
+    np.testing.assert_allclose(_hybrid_inverse(position), wavelength)
+    # MIRI/LRS takes about a fifth of a 0.6-10 um axis.
+    assert 0.15 < (_hybrid_forward(10.0) - 5.0) / (_hybrid_forward(10.0) - 0.6) < 0.25
+
+
 def _limb_table(dt0_s, k=0.12, coefficient=2500.0):
     """Channels with the analytic half-disk responses and tiny errors."""
     n = len(dt0_s)
@@ -123,3 +135,139 @@ def test_limb_errors_are_anticorrelated_when_timing_dominates():
     table = _limb_table([0., 0.]).assign(depth_err=1e-5, t0_err_s=20.)
     corr = limb_spectra(table).corr_morning_evening
     assert np.all(corr < -0.9)
+
+
+def _visit(name, start, stop, epoch, depth=.02, dt0=0., depth_err=1e-4, t0_err_s=4., n=40):
+    """A NIRSpec dataset of one visit; channels at R ~ 200 between start and stop (um)."""
+    edges = np.geomspace(start, stop, n + 1)
+    return pd.DataFrame({
+        'dataset': name, 'instrument': 'NIRSpec', 'label': name, 'wavelength': 0.5 * (edges[1:] + edges[:-1]),
+        'wavelength_err': 0.5 * np.diff(edges), 'wave_lo_um': edges[:-1], 'wave_hi_um': edges[1:], 'planet': 0,
+        'depth': depth, 'depth_err': depth_err, 'dt0_s': dt0, 't0_err_s': t0_err_s,
+        't0_bjd': epoch + dt0 / 86400.0, 'corr_depth_t0': 0.,
+        'd_depth_dRL': .12, 'd_depth_dRT': .12, 'd_dt0_dRL_s_per_Rstar': -2500., 'd_dt0_dRT_s_per_Rstar': 2500.,
+    })
+
+
+
+def test_datasets_on_the_same_channels_are_binned_and_averaged_channel_by_channel():
+    from koala.joint_products import display_bin, ivw_combine
+    # SOSS channels at R ~ 97, and a G140H visit fitted on the same channels between 1.0 and 1.8 um.
+    soss = _visit('soss_order1', 0.9, 2.8, 2460000., n=110).assign(instrument='NIRISS')
+    g140h = soss[(soss.wavelength > 1.0) & (soss.wavelength < 1.8)].assign(
+        dataset='g140h_nrs1', instrument='NIRSpec', label='g140h_nrs1', t0_bjd=2460100.)
+    table = pd.concat([soss, g140h], ignore_index=True)
+    binned = display_bin(table)
+    soss_bins = binned[binned.dataset == 'soss_order1']
+    shared = soss_bins[(soss_bins.wave_lo_um >= g140h.wave_lo_um.min()) & (soss_bins.wave_hi_um <= g140h.wave_hi_um.max())]
+    # Where G140H has the channels, both datasets keep them unbinned (NIRSpec's R ~ 100), at the
+    # same wavelengths; SOSS alone is binned to R ~ 50 elsewhere.
+    np.testing.assert_array_equal(shared.wave_lo_um, binned[binned.dataset == 'g140h_nrs1'].wave_lo_um)
+    assert (shared.channels == 1).all() and (soss_bins.channels.max() == 2)
+    combined, _ = ivw_combine(table)
+    both = combined[combined.visits == 2]
+    np.testing.assert_allclose(both.wavelength, g140h.wavelength)
+    np.testing.assert_allclose(both.wavelength_err, g140h.wavelength_err)
+    assert (both.channels == 2).all()
+
+
+def test_only_clearly_matching_channels_are_averaged_as_one():
+    from koala.joint_products import ivw_combine
+    soss = _visit('soss_order1', 0.9, 2.8, 2460000., n=110).assign(instrument='NIRISS')
+    g140h = soss[(soss.wavelength > 1.0) & (soss.wavelength < 1.8)].assign(
+        dataset='g140h_nrs1', instrument='NIRSpec', label='g140h_nrs1', t0_bjd=2460100.)
+    width = g140h.wave_hi_um - g140h.wave_lo_um
+    for shift, matched in ((0.1, True), (0.5, False)):
+        moved = g140h.assign(**{c: g140h[c] + shift * width for c in ('wavelength', 'wave_lo_um', 'wave_hi_um')})
+        combined, _ = ivw_combine(pd.concat([soss, moved], ignore_index=True))
+        if matched:
+            # A tenth of a channel apart: one point per channel, holding both visits.
+            assert (combined.visits == 2).sum() == len(g140h)
+            assert (combined[combined.visits == 2].channels == 2).all()
+        else:
+            # Half a channel apart, it is not clear which channels belong together: nothing is averaged.
+            assert combined is None
+
+
+
+def test_ivw_timing_is_shown_relative_to_the_window_between_water_bands():
+    from koala.joint_products import _timing_reference
+    table = _visit('a', 1.0, 2.0, 2460000., n=60)
+    table['dt0_s'] = np.where(table.wavelength > 1.35, 13., 3.)
+    shown, reference = _timing_reference(table)
+    np.testing.assert_allclose(reference, 3.)
+    np.testing.assert_allclose(shown.dt0_s[table.wavelength.between(1.22, 1.30)], 0.)
+    np.testing.assert_allclose(shown.dt0_s[table.wavelength > 1.35], 10.)
+    # Without the window the times are left as they are.
+    far = _visit('b', 3.0, 4.0, 2460000.)
+    shown, reference = _timing_reference(far)
+    assert reference is None and shown is far
+
+
+def test_joint_figures_share_the_combined_timing_zero():
+    from koala.joint_products import _common_timing_zero, ivw_combine
+    # The second visit's white-light time is 6 s later, so its times read 6 s earlier everywhere.
+    table = pd.concat([_visit('a', 1.0, 2.0, 2460000., n=140),
+                       _visit('b', 1.5, 2.5, 2460100., dt0=-6., n=100)], ignore_index=True)
+    shown, reference = _common_timing_zero(table)
+    np.testing.assert_allclose(shown.dt0_s, 0., atol=1e-9)
+    combined, _ = ivw_combine(table)
+    np.testing.assert_allclose(reference, combined.dt0_s[combined.wavelength.between(1.22, 1.30)].mean())
+
+
+def test_ivw_lines_up_visits_before_averaging_them():
+    from koala.joint_products import ivw_combine
+    # The second visit reads 200 ppm deeper and 6 s later everywhere; the spectra are otherwise flat.
+    table = pd.concat([_visit('a', 1.0, 2.0, 2460000.0, n=140),
+                       _visit('b', 1.5, 2.5, 2460100.0, depth=.0202, dt0=6., n=100)], ignore_index=True)
+    combined, offsets = ivw_combine(table)
+    offsets = offsets.set_index('visit')
+    np.testing.assert_allclose(offsets.depth_offset_ppm['b'] - offsets.depth_offset_ppm['a'], 200., atol=1e-6)
+    np.testing.assert_allclose(offsets.t0_offset_s['b'] - offsets.t0_offset_s['a'], 6., atol=1e-6)
+    np.testing.assert_allclose(offsets.depth_overlap_chi2, 0., atol=1e-12)
+    # No step where the coverage changes, and the zero sits between the two visits.
+    np.testing.assert_allclose(combined.depth, combined.depth.iloc[0], atol=1e-12)
+    np.testing.assert_allclose(combined.dt0_s, combined.dt0_s.iloc[0], atol=1e-9)
+    assert 0. < combined.dt0_s.iloc[0] < 6.
+    # Inverse-variance errors from all channels of both visits in a bin.
+    np.testing.assert_allclose(combined.t0_err_s, 4. / np.sqrt(combined.channels))
+    assert set(combined.visits) == {1, 2}
+    resolution = combined.wavelength / (combined.wave_hi_um - combined.wave_lo_um)
+    assert abs(np.median(resolution) - 100) < 2
+
+
+def test_ivw_limb_asymmetry_tightens_with_more_visits():
+    from koala.joint_products import ivw_combine, limb_spectra
+    one, _ = ivw_combine(pd.concat([_visit('a', 3., 4., 2460000.), _visit('b', 4.2, 5., 2460100.)]))
+    assert one is None
+    four = pd.concat([_visit(name, 3., 4., 2460000. + 100 * k, t0_err_s=20.) for k, name in enumerate('abcd')])
+    combined, _ = ivw_combine(four)
+    single, _ = ivw_combine(pd.concat([four[four.dataset == 'a'],
+                                       four[four.dataset == 'b'].assign(t0_err_s=2e4, depth_err=1.)]))
+    ratio = (limb_spectra(combined).radius_evening_minus_morning_err_Rstar /
+             limb_spectra(single).radius_evening_minus_morning_err_Rstar)
+    np.testing.assert_allclose(np.median(ratio), 0.5, rtol=0.05)
+
+
+def test_ivw_figures_are_written_only_for_overlapping_visits(tmp_path):
+    for name, (start, stop), epoch in (('g235h_nrs2', (2.3, 3.1), 2460000.), ('prism_nrs1', (2.0, 5.0), 2460100.)):
+        member = tmp_path / name
+        member.mkdir()
+        _visit(name, start, stop, epoch).drop(columns=['dataset', 'instrument', 'label']).to_csv(
+            member / f'WASP-39_NIRSPEC_{name}_Rreference_time_shift.csv', index=False)
+    plot_joint_spectra(tmp_path)
+    for stem in ('joint_spectrum_ivw', 'limb_spectra_ivw'):
+        assert (tmp_path / 'joint' / f'{stem}.png').exists()
+    assert len(pd.read_csv(tmp_path / 'joint' / 'ivw_offsets.csv')) == 2
+    # Without shared wavelengths there is nothing to combine.
+    shutil.rmtree(tmp_path / 'prism_nrs1')
+    shutil.rmtree(tmp_path / 'joint')
+    # Two detectors of one visit that touch at their ends do not count as an overlap.
+    (tmp_path / 'g235h_nrs1').mkdir()
+    _visit('g235h_nrs1', 1.7, 2.31, 2460000.).drop(columns=['dataset', 'instrument', 'label']).to_csv(
+        tmp_path / 'g235h_nrs1' / 'WASP-39_NIRSPEC_g235h_nrs1_Rreference_time_shift.csv', index=False)
+    (tmp_path / 'g395h_nrs1').mkdir()
+    _visit('g395h_nrs1', 3.2, 3.7, 2460100.).drop(columns=['dataset', 'instrument', 'label']).to_csv(
+        tmp_path / 'g395h_nrs1' / 'WASP-39_NIRSPEC_g395h_nrs1_Rreference_time_shift.csv', index=False)
+    plot_joint_spectra(tmp_path)
+    assert not (tmp_path / 'joint' / 'joint_spectrum_ivw.png').exists()
