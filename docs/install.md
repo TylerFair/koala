@@ -16,6 +16,16 @@ For NVIDIA GPUs with CUDA 12, install the matching pinned JAX build:
 python -m pip install "jax[cuda12]==0.6.2"
 ```
 
+Quadratic transits automatically use a CUDA accelerator when the CUDA toolkit's
+`nvcc` compiler is on `PATH` (or under `CUDA_HOME` or `CUDA_PATH`) and supports the
+device. The first use builds it in `$XDG_CACHE_HOME/koala/quadratic_cuda`, or
+`~/.cache/koala/quadratic_cuda` when `XDG_CACHE_HOME` is unset. Later fits reuse
+that build. Package installation does not run a compiler.
+
+If CUDA compilation is unavailable, koala uses the JAX closed form. It prints
+which implementation is selected. CPU evaluation and higher derivatives use
+JAX; the CUDA accelerator uses the same flux, derivatives and likelihood.
+
 Check the installation:
 
 ```bash

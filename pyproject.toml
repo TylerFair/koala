@@ -52,3 +52,6 @@ markers = [
     "gpu: requires a CUDA device",
     "harmonica: exercises the bundled Harmonica C++ extension",
 ]
+
+[tool.setuptools.package-data]
+"models.jaxoplanet" = ["quadratic_cuda.cu", "quadratic_cuda.h"]
