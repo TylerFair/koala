@@ -677,6 +677,15 @@ def create_vectorized_model(
             raise ValueError('t0_half_width_days must be finite and positive.')
         if power2_table is not None:
             raise ValueError('free_t0 cannot use a fixed-orbit power-2 table.')
+    # With the CUDA kernel the fused score also beats the full likelihood on short light
+    # curves; with JAX alone it does not, so CPU runs keep the full likelihood there.
+    quadratic_score_route = (
+        free_t0 and resolved_kernel == 'quadratic_contact_safe' and ld_profile == 'quadratic'
+        and surface_config.get('fit_geometry', True)
+    )
+    if quadratic_score_route:
+        from .quadratic_cuda import accelerated
+        quadratic_score_route = accelerated()
     if ld_profile == "power2":
         MUS_LD, P_LD = _prepare_power2_poly()
 
@@ -695,9 +704,9 @@ def create_vectorized_model(
         rors_reference=None, transit_separation=None,
     ):
         num_lcs = jnp.atleast_2d(yerr).shape[0]
-        use_cadence_reduction = (
-            cadence_reduction_eligible
-            and int(jnp.shape(t)[0]) > _AUTO_CADENCE_REDUCTION_THRESHOLD
+        use_cadence_reduction = cadence_reduction_eligible and (
+            int(jnp.shape(t)[0]) > _AUTO_CADENCE_REDUCTION_THRESHOLD
+            or (quadratic_score_route and oot_reference_beta is not None)
         )
         use_transit_grid = (
             transit_grid_eligible
@@ -1301,7 +1310,7 @@ def create_vectorized_model(
                 and all(jnp.size(value) == 1 for value in (PERIOD, a_rs, bs, mu_ecc, mu_omega))
             )
             if use_quadratic_score:
-                from .quadratic_likelihood import log_likelihood
+                from .quadratic_cuda import log_likelihood
 
                 beta = jnp.stack(
                     tuple(params[name] for name in linear_trend_names), axis=1
