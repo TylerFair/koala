@@ -8,43 +8,60 @@ using D=ffi::Buffer<ffi::F64>;
 using B=ffi::Buffer<ffi::PRED>;
 using R=ffi::ResultBuffer<ffi::F64>;
 constexpr int threads=128;
+template<int K>
 __global__ void First(int64_t n,const double* theta,const double* z,const double* zdot,
                       const double* y,const double* var,const bool* mask,
                       const double* design,const bool* front,double* scratch) {
+  constexpr int V=K+6;
   int64_t lane=blockIdx.y,t=int64_t(blockIdx.x)*threads+threadIdx.x,i=lane*n+t;
-  double values[8]={};
-  if(t<n)koala_quad::cadence(theta+lane*7,z[i],zdot[i],y[i],var[i],mask[i],design+2*i,front[i],values);
-  __shared__ double shared[8][threads];
-  for(int k=0;k<8;++k)shared[k][threadIdx.x]=values[k];
+  double values[V]={};
+  if(t<n)koala_quad::cadence<K>(theta+lane*(K+5),z[i],zdot[i],y[i],var[i],mask[i],design+K*i,front[i],values);
+  __shared__ double shared[V][threads];
+  for(int k=0;k<V;++k)shared[k][threadIdx.x]=values[k];
   __syncthreads();
   for(int stride=threads/2;stride;stride/=2) {
-    if(threadIdx.x<stride)for(int k=0;k<8;++k)shared[k][threadIdx.x]+=shared[k][threadIdx.x+stride];
+    if(threadIdx.x<stride)for(int k=0;k<V;++k)shared[k][threadIdx.x]+=shared[k][threadIdx.x+stride];
     __syncthreads();
   }
-  if(threadIdx.x==0)for(int k=0;k<8;++k)scratch[(lane*gridDim.x+blockIdx.x)*8+k]=shared[k][0];
+  if(threadIdx.x==0)for(int k=0;k<V;++k)scratch[(lane*gridDim.x+blockIdx.x)*V+k]=shared[k][0];
 }
-__global__ void Second(int blocks,const double* scratch,double* output) {
+__global__ void Second(int blocks,int values,const double* scratch,double* output) {
   int lane=blockIdx.x,k=threadIdx.x;
-  if(k<8) {
-    double sum=0.;for(int b=0;b<blocks;++b)sum+=scratch[(lane*blocks+b)*8+k];
-    output[lane*8+k]=sum;
+  if(k<values) {
+    double sum=0.;for(int b=0;b<blocks;++b)sum+=scratch[(lane*blocks+b)*values+k];
+    output[lane*values+k]=sum;
   }
 }
+template<int K>
+void Launch(cudaStream_t stream,int blocks,int64_t lanes,int64_t n,D& theta,D& z,D& zdot,D& y,D& var,
+            B& mask,D& design,B& front,R& scratch) {
+  First<K><<<dim3(blocks,lanes),threads,0,stream>>>(n,theta.typed_data(),z.typed_data(),zdot.typed_data(),
+      y.typed_data(),var.typed_data(),mask.typed_data(),design.typed_data(),front.typed_data(),scratch->typed_data());
+}
 ffi::Error Calculate(cudaStream_t stream,D theta,D z,D zdot,D y,D var,B mask,D design,B front,R out,R scratch) {
-  int64_t n=z.dimensions().back(),lanes=theta.element_count()/7;
-  if(theta.dimensions().back()!=7 || design.dimensions().back()!=2)
-    return ffi::Error::InvalidArgument("koala quadratic CUDA expects seven parameters and two trend columns");
+  int64_t n=z.dimensions().back(),columns=design.dimensions().back();
+  if(columns<1 || columns>8 || theta.dimensions().back()!=columns+5)
+    return ffi::Error::InvalidArgument("koala quadratic CUDA expects 1-8 trend columns and matching parameters");
+  int64_t lanes=theta.element_count()/(columns+5),values=columns+6;
   if(z.element_count()!=lanes*n || zdot.element_count()!=lanes*n || y.element_count()!=lanes*n ||
      var.element_count()!=lanes*n || mask.element_count()!=lanes*n ||
-     design.element_count()!=lanes*n*2 || front.element_count()!=lanes*n)
+     design.element_count()!=lanes*n*columns || front.element_count()!=lanes*n)
     return ffi::Error::InvalidArgument("koala quadratic CUDA batch shape mismatch");
   int blocks=(n+threads-1)/threads;
   if (lanes == 0) return ffi::Error::Success();
-  if (out->element_count() != lanes*8 || scratch->element_count() != lanes*blocks*8)
+  if (out->element_count() != lanes*values || scratch->element_count() != lanes*blocks*values)
     return ffi::Error::InvalidArgument("koala quadratic CUDA output shape mismatch");
-  if (blocks > 0) First<<<dim3(blocks,lanes),threads,0,stream>>>(n,theta.typed_data(),z.typed_data(),zdot.typed_data(),
-      y.typed_data(),var.typed_data(),mask.typed_data(),design.typed_data(),front.typed_data(),scratch->typed_data());
-  Second<<<lanes,32,0,stream>>>(blocks,scratch->typed_data(),out->typed_data());
+  if (blocks > 0) switch(columns) {
+    case 1: Launch<1>(stream,blocks,lanes,n,theta,z,zdot,y,var,mask,design,front,scratch); break;
+    case 2: Launch<2>(stream,blocks,lanes,n,theta,z,zdot,y,var,mask,design,front,scratch); break;
+    case 3: Launch<3>(stream,blocks,lanes,n,theta,z,zdot,y,var,mask,design,front,scratch); break;
+    case 4: Launch<4>(stream,blocks,lanes,n,theta,z,zdot,y,var,mask,design,front,scratch); break;
+    case 5: Launch<5>(stream,blocks,lanes,n,theta,z,zdot,y,var,mask,design,front,scratch); break;
+    case 6: Launch<6>(stream,blocks,lanes,n,theta,z,zdot,y,var,mask,design,front,scratch); break;
+    case 7: Launch<7>(stream,blocks,lanes,n,theta,z,zdot,y,var,mask,design,front,scratch); break;
+    case 8: Launch<8>(stream,blocks,lanes,n,theta,z,zdot,y,var,mask,design,front,scratch); break;
+  }
+  Second<<<lanes,32,0,stream>>>(blocks,values,scratch->typed_data(),out->typed_data());
   auto error=cudaGetLastError();
   if(error!=cudaSuccess)return ffi::Error::Internal(cudaGetErrorString(error));
   return ffi::Error::Success();

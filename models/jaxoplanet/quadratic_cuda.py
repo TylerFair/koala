@@ -137,6 +137,11 @@ def _accelerator():
 _accelerator.cache_clear = _load_accelerator.cache_clear
 
 
+def accelerated():
+    """Whether the CUDA kernel is built and loaded in this process."""
+    return _accelerator() is not None
+
+
 def _active_jvp(function, primals, tangents, *, start=0):
     indices = [i for i in range(start, len(primals))
                if not isinstance(tangents[i], jax.custom_derivatives.SymbolicZero)]
@@ -219,8 +224,9 @@ def _native_likelihood():
         def separation(epoch):
             return orbit_separation(t, period, epoch, a_rs, impact, ecc, omega)
         (z, front), (z_dot, _) = jax.jvp(separation, (theta[3],), (jnp.ones_like(theta[3]),))
-        outputs = (jax.ShapeDtypeStruct((8,), jnp.float64),
-                   jax.ShapeDtypeStruct(((len(t)+127)//128, 8), jnp.float64))
+        values = design.shape[-1]+6
+        outputs = (jax.ShapeDtypeStruct((values,), jnp.float64),
+                   jax.ShapeDtypeStruct(((len(t)+127)//128, values), jnp.float64))
         value, _ = jax.ffi.ffi_call(target, outputs, vmap_method='broadcast_all')(
             theta, z, z_dot, y, variance, mask, design, front)
         return value
@@ -250,7 +256,7 @@ def _native_likelihood():
 
 
 def log_likelihood(theta, t, y, variance, mask, design, orbit):
-    """Use the fused CUDA score for two-column trends, otherwise the JAX score."""
-    if (design.shape[-1] != 2 or theta.dtype != jnp.float64 or _accelerator() is None):
+    """Use the fused CUDA score for one to eight trend columns, otherwise the JAX score."""
+    if (not 1 <= design.shape[-1] <= 8 or theta.dtype != jnp.float64 or _accelerator() is None):
         return quadratic_likelihood.log_likelihood(theta, t, y, variance, mask, design, orbit)
     return _native_likelihood()(theta, t, y, variance, mask, design, orbit)

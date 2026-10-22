@@ -828,10 +828,19 @@ def _prepare_trend_likelihood(model, inputs, fit, flux, flux_error, model_kwargs
     num_lcs = flux.shape[0]
     if getattr(fit, 'transit_separation', None) is not None:
         model_kwargs['transit_separation'] = fit.transit_separation
+    # Short light curves use the reduction only for the fused quadratic score, and only
+    # with the CUDA kernel; with the JAX score alone it is slower there.
+    fused_quadratic = (
+        fit.trend_mode == 'free' and model.ld_profile == 'quadratic'
+        and bool(getattr(inputs, 'flags', {}).get('spectro_free_t0', False))
+    )
+    if fused_quadratic and int(fit.time.size) <= 5000:
+        from models.jaxoplanet.quadratic_cuda import accelerated
+        fused_quadratic = accelerated()
     if (
         model.transit_engine == 'jaxoplanet'
         and model._engine_spectro_kw.get('cadence_reduction') == 'auto'
-        and int(fit.time.size) > 5000
+        and (int(fit.time.size) > 5000 or fused_quadratic)
         and (fit.trend_mode == 'free' or (
             fit.trend_mode == 'gaussian_marginalized'
             and fit.detrend_type in {'constant', 'linear', 'quadratic'}))

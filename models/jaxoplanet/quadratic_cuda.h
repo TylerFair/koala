@@ -102,20 +102,23 @@ KOALA_INLINE Parts partials(double u1,double u2,double raw_r,double raw_z) {
   double du2=(1.5*area-2*m1-.25*s2+value*pi/6)/norm;
   return {value,raw_r<0.?-dr:dr,raw_z<0.?-dz:dz,du1,du2};
 }
+// K trend columns; out holds log probability, four transit, K trend and one jitter term.
+template<int K>
 KOALA_INLINE void cadence(const double* theta,double z,double zdot,double y,double var,
                        bool valid,const double* design,bool front,double* out) {
-  for(int k=0;k<8;++k)out[k]=0.;
+  for(int k=0;k<K+6;++k)out[k]=0.;
   if(!valid)return;
   Parts p=front?partials(theta[1],theta[2],theta[0],z):Parts{0.,0.,0.,0.,0.};
-  double flux=1+p.value,trend=design[0]*theta[4]+design[1]*theta[5];
-  double residual=y-flux*trend,jitter=theta[6],totalvar=var+jitter*jitter;
+  double flux=1+p.value,trend=0.;
+  for(int k=0;k<K;++k)trend+=design[k]*theta[4+k];
+  double residual=y-flux*trend,jitter=theta[4+K],totalvar=var+jitter*jitter;
   double sigma=sqrt(totalvar),standard=residual/sigma;
   // Match numpyro Normal.log_prob, retaining the original arithmetic.
   out[0]=-.5*standard*standard-log(sqrt(2*pi)*sigma);
   double score=residual/totalvar,transit=score*trend;
   out[1]=transit*p.dr;out[2]=transit*p.du1;out[3]=transit*p.du2;
   out[4]=transit*p.dz*zdot;
-  out[5]=score*flux*design[0];out[6]=score*flux*design[1];
-  out[7]=jitter*(residual*residual/totalvar-1)/totalvar;
+  for(int k=0;k<K;++k)out[5+k]=score*flux*design[k];
+  out[5+K]=jitter*(residual*residual/totalvar-1)/totalvar;
 }
 } // namespace koala_quad

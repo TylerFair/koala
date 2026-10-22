@@ -145,5 +145,5 @@ def test_non_linear_trend_uses_jax_without_native_build(monkeypatch):
     monkeypatch.setattr(quadratic_cuda, '_accelerator', unexpected)
     marker = object()
     monkeypatch.setattr(quadratic_likelihood, 'log_likelihood', lambda *args: marker)
-    args = (jnp.zeros(9), None, None, None, None, jnp.zeros((3, 4)), None)
+    args = (jnp.zeros(14), None, None, None, None, jnp.zeros((3, 9)), None)
     assert quadratic_cuda.log_likelihood(*args) is marker
