@@ -52,7 +52,7 @@ def test_style_module_degrades_without_optional_packages(monkeypatch):
     assert module.cmc is None
     assert module.accent_color_for_label("NIRISS_SOSS_order1") == "mediumorchid"
     assert len(module.model_palette_colors(3)) == 3
-    assert plt.rcParams["axes.labelsize"] == 18.0
+    assert plt.rcParams["axes.labelsize"] == module.LABEL_SIZE
 
 
 def test_white_light_plot_entry_points_write_files(tmp_path):

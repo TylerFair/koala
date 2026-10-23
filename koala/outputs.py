@@ -473,7 +473,12 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
     params_df.to_csv(paths.table(stage, "params"), index=False)
     outlier_indices = np.flatnonzero(depth_error_ratios > 5.0)
     if outlier_indices.size:
-        info('Some depth uncertainties exceed five times the channel median; see the detailed fit results.')
+        flagged = np.asarray(wavelengths, dtype=float).ravel()[outlier_indices]
+        where = (f'at {flagged[0]:.2f} µm' if flagged.size == 1 else
+                 f'between {flagged.min():.2f} and {flagged.max():.2f} µm')
+        several = outlier_indices.size != 1
+        info(f'{outlier_indices.size} channel{"s" if several else ""} {where} '
+             f'{"have" if several else "has"} a depth uncertainty more than five times the median.')
         debug(
             "WARNING: depth uncertainties exceed 5x the channel median at "
             f"channel indices {outlier_indices.tolist()}."

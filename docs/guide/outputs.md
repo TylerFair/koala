@@ -38,9 +38,9 @@ Channel `000` is the first row of the spectrum, `001` the second, and so on.
 ## The white-light fit
 
 `*_whitelight_params.csv` has the fitted orbit and every other white-light parameter, with uncertainties.
-`t0` is in BMJD_TDB, and `t0_bjd_tdb` is the same time as a full BJD_TDB.
+`t0` is in BJD_TDB − 2400000, and `t0_bjd_tdb` is the same time as a full BJD_TDB.
 
-`*_whitelight_lightcurve.csv` has the white-light curve with the model for every integration: `time_bjd` (in BMJD_TDB, despite the name), `time_from_t0_hr`, `flux`, `flux_err`, `bestfit_model`, `transit_model`, `trend_model`, `detrended_flux`, `residual`, `residual_ppm` and `is_outlier`.
+`*_whitelight_lightcurve.csv` has the white-light curve with the model for every integration: `time_bjd` (in BJD_TDB − 2400000), `time_from_t0_hr`, `flux`, `flux_err`, `bestfit_model`, `transit_model`, `trend_model`, `detrended_flux`, `residual`, `residual_ppm` and `is_outlier`.
 
 ## Other kinds of fit
 
@@ -74,6 +74,9 @@ With `flags.plots: minimal`, koala only makes `whitelight.png` and the spectrum 
 
 The binned points in the figures are only there to make them easier to read.
 The fits always use every integration, and for numbers you should read the tables.
+
+The figures are drawn at the width of a journal page, 7 inches, so they can go straight into a paper: with `\includegraphics[width=\textwidth]{...}` every label prints at 11 pt or larger in an AASTeX, MNRAS or A&A article.
+To draw your own figures the same way, call `koala.plotting_style.apply_publication_style()` first.
 
 ## Joint fits
 

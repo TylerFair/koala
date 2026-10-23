@@ -1,0 +1,28 @@
+# WASP-39 b with MIRI/LRS (GO 2783), one of the members of wasp39_three_instruments.yaml.
+# Channels of six detector columns, and an exponential ramp after leaving out the first 20 minutes.
+
+planet:
+  name: WASP-39
+  period: {value: 4.05528043, prior: fixed}                                  # days
+  t0: {value: 59990.319, prior: uniform, low: 59990.269, high: 59990.369}    # BJD_TDB - 2400000
+  duration: {value: 0.117, prior: log_uniform, low: 0.01, high: 1.0}         # days
+  b: {value: 0.45, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.146, prior: uniform, low: 0.01, high: 0.5}
+
+stellar:
+  teff: 5509
+  logg: 4.22
+  feh: 0.04
+
+instrument: MIRI/LRS
+
+input_file: examples/data/WASP-39_miri_lrs.fits
+output_dir: results/WASP-39_MIRI_LRS
+
+pixels:
+  high: 6
+
+exclude_times: [["min(t)", "min(t) + 0.0139"]]   # the first 20 minutes
+
+flags:
+  detrending_type: explinear

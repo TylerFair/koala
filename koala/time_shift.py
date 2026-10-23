@@ -10,7 +10,7 @@ import json
 import numpy as np
 
 SECONDS_PER_DAY = 86400.0
-MJD_OFFSET = 2400000.5
+from .readers import TIME_OFFSET
 
 
 def analytic_time_shift_coefficient(period, a_rs, b):
@@ -40,7 +40,7 @@ def analytic_time_shift_coefficient(period, a_rs, b):
 def time_shift_table(wavelengths, wavelength_err, samples, geometry, *, responses):
     """One row per channel/planet; medians and central 68% half-widths.
 
-    Koala stores BMJD_TDB internally. Only the absolute epoch output receives
+    Koala works in BJD_TDB - 2400000. Only the absolute epoch output receives
     the JD offset; relative times use the sampled small coordinate directly.
     """
     import pandas as pd
@@ -79,8 +79,8 @@ def time_shift_table(wavelengths, wavelength_err, samples, geometry, *, response
                 wavelength=float(wave), wavelength_err=float(width),
                 wave_lo_um=float(wave - width), wave_hi_um=float(wave + width),
                 planet=planet, depth=dq[1], depth_err=(dq[2]-dq[0])/2,
-                t0=t0[planet] + MJD_OFFSET + tq[1]/SECONDS_PER_DAY,
-                t0_bjd=t0[planet] + MJD_OFFSET + tq[1]/SECONDS_PER_DAY,
+                t0=t0[planet] + TIME_OFFSET + tq[1]/SECONDS_PER_DAY,
+                t0_bjd=t0[planet] + TIME_OFFSET + tq[1]/SECONDS_PER_DAY,
                 t0_err_s=(tq[2]-tq[0])/2, dt0_s=tq[1],
                 corr_depth_t0=correlation,
                 **responses[channel][planet],
@@ -113,20 +113,20 @@ def save_time_shift_products(wavelengths, wavelength_err, samples, prefix, geome
         for column in columns:
             spectrum[column + suffix] = part[column].to_numpy()
     _atomic_dataframe_csv(spectrum, paths.table(stage, 'spectrum'), index=False)
-    from .plotting_style import apply_publication_style, style_axis, save_figure, figure_title, accent_color_for_label
+    from .plotting_style import (DATA_MARKER_STYLE, apply_publication_style, style_axis, save_figure, figure_title,
+                                 accent_color_for_label, figsize)
     apply_publication_style()
-    fig, axes = plt.subplots(2, 1, figsize=(9, 6.5), sharex=True, constrained_layout=True)
+    fig, axes = plt.subplots(2, 1, figsize=figsize(5.2), sharex=True, constrained_layout=True)
     for planet, part in table.groupby('planet', sort=True):
         color = accent_color_for_label(paths.prefix)
         axes[0].errorbar(part.wavelength, part.depth*1e6, yerr=part.depth_err*1e6,
-                         fmt='o', ms=4, color=color, mfc='white', label=f'Planet {planet + 1}')
-        axes[1].errorbar(part.wavelength, part.dt0_s, yerr=part.t0_err_s,
-                         fmt='o', ms=4, color=color, mfc='white')
+                         label=f'Planet {planet + 1}', **{**DATA_MARKER_STYLE, 'color': color})
+        axes[1].errorbar(part.wavelength, part.dt0_s, yerr=part.t0_err_s, **{**DATA_MARKER_STYLE, 'color': color})
     axes[0].set_ylabel('Depth [ppm]')
     axes[1].axhline(0, color='.5', lw=.8)
     axes[1].set(xlabel='Wavelength [µm]', ylabel=r'$t_0 - t_{0,white}$ [s]')
     if table.planet.nunique() > 1:
-        axes[0].legend(fontsize=10)
+        axes[0].legend()
     for ax in axes:
         style_axis(ax)
     from .diagnostic_figures import grid_title
@@ -134,7 +134,7 @@ def save_time_shift_products(wavelengths, wavelength_err, samples, prefix, geome
     save_figure(fig, paths.figure(stage or paths.prefix, 'timing'))
     metadata = dict(
         time_scale='BJD_TDB', uncertainty='central 68 percent interval half-width',
-        reference_t0_bjd=(np.atleast_1d(geometry.T0_BASE) + MJD_OFFSET).tolist(),
+        reference_t0_bjd=(np.atleast_1d(geometry.T0_BASE) + TIME_OFFSET).tolist(),
         conditional_on_fixed_white_orbit=True,
         white_epoch_uncertainty_added_to_each_bin=False,
         time_shift_coefficient_units='seconds per stellar radius',

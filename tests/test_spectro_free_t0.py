@@ -113,7 +113,7 @@ def test_spherical_zero_shift_and_finite_timing_products(tmp_path):
     np.testing.assert_allclose(table.time_shift_coefficient_analytic,
                                analytic_time_shift_coefficient(4.,9.,.35), rtol=1e-14)
     np.testing.assert_array_equal(table.dt0_s,0.)
-    np.testing.assert_array_equal(table.t0,2460000.625)
+    np.testing.assert_array_equal(table.t0,2460000.125)
     assert np.all(np.isfinite(table.to_numpy()))
     prefix=str(tmp_path/'test_R10')
     import pandas as pd

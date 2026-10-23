@@ -488,11 +488,9 @@ def _initialize_spectroscopic_start(
 
 def _spectroscopic_ld(model, inputs, wavelengths, widths, bin_str):
     if joint_display.get() is not None:
-        label = inputs.instrument
-        if inputs.order is not None:
-            label += f' order {inputs.order}'
-        else:
-            label = inputs.instrument_full_str
+        from .console import observation_label
+        prefix = getattr(inputs, 'instrument_full_str', None)
+        label = observation_label(prefix) if prefix else inputs.instrument
         info('')
         info(f'{label}: spectroscopy {grid_description(bin_str)}, {len(wavelengths)} channels, '
              'orbit fixed to the joint white-light posterior')
@@ -1229,7 +1227,9 @@ def run_low_resolution_stage(
 
         medians = np.nanmedian(residuals, axis=1, keepdims=True)
         sigmas    = 1.4826 * np.nanmedian(np.abs(residuals - medians), axis=1, keepdims=True)
-        point_mask = np.abs(residuals - medians) > spectroscopic_sigma * sigmas
+        # A threshold of 0 (the default) clips nothing.
+        point_mask = (np.abs(residuals - medians) > spectroscopic_sigma * sigmas if spectroscopic_sigma
+                      else np.zeros(residuals.shape, dtype=bool))
         time_mask = np.any(point_mask, axis=0)
         valid = ~time_mask
         _atomic_save_npy(lr_mask_path, time_mask)

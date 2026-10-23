@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 
 with fits.open("examples/data/WASP-39_soss_binned8.fits") as hdul:
-    time = hdul["TIME"].data          # BMJD_TDB
+    time = hdul["TIME"].data          # BMJD_TDB, as in every JWST file
     wave = hdul["WAVE O1"].data       # microns
     flux = hdul["FLUX O1"].data       # shape (integration, wavelength)
 
@@ -29,7 +29,7 @@ white = flux.sum(axis=1)
 white /= np.median(white[:100])
 image = flux / np.median(flux[:100], axis=0)
 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 7), sharex=True)
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.9, 5.4), sharex=True)
 ax1.plot(hours, white, ".k", ms=2)
 ax1.set_ylabel("white-light flux")
 ax2.pcolormesh(hours, wave, image.T, vmin=0.97, vmax=1.01, shading="nearest")
@@ -55,7 +55,7 @@ Here's the one for this observation, which is also in `examples/niriss_soss_orde
 planet:
   name: WASP-39
   period: {value: 4.05528043, prior: fixed}
-  t0: {value: 59787.055, prior: uniform, low: 59787.005, high: 59787.105}
+  t0: {value: 59787.555, prior: uniform, low: 59787.505, high: 59787.605}
   duration: {value: 0.117, prior: log_uniform, low: 0.01, high: 1.0}
   b: {value: 0.45, prior: uniform, low: 0.0, high: 1.5}
   rprs: {value: 0.146, prior: uniform, low: 0.01, high: 0.5}
@@ -78,7 +78,7 @@ resolution:
 The `planet` block gives a starting value and a prior for each property of the orbit.
 We hold the period fixed, since one transit can't measure it better than the published ephemeris.
 The others are fitted with broad priors: the mid-transit time `t0` anywhere in a 2.4-hour window, the transit duration, the impact parameter `b`, and the radius ratio `rprs` ($R_p/R_*$).
-Times are in BMJD_TDB (that's BJD_TDB − 2400000.5) and the period and duration are in days.
+Times are in BJD_TDB − 2400000, the way most papers quote them, and the period and duration are in days.
 Literature values often use a different zero point, so it's worth checking this when you set up your own planet.
 
 The `stellar` block is the star's effective temperature, surface gravity and metallicity.
@@ -94,7 +94,7 @@ Everything else has a default that's a good place to start:
 - a linear trend in time for each light curve,
 - quadratic limb darkening with wide uniform priors on its two coefficients,
 - an extra white-noise (jitter) term on top of the reported flux uncertainties,
-- integrations more than 4σ from the model are clipped,
+- integrations more than 5σ from the white-light model are clipped, and left out of the channel fits too,
 - four chains of 1000 posterior draws each, which have to agree before koala accepts a fit.
 
 [Configuring a fit](guide/configuration.md) shows how to change these.
@@ -115,7 +115,7 @@ import koala
 koala.fit("examples/niriss_soss_order1.yaml")
 ```
 
-This fit took just under 6 minutes on 16 cores of a cluster node (Intel Xeon Gold 6248R).
+This fit took about 5 minutes on 16 cores of a cluster node (Intel Xeon Gold 6248R).
 Here's what koala printed along the way:
 
 ```text
@@ -126,41 +126,41 @@ Reading examples/data/WASP-39_soss_binned8.fits
   Binned to 115 channels at R = 100
 Planet parameters:
   period    fixed at 4.05528043
-  t0        uniform(59787.005, 59787.105), start 59787.055
+  t0        uniform(59787.505, 59787.605), start 59787.555
   duration  log-uniform(0.01, 1.0), start 0.117
   b         uniform(0.0, 1.5), start 0.45
   rprs      uniform(0.01, 0.5), start 0.146
 Limb darkening: quadratic law with uniform priors on u1 + u2 and u1 - u2
+Stagger has no models above solar metallicity, so limb darkening uses its [Fe/H] = 0 models.
 Downloaded stellar limb-darkening data.
 White light: transit with a linear trend, 4 chains of 1000 draws
-sample: 100%|██████████████████████████████████████████████████| 1200/1200 [00:35<00:00, 33.33it/s]
-White-light sampling had divergences; retrying with smaller steps.
-sample: 100%|██████████████████████████████████████████████████| 1200/1200 [01:00<00:00, 19.94it/s]
-  Converged: R-hat <= 1.001, bulk effective sample size >= 1278, no divergences
+sample: 100%|██████████████████████████████████████████████████| 1200/1200 [00:37<00:00, 32.05it/s]
+  Converged: R-hat <= 1.003, bulk effective sample size >= 1948, no divergences
   rprs             0.14591 ± 0.00018
-  b                0.4511 ± 0.0047
-  t0               59787.056748 ± 0.000014 BMJD_TDB
-  duration         0.119602 ± 0.000088 d
-  Residual scatter 109 ppm; 1 integration clipped at 4σ
-Limb darkening from stellar models: 100%|██████████████████████| 115/115 [00:00<00:00, 1533.79it/s]
+  b                0.4510 ± 0.0048
+  t0               59787.556749 ± 0.000014 BJD_TDB - 2400000
+  duration         0.119600 ± 0.000088 d
+  Residual scatter 109 ppm; 1 integration clipped at 5σ
+Limb darkening from stellar models: 100%|███████████████████████| 115/115 [00:00<00:00, 679.57it/s]
 Spectroscopy at R = 100: 115 channels, orbit fixed to the white-light posterior
-Channels: 100%|██████████████████████████████████████████████████| 115/115 [03:04<00:00,  1.60s/it]
+Channels: 100%|██████████████████████████████████████████████████| 115/115 [03:03<00:00,  1.60s/it]
 All 115 channels passed the convergence checks!
 Spectrum: results/WASP-39_SOSS_ORDER1/WASP-39_NIRISS_SOSS_order1_R100_spectrum.csv
 Figures: results/WASP-39_SOSS_ORDER1/figures/
 Full log: results/WASP-39_SOSS_ORDER1/koala.log
-Done in 5 min 51 s.
+Done in 5 min 7 s.
 ```
 
 Let's go through that.
 First koala reads the file and tells us what it found, which is a good moment to check that the instrument, the number of integrations and the wavelength range are what you expect.
-It then prints the priors it's going to use.
-The first time you fit a star, it also downloads the stellar models it needs for the limb darkening.
+It then prints the priors it's going to use, and which stellar models it will use for the limb darkening.
+That's the 3D Stagger grid, and since WASP-39 is a little more metal-rich than the Sun, where Stagger stops, koala uses its solar-metallicity models.
+The first time you fit a star, it also downloads the stellar models it needs.
 
 Next it fits the white-light curve.
 Adding up all the wavelengths gives the most precise light curve we have, so this is where koala measures the orbit: the transit time, duration and impact parameter, along with the white-light radius ratio, limb darkening, trend and jitter.
-Here the first set of chains had divergent transitions, which happens when the sampler's steps are too big for the shape of the posterior, so koala ran them again with smaller steps.
 Once the four chains agreed, it printed the results and how many outlying integrations it clipped.
+(If the chains have divergent transitions, which happens when the sampler's steps are too big for the shape of the posterior, koala says so and runs them again with smaller steps.)
 
 Then it looks up the limb darkening at each wavelength and fits each channel with the orbit held fixed at the white-light result.
 Each channel gets its own radius ratio, limb darkening, trend and jitter.
@@ -182,7 +182,7 @@ wl = pd.read_csv(next(out.glob("*_whitelight_lightcurve.csv")))
 good = wl["is_outlier"] == 0
 hours = wl["time_from_t0_hr"]
 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), sharex=True,
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.9, 4.6), sharex=True,
                                gridspec_kw={"height_ratios": [2, 1]})
 ax1.plot(hours[good], wl["detrended_flux"][good], ".k", ms=2, alpha=0.5)
 ax1.plot(hours, wl["transit_model"], "C1", lw=1.5)
@@ -198,7 +198,7 @@ ax2.set_ylabel("residual (ppm)")
 ```
 
 The model goes right through the data, and the residuals scatter by about 110 ppm around zero with no pattern left in them, which is what we'd hope for.
-One integration at the very start of the observation was more than 4σ from the model, so koala clipped it, and it's left out of this plot.
+One integration at the very start of the observation was more than 5σ from the model, so koala clipped it, and it's left out of this plot.
 
 The fitted orbit is in `*_whitelight_params.csv`:
 
@@ -208,14 +208,14 @@ print(params[["t0", "t0_err", "duration", "duration_err", "b", "b_err", "rors", 
 ```
 
 ```text
-t0              59787.056748
+t0              59787.556749
 t0_err              0.000014
-duration            0.119602
+duration            0.119600
 duration_err        0.000088
-b                   0.451094
-b_err               0.004747
-rors                0.145913
-rors_err            0.000178
+b                   0.451028
+b_err               0.004754
+rors                0.145912
+rors_err            0.000177
 ```
 
 The transit time is measured to about a second and the radius ratio to about 0.1%, which is why it pays to fit the orbit once with all the light and then hold it fixed.
@@ -228,7 +228,7 @@ The spectrum is in a CSV file named after the target, instrument and wavelength 
 ```python
 spec = pd.read_csv(next(out.glob("*_R100_spectrum.csv")))
 
-fig, ax = plt.subplots(figsize=(9, 4))
+fig, ax = plt.subplots(figsize=(6.9, 3.2))
 ax.errorbar(spec["wavelength"], spec["depth_ppm00"],
             xerr=spec["wavelength_err"], yerr=spec["depth_err_ppm00"],
             fmt="o", ms=3, color="k")

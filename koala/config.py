@@ -269,8 +269,8 @@ def parse_planet_parameter_specs(planet_cfg):
 def check_ephemeris_covers_data(time, specs, light_curve_model='transit'):
     """Fail early when no allowed transit/eclipse time falls on the data.
 
-    A wrong time system is the usual cause: Koala works in BMJD_TDB
-    (BJD_TDB - 2400000.5), while papers often quote full BJD or BJD - 2400000.
+    A wrong time system is the usual cause: Koala works in BJD_TDB - 2400000,
+    while papers also quote full BJD or BMJD_TDB = BJD_TDB - 2400000.5.
     With a fixed period the model is periodic, so such an epoch silently puts
     the model event at the wrong orbital phase and the fitted depth goes to zero.
     """
@@ -282,8 +282,8 @@ def check_ephemeris_covers_data(time, specs, light_curve_model='transit'):
         if abs(t0.value - 0.5 * (t_lo + t_hi)) > 1.0e5:
             raise ValueError(
                 f"planet.t0 (or eclipse_time) = {t0.value + shift * period.value:.5f} "
-                f"looks like a full BJD, but the data are BMJD_TDB "
-                f"({t_lo:.3f} to {t_hi:.3f}). Subtract 2400000.5."
+                f"looks like a full BJD, but koala works in BJD_TDB - 2400000 "
+                f"(the data run from {t_lo:.3f} to {t_hi:.3f}). Subtract 2400000."
             )
         if light_curve_model == 'phase_curve' or period.free:
             continue
@@ -300,13 +300,17 @@ def check_ephemeris_covers_data(time, specs, light_curve_model='transit'):
             return lo + offset + n * p <= t_hi
 
         if not covers(0.0):
-            hint = (" Shifting the ephemeris by 0.5 d would fit: BJD - 2400000 was "
-                    "probably used instead of BMJD_TDB = BJD - 2400000.5."
-                    if covers(0.5) or covers(-0.5) else "")
+            hint = (" Shifting the ephemeris by 0.5 d would fit: a BMJD_TDB "
+                    "(BJD - 2400000.5) time was probably used instead of BJD_TDB - 2400000; "
+                    "add 0.5."
+                    if covers(0.5) else
+                    " Shifting the ephemeris by 0.5 d would fit: check the time system "
+                    "(koala works in BJD_TDB - 2400000)."
+                    if covers(-0.5) else "")
             raise ValueError(
                 f"Planet {i}: no {event} time allowed by the planet.t0/eclipse_time "
                 f"prior ({lo:.5f} to {hi:.5f} plus whole periods) falls inside the "
-                f"data ({t_lo:.5f} to {t_hi:.5f} BMJD_TDB).{hint}"
+                f"data ({t_lo:.5f} to {t_hi:.5f}, BJD_TDB - 2400000).{hint}"
             )
 
 

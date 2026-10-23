@@ -37,8 +37,8 @@ For several planets, give a list with one entry per planet.
 |---|---|---|
 | `name` | | target name, used in file names |
 | `period` | days | orbital period |
-| `t0` | BMJD_TDB | mid-transit time |
-| `eclipse_time` | BMJD_TDB | mid-eclipse time, instead of `t0` (circular orbit, fixed period) |
+| `t0` | BJD_TDB − 2400000 | mid-transit time |
+| `eclipse_time` | BJD_TDB − 2400000 | mid-eclipse time, instead of `t0` (circular orbit, fixed period) |
 | `duration` | days | transit duration |
 | `a_rs` | | scaled semi-major axis $a/R_*$, instead of `duration` |
 | `b` | | impact parameter |
@@ -53,11 +53,11 @@ For several planets, give a list with one entry per planet.
 |---|---|---|
 | `teff`, `logg`, `feh` | | effective temperature (K), surface gravity ($\log_{10}$ cgs) and metallicity (dex) |
 | `teff_sigma`, `logg_sigma`, `feh_sigma` | | their uncertainties, used by `ld_prior: stellarprior` |
-| `ld_model` | `mps1` | ExoTiC-LD stellar-model grid (`mps1`, `mps2`, `stagger`, `kurucz`, `phoenix`) |
+| `ld_model` | `stagger`, or `mps1` for stars outside Stagger | ExoTiC-LD stellar-model grid (`stagger`, `mps1`, `mps2`, `kurucz`, `phoenix`); Stagger uses its solar-metallicity models for metal-rich stars |
 | `ld_data_path` | `~/.cache/koala/exotic_ld_data` | where the stellar-model files are kept |
 | `ld_interpolate_type` | `trilinear` | how ExoTiC-LD interpolates the grid |
 | `ld_coefficients` | | your own fixed coefficients (for `ld_prior: fixed` or `fixed_u1`) |
-| `ld_prior_model` | `ld_model`, or `stagger` if that isn't set | stellar-model grid for `stellarprior` |
+| `ld_prior_model` | `ld_model` | stellar-model grid for `stellarprior`, if it should differ from `ld_model` |
 | `ld_prior_n_grid` | 9 | grid points per stellar parameter for `stellarprior` |
 | `ld_prior_nsigma` | 5 | half-width of that grid, in standard deviations |
 | `ld_prior_min_sigma` | 1e-4 | smallest allowed prior width |
@@ -73,8 +73,8 @@ For several planets, give a list with one entry per planet.
 | `resolution.high` | | a resolving power, `native`, or `reference` |
 | `resolution.low` | | an optional coarser stage, with the same choices |
 | `resolution.reference_grid`, `resolution.reference_grid_lr` | | CSV files of bin edges for `reference` |
-| `outlier_clip.whitelight_sigma` | 4 | clipping threshold for the white-light fit |
-| `outlier_clip.spectroscopic_sigma` | 4 | clipping threshold for the channel fits |
+| `outlier_clip.whitelight_sigma` | 5 | clipping threshold for the white-light fit; 0 turns it off |
+| `outlier_clip.spectroscopic_sigma` | 0 | clipping threshold applied to the `resolution.low` channels before the fine stage; 0 turns it off |
 | `outlier_clip.mask_integrations_start`, `outlier_clip.mask_integrations_end` | | number of integrations to leave out at the start and end |
 
 ## Trend priors
@@ -107,7 +107,7 @@ In the channel fits, the polynomial coefficients have uniform(−10, 10) priors 
 | `ld_uniform_basis` | `uplus_uminus` | uniform quadratic priors on $u_1 \pm u_2$, or `coefficients` for a box in $u_1, u_2$ |
 | `ld_uniform_coefficient_bounds` | `[0, 1]` | that box, which also bounds the free $u_2$ of `fixed_u1` |
 | `ld_parameterization` | `auto` | power-2 sampling coordinates: `maxted_smooth`, `decorrelated` or `coefficients` |
-| `spot_center`, `spot_width`, `spot_amp` | | starting guesses for a spot crossing (BMJD_TDB, days, flux) |
+| `spot_center`, `spot_width`, `spot_amp` | | starting guesses for a spot crossing (BJD_TDB − 2400000, days, flux) |
 | `spot_center2`, `spot_width2`, `spot_amp2` | | the same for a second spot (`spot_center_2`, `spot_width_2`, `spot_amp_2` also work) |
 | `t_jump_guess`, `jump_guess` | | starting time and size of a step |
 | `mask_start`, `mask_end` | | an older way of leaving out time ranges, combined with `exclude_times` |

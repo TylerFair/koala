@@ -7,10 +7,11 @@ Run them from the top of the repository, for example:
 koala -c examples/niriss_soss_order1.yaml
 ```
 
-The WASP-39 b examples use the NIRISS/SOSS observation in `data/`, so they run as they are:
+The WASP-39 b examples use the NIRISS/SOSS, NIRSpec/G395H and MIRI/LRS observations in `data/`, so they run as they are:
 
 - `niriss_soss_order1.yaml` is the fit in [Your first fit](https://koala-jwst.readthedocs.io/en/latest/quickstart.html).
 - `joint_soss_orders.yaml` fits one orbit to both SOSS orders (with `joint_soss_order1.yaml` and `joint_soss_order2.yaml`), as in the [both-orders case study](https://koala-jwst.readthedocs.io/en/latest/case_studies/transmission_soss.html).
+- `wasp39_three_instruments.yaml` fits one orbit to SOSS, both G395H detectors and MIRI/LRS, then the spectrum of each (with the four `wasp39_*.yaml` members), as in the [three-instrument case study](https://koala-jwst.readthedocs.io/en/latest/case_studies/three_instruments.html).
 
 The eclipse, phase-curve and spotted-star examples use generated data, made with `python tools/example_phase_curves.py eclipse` (or `phase_curve`, or `stellar_spots`):
 

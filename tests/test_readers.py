@@ -108,7 +108,7 @@ def test_read_eureka_stage3_drops_nan_columns_and_neutralizes_mask(tmp_path):
     assert flux[2, 3] == pytest.approx(54.0), 'masked pixel takes the channel median'
     assert flux_err[2, 3] == pytest.approx(0.5 * readers.BAD_PIXEL_ERROR_FACTOR)
     assert flux_err[0, 3] == 0.5
-    np.testing.assert_allclose(time, np.arange(5) / 100. + 59883.6)
+    np.testing.assert_allclose(time, np.arange(5) / 100. + 59883.6 + 0.5)  # BMJD_TDB -> BJD_TDB - 2400000
 
 
 def test_read_eureka_stage4_uses_stored_bin_edges(tmp_path):
@@ -118,7 +118,7 @@ def test_read_eureka_stage4_uses_stored_bin_edges(tmp_path):
     np.testing.assert_allclose(flux, 7.0)
 
 
-def test_full_jd_times_are_converted_to_bmjd(tmp_path):
+def test_full_jd_and_bmjd_times_become_bjd_minus_2400000(tmp_path):
     path = _sparta_pickle(tmp_path / 'd.pkl')
     with open(path, 'rb') as f:
         d = pickle.load(f)
@@ -126,7 +126,7 @@ def test_full_jd_times_are_converted_to_bmjd(tmp_path):
     with open(path, 'wb') as f:
         pickle.dump(d, f)
     _, _, time, _, _ = readers.read_sparta(path)
-    assert time[0] == pytest.approx(59883.6)
+    assert time[0] == pytest.approx(59884.1)
 
 
 def test_load_spectra_applies_instrument_window_to_every_format(tmp_path):

@@ -9,7 +9,8 @@ Two configuration keys, each optional, remove data before any fitting:
     from the end of the series, so ``[[-5, null]]`` drops the last five.
 
 ``exclude_times``
-    A list of ``[start, end]`` time pairs in the file's time system (BMJD_TDB),
+    A list of ``[start, end]`` time pairs in BJD_TDB - 2400000 (koala's time
+    system: the BMJD_TDB in JWST files plus 0.5 d),
     both ends inclusive, for example ``[[60795.15, 60795.26]]``. Either end may
     be ``null`` for an open range, or a string expression in ``t`` such as
     ``"min(t) + 0.007"``.

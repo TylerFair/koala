@@ -49,8 +49,8 @@ This took about 7 minutes on 16 cores of an Intel Xeon node.
 koala fits the two white-light curves together first, then the channels of order 1, then those of order 2.
 The joint orbit is in `results/WASP-39_joint/joint_params.csv`, and each order gets its own directory (`joint_soss_order1/` and `joint_soss_order2/`) with the usual [output files](../guide/outputs.md).
 
-The joint fit gives $a/R_* = 11.390 \pm 0.021$, $b = 0.4516 \pm 0.0043$ and a transit time of $59787.056747 \pm 0.000012$ BMJD_TDB.
-The white-light radius ratios are $0.14591 \pm 0.00016$ in order 1 and $0.14527 \pm 0.00020$ in order 2, which differ because the two orders cover different wavelengths.
+The joint fit gives $a/R_* = 11.390 \pm 0.021$, $b = 0.4516 \pm 0.0042$ and a transit time of $59787.556747 \pm 0.000012$ (BJD_TDB − 2400000).
+The white-light radius ratios are $0.14591 \pm 0.00016$ in order 1 and $0.14527 \pm 0.00019$ in order 2, which differ because the two orders cover different wavelengths.
 
 ## The spectrum
 
@@ -62,7 +62,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 out = Path("results/WASP-39_joint")
-fig, ax = plt.subplots(figsize=(9, 4))
+fig, ax = plt.subplots(figsize=(6.9, 3.2))
 for order in (1, 2):
     spec = pd.read_csv(next((out / f"joint_soss_order{order}").glob("*_R100_spectrum.csv")))
     ax.errorbar(spec["wavelength"], spec["depth_ppm00"],
@@ -97,7 +97,7 @@ For a real analysis you'd start from an extraction at the detector's full resolu
 
 ## More orders, detectors and visits
 
-The same set-up works for any combination of observations of the same planet: SOSS orders, the two NIRSpec detectors, different instruments, or several visits.
+The same set-up works for any combination of observations of the same planet: SOSS orders, the two NIRSpec detectors, different instruments, or several visits ([WASP-39 b with NIRISS, NIRSpec and MIRI](three_instruments.md) puts three instruments together).
 List one configuration per dataset under `members`.
 Datasets whose observing times overlap are grouped into one visit and share a transit time, and separate visits each get their own.
 To group them yourself, give `visits` as lists of member file names without the `.yaml`, for example `visits: [[soss_order1, soss_order2], [nrs1]]`.

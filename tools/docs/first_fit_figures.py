@@ -20,12 +20,12 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 
-from generate_tutorial_figures import COLOR, OUT, ROOT, style
+from generate_tutorial_figures import COLOR, OUT, ROOT, finish, style
 
 
 def data_figure():
     with fits.open(ROOT / "examples/data/WASP-39_soss_binned8.fits") as hdul:
-        time = hdul["TIME"].data          # BMJD_TDB
+        time = hdul["TIME"].data          # BMJD_TDB, as in every JWST file
         wave = hdul["WAVE O1"].data       # microns
         flux = hdul["FLUX O1"].data       # (integration, wavelength)
 
@@ -34,14 +34,13 @@ def data_figure():
     white /= np.median(white[:100])
     image = flux / np.median(flux[:100], axis=0)
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 7), sharex=True)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.9, 5.4), sharex=True)
     ax1.plot(hours, white, ".k", ms=2)
     ax1.set_ylabel("white-light flux")
     ax2.pcolormesh(hours, wave, image.T, vmin=0.97, vmax=1.01, shading="nearest")
     ax2.set_xlabel("hours since the first integration")
     ax2.set_ylabel("wavelength (µm)")
-    fig.savefig(OUT / "first_fit_data.png", dpi=180, facecolor="white")
-    plt.close(fig)
+    finish(fig, "first_fit_data.png")
 
 
 def whitelight_figure(out):
@@ -49,7 +48,7 @@ def whitelight_figure(out):
     good = wl["is_outlier"] == 0
     hours = wl["time_from_t0_hr"]
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), sharex=True,
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.9, 4.6), sharex=True,
                                    gridspec_kw={"height_ratios": [2, 1]})
     ax1.plot(hours[good], wl["detrended_flux"][good], ".k", ms=2, alpha=0.5)
     ax1.plot(hours, wl["transit_model"], "C1", lw=1.5)
@@ -58,35 +57,32 @@ def whitelight_figure(out):
     ax2.axhline(0, color="C1", lw=1.5)
     ax2.set_xlabel("hours from mid-transit")
     ax2.set_ylabel("residual (ppm)")
-    fig.savefig(OUT / "first_fit_whitelight.png", dpi=180, facecolor="white")
-    plt.close(fig)
+    finish(fig, "first_fit_whitelight.png")
 
 
 def spectrum_figure(out):
     spec = pd.read_csv(next(out.glob("*_R100_spectrum.csv")))
 
-    fig, ax = plt.subplots(figsize=(9, 4))
+    fig, ax = plt.subplots(figsize=(6.9, 3.2))
     ax.errorbar(spec["wavelength"], spec["depth_ppm00"],
                 xerr=spec["wavelength_err"], yerr=spec["depth_err_ppm00"],
                 fmt="o", ms=3, color="k")
     ax.set_xlabel("wavelength (µm)")
     ax.set_ylabel("transit depth (ppm)")
-    fig.savefig(OUT / "first_fit_spectrum.png", dpi=180, facecolor="white")
-    plt.close(fig)
+    finish(fig, "first_fit_spectrum.png")
 
     # The front page and README show the same spectrum in the house colour.
-    fig, ax = plt.subplots(figsize=(9, 4.4))
+    fig, ax = plt.subplots(figsize=(6.9, 3.4))
     ax.errorbar(spec["wavelength"], spec["depth_ppm00"],
                 xerr=spec["wavelength_err"], yerr=spec["depth_err_ppm00"],
                 fmt="o", ms=3.5, mfc="white", mec=COLOR, ecolor=COLOR, elinewidth=0.9)
     ax.set_xlabel("wavelength (µm)")
     ax.set_ylabel("transit depth (ppm)")
-    fig.savefig(OUT / "soss_spectrum.png", dpi=180, facecolor="white")
-    plt.close(fig)
+    finish(fig, "soss_spectrum.png")
 
 
 def both_orders_figure(out):
-    fig, ax = plt.subplots(figsize=(9, 4))
+    fig, ax = plt.subplots(figsize=(6.9, 3.2))
     for order in (1, 2):
         spec = pd.read_csv(next((out / f"joint_soss_order{order}").glob("*_R100_spectrum.csv")))
         ax.errorbar(spec["wavelength"], spec["depth_ppm00"],
@@ -95,8 +91,7 @@ def both_orders_figure(out):
     ax.legend()
     ax.set_xlabel("wavelength (µm)")
     ax.set_ylabel("transit depth (ppm)")
-    fig.savefig(OUT / "soss_both_orders.png", dpi=180, facecolor="white")
-    plt.close(fig)
+    finish(fig, "soss_both_orders.png")
 
 
 def main():

@@ -1,4 +1,4 @@
-"""The white-light corner plot shows the sampled scalar sites only."""
+"""The white-light corner plot shows the sampled physical sites only (no trend or jitter)."""
 
 import numpy as np
 import pytest
@@ -38,12 +38,14 @@ def _samples(n=400):
 
 def test_corner_columns_select_and_order_scalar_sites():
     columns, labels = _corner_columns(_samples())
-    assert len(columns) == len(labels) == 9
+    assert len(columns) == len(labels) == 6   # t0, rprs, b, duration, u1, u2
     assert labels[0].startswith("$t_0$")
     assert "offset [s]" in labels[0]
     assert labels[1].startswith(r"$R_p/R_\star$")
     assert r"$u_1$" in labels and r"$u_2$" in labels
     assert all(np.isfinite(c).all() and np.std(c) > 0 for c in columns)
+    assert labels[3] == r"$T_{14}$ [h]"
+    np.testing.assert_allclose(columns[3], _samples()['duration'] * 24)
     np.testing.assert_array_equal(columns[0], (_samples()['t0_0']-np.median(_samples()['t0_0']))*86400)
 
 
@@ -64,5 +66,5 @@ def test_corner_excludes_fixed_nonbinary_period():
     samples = _samples(n=1000)
     samples['period'] = np.full(1000, 2.6162644)
     columns, labels = _corner_columns(samples)
-    assert len(columns) == 9
+    assert len(columns) == 6
     assert labels[0].startswith('$t_0$')

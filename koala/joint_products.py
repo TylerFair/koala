@@ -364,6 +364,7 @@ def _wavelength_axis(top, bottom, out):
     from matplotlib.ticker import FixedLocator, NullLocator
     from .plotting_style import style_axis
 
+    axes = (top,) if top is bottom else (top, bottom)
     low = float(np.nanmin(out.wavelength - out.wavelength_err))
     high = float(np.nanmax(out.wavelength + out.wavelength_err))
     if high > 5.5 and low < _LOG_BEYOND:
@@ -373,26 +374,26 @@ def _wavelength_axis(top, bottom, out):
         high = max(high, 10.4) if high > 8.0 else high
         bottom.set_xlim(low - 0.02 * (_LOG_BEYOND - low), high)
         ticks = [t for t in (0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0) if low <= t <= high * 1.01]
-        for ax in (top, bottom):
+        for ax in axes:
             ax.xaxis.set_major_locator(FixedLocator(ticks))
             ax.xaxis.set_minor_locator(NullLocator())
             # Mark where the axis turns logarithmic.
             ax.axvline(_LOG_BEYOND, color='0.75', lw=0.8, ls=':', zorder=0)
         bottom.set_xticklabels([f'{t:g}' for t in ticks])
-        for ax in (top, bottom):
+        for ax in axes:
             style_axis(ax, x_locator=False)
     else:
         pad = 0.02 * (high - low)
         bottom.set_xlim(low - pad, high + pad)
-        for ax in (top, bottom):
+        for ax in axes:
             style_axis(ax)
 
 
 def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]', figure_path=None, render=True):
     """Two panels on one wavelength axis: transit depth, then the transit-time offset."""
     from .plotting_style import (
-        DATA_MARKER_STYLE, SPECTRUM_COLOR, ZERO_LINE_COLOR, apply_publication_style,
-        save_figure, style_axis,
+        DATA_MARKER_STYLE, SPECTRUM_COLOR, TITLE_SIZE, ZERO_LINE_COLOR, apply_publication_style,
+        figsize, save_figure, style_axis,
     )
     import matplotlib.pyplot as plt
 
@@ -405,7 +406,7 @@ def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]', f
     out = out[out.shown]
     apply_publication_style()
     fig, (top, bottom) = plt.subplots(
-        2, 1, figsize=(10, 7.2), sharex=True, gridspec_kw={'height_ratios': [1.25, 1]},
+        2, 1, figsize=figsize(5.4), sharex=True, gridspec_kw={'height_ratios': [1.25, 1]},
     )
     style = dict(color=SPECTRUM_COLOR, ecolor=SPECTRUM_COLOR, zorder=2, **DATA_MARKER_STYLE)
     for ax, value, error in ((top, out.depth_ppm, out.depth_err_ppm), (bottom, out.dt0_s, out.t0_err_s)):
@@ -415,7 +416,7 @@ def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]', f
     top.set_ylabel('Transit depth [ppm]')
     bottom.set_ylabel(t0_label)
     bottom.set_xlabel(r'Wavelength [$\mu$m]')
-    top.set_title(label or 'Joint spectrum', fontsize=16, pad=12)
+    top.set_title(label or 'Joint spectrum', fontsize=TITLE_SIZE, pad=8)
 
     _wavelength_axis(top, bottom, out)
     fig.align_ylabels((top, bottom))
@@ -489,7 +490,7 @@ def limb_spectra(table, offsets=None, draws=4000, seed=0):
 
 def _draw_limbs(table, stem, figure_path=None, render=True, label='Joint morning and evening limbs'):
     """Evening and morning depths in two stacked panels, the evening in front above and the morning below."""
-    from .plotting_style import DATA_MARKER_STYLE, apply_publication_style, save_figure
+    from .plotting_style import DATA_MARKER_STYLE, TITLE_SIZE, apply_publication_style, figsize, save_figure
     import matplotlib.pyplot as plt
 
     limit = table.instrument.map(DISPLAY_MAX_WAVELENGTH).fillna(np.inf) if 'instrument' in table else np.inf
@@ -499,7 +500,7 @@ def _draw_limbs(table, stem, figure_path=None, render=True, label='Joint morning
         return Path(figure_path or f'{stem}.png')
     out = out[out.shown]
     apply_publication_style()
-    fig, (top, bottom) = plt.subplots(2, 1, figsize=(10, 8), sharex=True, sharey=True)
+    fig, (top, bottom) = plt.subplots(2, 1, figsize=figsize(6.0), sharex=True, sharey=True)
     series = {
         name: (out[f'depth_{name}_ppm'].to_numpy(),
                np.vstack([out[f'depth_{name}_err_minus_ppm'], out[f'depth_{name}_err_plus_ppm']]), color)
@@ -519,7 +520,7 @@ def _draw_limbs(table, stem, figure_path=None, render=True, label='Joint morning
         handles, labels = ax.get_legend_handles_labels()
         order = [labels.index(f'{front.capitalize()} limb'), 1 - labels.index(f'{front.capitalize()} limb')]
         ax.legend([handles[i] for i in order], [labels[i] for i in order], loc='upper left', frameon=False)
-    top.set_title(label, fontsize=16, pad=12)
+    top.set_title(label, fontsize=TITLE_SIZE, pad=8)
     top.set_ylim(low, high)
     bottom.set_xlabel(r'Wavelength [$\mu$m]')
     _wavelength_axis(top, bottom, out)
@@ -532,7 +533,7 @@ def _draw_limbs(table, stem, figure_path=None, render=True, label='Joint morning
 def _draw_depth_only(table, stem, figure_path, label='Joint spectrum', render=True):
     """The ordinary joint spectrum has no fitted channel timing panel."""
     from .plotting_style import (
-        DATA_MARKER_STYLE, SPECTRUM_COLOR, apply_publication_style, save_figure, style_axis,
+        DATA_MARKER_STYLE, SPECTRUM_COLOR, TITLE_SIZE, apply_publication_style, figsize, save_figure, style_axis,
     )
     import matplotlib.pyplot as plt
     out = table.assign(depth_ppm=table.depth*1e6, depth_err_ppm=table.depth_err*1e6)
@@ -541,12 +542,12 @@ def _draw_depth_only(table, stem, figure_path, label='Joint spectrum', render=Tr
         return Path(figure_path)
     apply_publication_style()
     # One spectrum colour for every dataset, as in the depth-and-timing figure.
-    fig, ax = plt.subplots(figsize=(10, 4.5), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=figsize(3.6), constrained_layout=True)
     ax.errorbar(out.wavelength, out.depth_ppm, xerr=out.wavelength_err, yerr=out.depth_err_ppm,
                 color=SPECTRUM_COLOR, ecolor=SPECTRUM_COLOR, **DATA_MARKER_STYLE)
     ax.set(xlabel=r'Wavelength [$\mu$m]', ylabel='Transit depth [ppm]')
-    ax.set_title(label, fontsize=16, pad=12)
-    style_axis(ax)
+    ax.set_title(label, fontsize=TITLE_SIZE, pad=8)
+    _wavelength_axis(ax, ax, out)
     save_figure(fig, figure_path)
     return Path(figure_path)
 

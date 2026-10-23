@@ -165,6 +165,13 @@ def stellar_output(model, teff, logg, feh):
 _stellar_notices = set()
 
 
+def notice_once(key, message):
+    """Print ``message`` only the first time in a run (or in a joint fit)."""
+    if key not in _stellar_notices:
+        _stellar_notices.add(key)
+        info(message)
+
+
 @contextlib.contextmanager
 def quiet_sampling():
     token = _spectroscopy.set(True)
@@ -272,6 +279,14 @@ def grid_description(label):
     if label.startswith('R'):
         return f'at R = {label[1:]}'
     return 'on the configured wavelength grid'
+
+
+def observation_label(prefix):
+    """'SOSS order 1', 'G395H NRS1', 'MIRI/LRS', ... from a koala output prefix."""
+    from .plotting_style import format_instrument_stamp
+    label = format_instrument_stamp(prefix).removeprefix('JWST ')
+    label = label.replace('NIRISS/', '').replace('NIRSpec ', '').replace('NIRCam ', '').replace('/NRS', ' NRS')
+    return label.replace('ORDER', 'order ')
 
 
 def parameter_summary(label, value, uncertainty, unit=''):

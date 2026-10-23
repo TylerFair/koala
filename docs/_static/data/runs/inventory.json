@@ -1,55 +1,56 @@
 {
   "eclipse": [
     {
-      "file": "00_ROCKY-1_MIRI_LRS__init_vs_opt_check.png",
-      "bytes": 40501
-    },
-    {
-      "file": "00_ROCKY-1_MIRI_LRS__preopt_init_check.png",
-      "bytes": 51090
-    },
-    {
-      "file": "11_ROCKY-1_MIRI_LRS__whitelightmodel.png",
-      "bytes": 188549
-    },
-    {
-      "file": "12_ROCKY-1_MIRI_LRS__whitelightresidual.png",
-      "bytes": 105117
-    },
-    {
-      "file": "13_ROCKY-1_MIRI_LRS__whitelight_corner.png",
-      "bytes": 668147
-    },
-    {
-      "file": "14_ROCKY-1_MIRI_LRS__whitelightdetrended.png",
-      "bytes": 193914
-    },
-    {
-      "file": "15_ROCKY-1_MIRI_LRS__whitelight_summary.png",
-      "bytes": 104547
-    },
-    {
-      "file": "33_ROCKY-1_MIRI_LRS__Rnative_noisebin.csv",
-      "bytes": 1680,
+      "file": "ROCKY-1_MIRI_LRS_Rnative_emission.csv",
+      "bytes": 1676,
       "columns": [
-        "bin_size_points",
-        "measured_rms",
-        "measured_rms_p16",
-        "measured_rms_p84",
-        "expected_white_rms"
+        "wavelength",
+        "wavelength_err",
+        "planet_index",
+        "eclipse_depth_ppm",
+        "eclipse_depth_ppm_err_low",
+        "eclipse_depth_ppm_err_high",
+        "sampler_used"
       ]
     },
     {
-      "file": "33_ROCKY-1_MIRI_LRS__Rnative_noisebin.png",
-      "bytes": 136490
+      "file": "ROCKY-1_MIRI_LRS_Rnative_lightcurves.csv",
+      "bytes": 109185,
+      "columns": [
+        "time",
+        "flux_000",
+        "flux_err_000",
+        "flux_001",
+        "flux_err_001",
+        "flux_002",
+        "flux_err_002",
+        "flux_003",
+        "flux_err_003",
+        "flux_004",
+        "flux_err_004",
+        "flux_005",
+        "flux_err_005",
+        "flux_006",
+        "flux_err_006",
+        "flux_007",
+        "flux_err_007",
+        "flux_008",
+        "flux_err_008",
+        "flux_009",
+        "flux_err_009",
+        "flux_010",
+        "flux_err_010",
+        "flux_011",
+        "flux_err_011",
+        "flux_012",
+        "flux_err_012",
+        "flux_013",
+        "flux_err_013"
+      ]
     },
     {
-      "file": "34_ROCKY-1_MIRI_LRS__Rnative_summary.png",
-      "bytes": 557846
-    },
-    {
-      "file": "ROCKY-1_MIRI_LRS__Rnative_bestfit_params.csv",
-      "bytes": 4976,
+      "file": "ROCKY-1_MIRI_LRS_Rnative_params.csv",
+      "bytes": 4979,
       "columns": [
         "wavelength",
         "wavelength_err",
@@ -86,80 +87,37 @@
       ]
     },
     {
-      "file": "ROCKY-1_MIRI_LRS__Rnative_emission.csv",
-      "bytes": 1672,
+      "file": "ROCKY-1_MIRI_LRS_whitelight_emission.csv",
+      "bytes": 174,
       "columns": [
         "wavelength",
         "wavelength_err",
         "planet_index",
         "eclipse_depth_ppm",
         "eclipse_depth_ppm_err_low",
-        "eclipse_depth_ppm_err_high",
-        "sampler_used"
+        "eclipse_depth_ppm_err_high"
       ]
     },
     {
-      "file": "ROCKY-1_MIRI_LRS__Rnative_emission.png",
-      "bytes": 77258
-    },
-    {
-      "file": "ROCKY-1_MIRI_LRS__Rnative_lightcurves_wide.csv",
-      "bytes": 109186,
+      "file": "ROCKY-1_MIRI_LRS_whitelight_lightcurve.csv",
+      "bytes": 35035,
       "columns": [
-        "time",
-        "flux_000",
-        "flux_err_000",
-        "flux_001",
-        "flux_err_001",
-        "flux_002",
-        "flux_err_002",
-        "flux_003",
-        "flux_err_003",
-        "flux_004",
-        "flux_err_004",
-        "flux_005",
-        "flux_err_005",
-        "flux_006",
-        "flux_err_006",
-        "flux_007",
-        "flux_err_007",
-        "flux_008",
-        "flux_err_008",
-        "flux_009",
-        "flux_err_009",
-        "flux_010",
-        "flux_err_010",
-        "flux_011",
-        "flux_err_011",
-        "flux_012",
-        "flux_err_012",
-        "flux_013",
-        "flux_err_013"
+        "time_bjd",
+        "time_from_t0_hr",
+        "flux",
+        "flux_err",
+        "bestfit_model",
+        "residual",
+        "residual_ppm",
+        "is_outlier",
+        "transit_model",
+        "trend_model",
+        "detrended_flux"
       ]
     },
     {
-      "file": "ROCKY-1_MIRI_LRS__Rnative_wavelengths.csv",
-      "bytes": 539,
-      "columns": [
-        "wavelength_center",
-        "wavelength_err"
-      ]
-    },
-    {
-      "file": "ROCKY-1_MIRI_LRS__spectroscopy_data_noLR_nativeHR.pkl",
-      "bytes": 66545
-    },
-    {
-      "file": "ROCKY-1_MIRI_LRS__spectroscopy_data_noLR_nativeHR.pkl.manifest.json",
-      "bytes": 218
-    },
-    {
-      "file": "ROCKY-1_MIRI_LRS__whitelight_artifacts.manifest.json",
-      "bytes": 216
-    },
-    {
-      "file": "ROCKY-1_MIRI_LRS__whitelight_bestfit_params.csv",
-      "bytes": 1385,
+      "file": "ROCKY-1_MIRI_LRS_whitelight_params.csv",
+      "bytes": 1386,
       "columns": [
         "planet_id",
         "period",
@@ -221,27 +179,74 @@
       ]
     },
     {
-      "file": "ROCKY-1_MIRI_LRS__whitelight_bestfit_params_emission.csv",
-      "bytes": 175,
+      "file": "figures/Rnative_emission.png",
+      "bytes": 75272
+    },
+    {
+      "file": "figures/Rnative_lightcurves.png",
+      "bytes": 513083
+    },
+    {
+      "file": "figures/Rnative_limb_darkening.png",
+      "bytes": 101048
+    },
+    {
+      "file": "figures/Rnative_noise.png",
+      "bytes": 233213
+    },
+    {
+      "file": "figures/Rnative_residual_map.png",
+      "bytes": 105939
+    },
+    {
+      "file": "figures/whitelight.png",
+      "bytes": 199790
+    },
+    {
+      "file": "figures/whitelight_corner.png",
+      "bytes": 197442
+    },
+    {
+      "file": "figures/whitelight_emission.png",
+      "bytes": 64480
+    },
+    {
+      "file": "figures/whitelight_start.png",
+      "bytes": 165121
+    },
+    {
+      "file": "koala.log",
+      "bytes": 10221
+    },
+    {
+      "file": "state/ROCKY-1_MIRI_LRS_Rnative_noise.csv",
+      "bytes": 1687,
       "columns": [
-        "wavelength",
-        "wavelength_err",
-        "planet_index",
-        "eclipse_depth_ppm",
-        "eclipse_depth_ppm_err_low",
-        "eclipse_depth_ppm_err_high"
+        "bin_size_points",
+        "measured_rms",
+        "measured_rms_p16",
+        "measured_rms_p84",
+        "expected_white_rms"
       ]
     },
     {
-      "file": "ROCKY-1_MIRI_LRS__whitelight_bestfit_params_emission.png",
-      "bytes": 64826
+      "file": "state/ROCKY-1_MIRI_LRS_spectroscopy_data_noLR_nativeHR.pkl",
+      "bytes": 66545
     },
     {
-      "file": "ROCKY-1_MIRI_LRS__whitelight_geometry_handoff.json",
-      "bytes": 960
+      "file": "state/ROCKY-1_MIRI_LRS_spectroscopy_data_noLR_nativeHR.pkl.manifest.json",
+      "bytes": 432
     },
     {
-      "file": "ROCKY-1_MIRI_LRS__whitelight_outlier_mask.npy",
+      "file": "state/ROCKY-1_MIRI_LRS_whitelight_artifacts.manifest.json",
+      "bytes": 430
+    },
+    {
+      "file": "state/ROCKY-1_MIRI_LRS_whitelight_geometry_handoff.json",
+      "bytes": 1088
+    },
+    {
+      "file": "state/ROCKY-1_MIRI_LRS_whitelight_outlier_mask.npy",
       "bytes": 309,
       "shape": [
         181
@@ -249,223 +254,102 @@
       "dtype": "bool"
     },
     {
-      "file": "ROCKY-1_MIRI_LRS__whitelight_timeseries.csv",
-      "bytes": 34784,
-      "columns": [
-        "time_bjd",
-        "time_from_t0_hr",
-        "flux",
-        "flux_err",
-        "bestfit_model",
-        "residual",
-        "residual_ppm",
-        "is_outlier",
-        "transit_model",
-        "trend_model",
-        "detrended_flux"
+      "file": "state/chunks/ROCKY-1_MIRI_LRS_Rnative_independent_nuts_cfgc47c93b8109f.manifest.json",
+      "bytes": 1608
+    },
+    {
+      "file": "state/chunks/ROCKY-1_MIRI_LRS_Rnative_independent_nuts_cfgc47c93b8109f_chunk_0_4.diagnostics.json",
+      "bytes": 8535
+    },
+    {
+      "file": "state/chunks/ROCKY-1_MIRI_LRS_Rnative_independent_nuts_cfgc47c93b8109f_chunk_0_4.pkl",
+      "bytes": 6721025
+    },
+    {
+      "file": "state/chunks/ROCKY-1_MIRI_LRS_Rnative_independent_nuts_cfgc47c93b8109f_chunk_12_14.diagnostics.json",
+      "bytes": 3779
+    },
+    {
+      "file": "state/chunks/ROCKY-1_MIRI_LRS_Rnative_independent_nuts_cfgc47c93b8109f_chunk_12_14.pkl",
+      "bytes": 3361021
+    },
+    {
+      "file": "state/chunks/ROCKY-1_MIRI_LRS_Rnative_independent_nuts_cfgc47c93b8109f_chunk_4_8.diagnostics.json",
+      "bytes": 5463
+    },
+    {
+      "file": "state/chunks/ROCKY-1_MIRI_LRS_Rnative_independent_nuts_cfgc47c93b8109f_chunk_4_8.pkl",
+      "bytes": 6721025
+    },
+    {
+      "file": "state/chunks/ROCKY-1_MIRI_LRS_Rnative_independent_nuts_cfgc47c93b8109f_chunk_8_12.diagnostics.json",
+      "bytes": 8536
+    },
+    {
+      "file": "state/chunks/ROCKY-1_MIRI_LRS_Rnative_independent_nuts_cfgc47c93b8109f_chunk_8_12.pkl",
+      "bytes": 6721025
+    },
+    {
+      "file": "state/whitelight_mcmc_diagnostics.json",
+      "bytes": 8326
+    },
+    {
+      "file": "state/whitelight_samples_by_chain.npz",
+      "bytes": 383782,
+      "arrays": [
+        "_eclipse_depth_0",
+        "a_rs_0",
+        "b_0",
+        "c",
+        "cos_i_0",
+        "depths_0",
+        "duration_0",
+        "eclipse_depth",
+        "eclipse_depth_ppm",
+        "eclipse_time_0",
+        "error",
+        "inc_0",
+        "log_jitter",
+        "period_0",
+        "rors_0",
+        "t0_0",
+        "u",
+        "v"
       ]
-    },
-    {
-      "file": "chunks/ROCKY-1_MIRI_LRS__Rnative_independent_nuts_cfg99c64139c1b0.manifest.json",
-      "bytes": 1611
-    },
-    {
-      "file": "chunks/ROCKY-1_MIRI_LRS__Rnative_independent_nuts_cfg99c64139c1b0_chunk_0_4.diagnostics.json",
-      "bytes": 2080
-    },
-    {
-      "file": "chunks/ROCKY-1_MIRI_LRS__Rnative_independent_nuts_cfg99c64139c1b0_chunk_0_4.pkl",
-      "bytes": 1424998
-    },
-    {
-      "file": "chunks/ROCKY-1_MIRI_LRS__Rnative_independent_nuts_cfg99c64139c1b0_chunk_12_14.diagnostics.json",
-      "bytes": 1559
-    },
-    {
-      "file": "chunks/ROCKY-1_MIRI_LRS__Rnative_independent_nuts_cfg99c64139c1b0_chunk_12_14.pkl",
-      "bytes": 712949
-    },
-    {
-      "file": "chunks/ROCKY-1_MIRI_LRS__Rnative_independent_nuts_cfg99c64139c1b0_chunk_4_8.diagnostics.json",
-      "bytes": 2077
-    },
-    {
-      "file": "chunks/ROCKY-1_MIRI_LRS__Rnative_independent_nuts_cfg99c64139c1b0_chunk_4_8.pkl",
-      "bytes": 1424998
-    },
-    {
-      "file": "chunks/ROCKY-1_MIRI_LRS__Rnative_independent_nuts_cfg99c64139c1b0_chunk_8_12.diagnostics.json",
-      "bytes": 2068
-    },
-    {
-      "file": "chunks/ROCKY-1_MIRI_LRS__Rnative_independent_nuts_cfg99c64139c1b0_chunk_8_12.pkl",
-      "bytes": 1424998
-    },
-    {
-      "file": "stuff.png",
-      "bytes": 19420
-    },
-    {
-      "file": "whitelight_mcmc_diagnostics.json",
-      "bytes": 1383
     }
   ],
   "phase_curve": [
     {
-      "file": "00_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_init_vs_opt_check.png",
-      "bytes": 57996
-    },
-    {
-      "file": "00_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_preopt_init_check.png",
-      "bytes": 65465
-    },
-    {
-      "file": "11_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelightmodel.png",
-      "bytes": 205604
-    },
-    {
-      "file": "12_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelightresidual.png",
-      "bytes": 125593
-    },
-    {
-      "file": "13_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_corner.png",
-      "bytes": 577569
-    },
-    {
-      "file": "14_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelightdetrended.png",
-      "bytes": 207736
-    },
-    {
-      "file": "15_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_summary.png",
-      "bytes": 103340
-    },
-    {
-      "file": "22_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_summary.png",
-      "bytes": 820920
-    },
-    {
-      "file": "24_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_spectrum_00.png",
-      "bytes": 135786
-    },
-    {
-      "file": "25_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_noisebin.csv",
-      "bytes": 1840,
-      "columns": [
-        "bin_size_points",
-        "measured_rms",
-        "measured_rms_p16",
-        "measured_rms_p84",
-        "expected_white_rms"
-      ]
-    },
-    {
-      "file": "25_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_noisebin.png",
-      "bytes": 135480
-    },
-    {
-      "file": "31_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_spectrum_00.png",
-      "bytes": 135870
-    },
-    {
-      "file": "33_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_noisebin.csv",
-      "bytes": 1847,
-      "columns": [
-        "bin_size_points",
-        "measured_rms",
-        "measured_rms_p16",
-        "measured_rms_p84",
-        "expected_white_rms"
-      ]
-    },
-    {
-      "file": "33_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_noisebin.png",
-      "bytes": 129842
-    },
-    {
-      "file": "34_Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_summary.png",
-      "bytes": 886519
-    },
-    {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20.csv",
-      "bytes": 1602,
-      "columns": [
-        "wavelength",
-        "wavelength_err",
-        "depth00",
-        "depth_err00",
-        "depth_ppm00",
-        "depth_err_ppm00",
-        "sampler_used"
-      ]
-    },
-    {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_artifacts.manifest.json",
-      "bytes": 220
-    },
-    {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_bestfit_params.csv",
-      "bytes": 4868,
-      "columns": [
-        "wavelength",
-        "wavelength_err",
-        "rors",
-        "rors_err",
-        "rors_err_low",
-        "rors_err_high",
-        "depth",
-        "depth_err",
-        "depth_err_low",
-        "depth_err_high",
-        "depth_ppm",
-        "depth_err_ppm",
-        "depth_err_low_ppm",
-        "depth_err_high_ppm",
-        "depth_error_ratio_to_median",
-        "depth_error_outlier_gt5x",
-        "u1",
-        "u1_err",
-        "u1_err_low",
-        "u1_err_high",
-        "u2",
-        "u2_err",
-        "u2_err_low",
-        "u2_err_high",
-        "c",
-        "c_err",
-        "c_err_low",
-        "c_err_high",
-        "v",
-        "v_err",
-        "v_err_low",
-        "v_err_high"
-      ]
-    },
-    {
       "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_emission.csv",
-      "bytes": 2700,
+      "bytes": 4732,
       "columns": [
         "wavelength",
         "wavelength_err",
         "planet_index",
-        "dayside_flux_ppm",
-        "dayside_flux_ppm_err_low",
-        "dayside_flux_ppm_err_high",
+        "eclipse_depth_ppm",
+        "eclipse_depth_ppm_err_low",
+        "eclipse_depth_ppm_err_high",
+        "phase_c1_ppm",
+        "phase_c1_ppm_err_low",
+        "phase_c1_ppm_err_high",
+        "phase_d1_ppm",
+        "phase_d1_ppm_err_low",
+        "phase_d1_ppm_err_high",
         "nightside_flux_ppm",
         "nightside_flux_ppm_err_low",
         "nightside_flux_ppm_err_high",
-        "hotspot_offset_deg",
-        "hotspot_offset_deg_err_low",
-        "hotspot_offset_deg_err_high",
+        "phase_amplitude_ppm",
+        "phase_amplitude_ppm_err_low",
+        "phase_amplitude_ppm_err_high",
+        "phase_offset_deg",
+        "phase_offset_deg_err_low",
+        "phase_offset_deg_err_high",
         "sampler_used"
       ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_emission.png",
-      "bytes": 168749
-    },
-    {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_lightcurves_wide.csv",
-      "bytes": 149550,
+      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_lightcurves.csv",
+      "bytes": 150231,
       "columns": [
         "time",
         "flux_000",
@@ -493,37 +377,8 @@
       ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_spectroscopic_outlier_mask.npy",
-      "bytes": 449,
-      "shape": [
-        321
-      ],
-      "dtype": "bool"
-    },
-    {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_wavelengths.csv",
-      "bytes": 437,
-      "columns": [
-        "wavelength_center",
-        "wavelength_err"
-      ]
-    },
-    {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative.csv",
-      "bytes": 1981,
-      "columns": [
-        "wavelength",
-        "wavelength_err",
-        "depth00",
-        "depth_err00",
-        "depth_ppm00",
-        "depth_err_ppm00",
-        "sampler_used"
-      ]
-    },
-    {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_bestfit_params.csv",
-      "bytes": 6099,
+      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_params.csv",
+      "bytes": 4890,
       "columns": [
         "wavelength",
         "wavelength_err",
@@ -560,31 +415,49 @@
       ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_emission.csv",
-      "bytes": 3346,
+      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_spectrum.csv",
+      "bytes": 1624,
       "columns": [
         "wavelength",
         "wavelength_err",
-        "planet_index",
-        "dayside_flux_ppm",
-        "dayside_flux_ppm_err_low",
-        "dayside_flux_ppm_err_high",
-        "nightside_flux_ppm",
-        "nightside_flux_ppm_err_low",
-        "nightside_flux_ppm_err_high",
-        "hotspot_offset_deg",
-        "hotspot_offset_deg_err_low",
-        "hotspot_offset_deg_err_high",
+        "depth00",
+        "depth_err00",
+        "depth_ppm00",
+        "depth_err_ppm00",
         "sampler_used"
       ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_emission.png",
-      "bytes": 178450
+      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_emission.csv",
+      "bytes": 5877,
+      "columns": [
+        "wavelength",
+        "wavelength_err",
+        "planet_index",
+        "eclipse_depth_ppm",
+        "eclipse_depth_ppm_err_low",
+        "eclipse_depth_ppm_err_high",
+        "phase_c1_ppm",
+        "phase_c1_ppm_err_low",
+        "phase_c1_ppm_err_high",
+        "phase_d1_ppm",
+        "phase_d1_ppm_err_low",
+        "phase_d1_ppm_err_high",
+        "nightside_flux_ppm",
+        "nightside_flux_ppm_err_low",
+        "nightside_flux_ppm_err_high",
+        "phase_amplitude_ppm",
+        "phase_amplitude_ppm_err_low",
+        "phase_amplitude_ppm_err_high",
+        "phase_offset_deg",
+        "phase_offset_deg_err_low",
+        "phase_offset_deg_err_high",
+        "sampler_used"
+      ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_lightcurves_wide.csv",
-      "bytes": 191816,
+      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_lightcurves.csv",
+      "bytes": 190863,
       "columns": [
         "time",
         "flux_000",
@@ -618,28 +491,103 @@
       ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_wavelengths.csv",
-      "bytes": 527,
+      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_params.csv",
+      "bytes": 6103,
       "columns": [
-        "wavelength_center",
-        "wavelength_err"
+        "wavelength",
+        "wavelength_err",
+        "rors",
+        "rors_err",
+        "rors_err_low",
+        "rors_err_high",
+        "depth",
+        "depth_err",
+        "depth_err_low",
+        "depth_err_high",
+        "depth_ppm",
+        "depth_err_ppm",
+        "depth_err_low_ppm",
+        "depth_err_high_ppm",
+        "depth_error_ratio_to_median",
+        "depth_error_outlier_gt5x",
+        "u1",
+        "u1_err",
+        "u1_err_low",
+        "u1_err_high",
+        "u2",
+        "u2_err",
+        "u2_err_low",
+        "u2_err_high",
+        "c",
+        "c_err",
+        "c_err_low",
+        "c_err_high",
+        "v",
+        "v_err",
+        "v_err_low",
+        "v_err_high"
       ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_spectroscopy_data_20LR_nativeHR.pkl",
-      "bytes": 173661
+      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_spectrum.csv",
+      "bytes": 2023,
+      "columns": [
+        "wavelength",
+        "wavelength_err",
+        "depth00",
+        "depth_err00",
+        "depth_ppm00",
+        "depth_err_ppm00",
+        "sampler_used"
+      ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_spectroscopy_data_20LR_nativeHR.pkl.manifest.json",
-      "bytes": 218
+      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_emission.csv",
+      "bytes": 791,
+      "columns": [
+        "wavelength",
+        "wavelength_err",
+        "planet_index",
+        "eclipse_depth_ppm",
+        "eclipse_depth_ppm_err_low",
+        "eclipse_depth_ppm_err_high",
+        "phase_c1_ppm",
+        "phase_c1_ppm_err_low",
+        "phase_c1_ppm_err_high",
+        "phase_d1_ppm",
+        "phase_d1_ppm_err_low",
+        "phase_d1_ppm_err_high",
+        "nightside_flux_ppm",
+        "nightside_flux_ppm_err_low",
+        "nightside_flux_ppm_err_high",
+        "phase_amplitude_ppm",
+        "phase_amplitude_ppm_err_low",
+        "phase_amplitude_ppm_err_high",
+        "phase_offset_deg",
+        "phase_offset_deg_err_low",
+        "phase_offset_deg_err_high"
+      ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_artifacts.manifest.json",
-      "bytes": 216
+      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_lightcurve.csv",
+      "bytes": 61372,
+      "columns": [
+        "time_bjd",
+        "time_from_t0_hr",
+        "flux",
+        "flux_err",
+        "bestfit_model",
+        "residual",
+        "residual_ppm",
+        "is_outlier",
+        "transit_model",
+        "trend_model",
+        "detrended_flux"
+      ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_bestfit_params.csv",
-      "bytes": 1378,
+      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_params.csv",
+      "bytes": 1738,
       "columns": [
         "planet_id",
         "period",
@@ -695,45 +643,111 @@
         "u1_err_high",
         "u2_err_low",
         "u2_err_high",
-        "dayside_flux",
-        "dayside_flux_err_low",
-        "dayside_flux_err_high",
+        "eclipse_depth",
+        "eclipse_depth_err_low",
+        "eclipse_depth_err_high",
+        "phase_c1",
+        "phase_c1_err_low",
+        "phase_c1_err_high",
+        "phase_d1",
+        "phase_d1_err_low",
+        "phase_d1_err_high",
         "nightside_flux",
         "nightside_flux_err_low",
         "nightside_flux_err_high",
-        "hotspot_offset",
-        "hotspot_offset_err_low",
-        "hotspot_offset_err_high"
+        "phase_amplitude",
+        "phase_amplitude_err_low",
+        "phase_amplitude_err_high",
+        "phase_offset_deg",
+        "phase_offset_deg_err_low",
+        "phase_offset_deg_err_high"
       ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_bestfit_params_emission.csv",
-      "bytes": 435,
+      "file": "figures/R20_emission.png",
+      "bytes": 269398
+    },
+    {
+      "file": "figures/R20_lightcurves.png",
+      "bytes": 491190
+    },
+    {
+      "file": "figures/R20_limb_darkening.png",
+      "bytes": 106104
+    },
+    {
+      "file": "figures/R20_noise.png",
+      "bytes": 245372
+    },
+    {
+      "file": "figures/R20_residual_map.png",
+      "bytes": 117474
+    },
+    {
+      "file": "figures/R20_spectrum.png",
+      "bytes": 75984
+    },
+    {
+      "file": "figures/Rnative_emission.png",
+      "bytes": 277305
+    },
+    {
+      "file": "figures/Rnative_lightcurves.png",
+      "bytes": 582261
+    },
+    {
+      "file": "figures/Rnative_limb_darkening.png",
+      "bytes": 107999
+    },
+    {
+      "file": "figures/Rnative_noise.png",
+      "bytes": 243771
+    },
+    {
+      "file": "figures/Rnative_residual_map.png",
+      "bytes": 123896
+    },
+    {
+      "file": "figures/Rnative_spectrum.png",
+      "bytes": 76467
+    },
+    {
+      "file": "figures/whitelight.png",
+      "bytes": 210510
+    },
+    {
+      "file": "figures/whitelight_corner.png",
+      "bytes": 200360
+    },
+    {
+      "file": "figures/whitelight_emission.png",
+      "bytes": 250594
+    },
+    {
+      "file": "figures/whitelight_start.png",
+      "bytes": 191757
+    },
+    {
+      "file": "koala.log",
+      "bytes": 9692
+    },
+    {
+      "file": "state/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_artifacts.manifest.json",
+      "bytes": 434
+    },
+    {
+      "file": "state/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_noise.csv",
+      "bytes": 1832,
       "columns": [
-        "wavelength",
-        "wavelength_err",
-        "planet_index",
-        "dayside_flux_ppm",
-        "dayside_flux_ppm_err_low",
-        "dayside_flux_ppm_err_high",
-        "nightside_flux_ppm",
-        "nightside_flux_ppm_err_low",
-        "nightside_flux_ppm_err_high",
-        "hotspot_offset_deg",
-        "hotspot_offset_deg_err_low",
-        "hotspot_offset_deg_err_high"
+        "bin_size_points",
+        "measured_rms",
+        "measured_rms_p16",
+        "measured_rms_p84",
+        "expected_white_rms"
       ]
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_bestfit_params_emission.png",
-      "bytes": 161509
-    },
-    {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_geometry_handoff.json",
-      "bytes": 912
-    },
-    {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_outlier_mask.npy",
+      "file": "state/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_spectroscopic_outlier_mask.npy",
       "bytes": 449,
       "shape": [
         321
@@ -741,109 +755,140 @@
       "dtype": "bool"
     },
     {
-      "file": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_timeseries.csv",
-      "bytes": 61062,
+      "file": "state/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_noise.csv",
+      "bytes": 1818,
       "columns": [
-        "time_bjd",
-        "time_from_t0_hr",
-        "flux",
-        "flux_err",
-        "bestfit_model",
-        "residual",
-        "residual_ppm",
-        "is_outlier",
-        "transit_model",
-        "trend_model",
-        "detrended_flux"
+        "bin_size_points",
+        "measured_rms",
+        "measured_rms_p16",
+        "measured_rms_p84",
+        "expected_white_rms"
       ]
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg29c1fcf26990.manifest.json",
-      "bytes": 2362
+      "file": "state/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_spectroscopy_data_20LR_nativeHR.pkl",
+      "bytes": 173661
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg29c1fcf26990_chunk_0_4.diagnostics.json",
-      "bytes": 2379
+      "file": "state/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_spectroscopy_data_20LR_nativeHR.pkl.manifest.json",
+      "bytes": 432
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg29c1fcf26990_chunk_0_4.pkl",
-      "bytes": 581434
+      "file": "state/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_artifacts.manifest.json",
+      "bytes": 430
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg29c1fcf26990_chunk_4_8.diagnostics.json",
-      "bytes": 2375
+      "file": "state/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_geometry_handoff.json",
+      "bytes": 1042
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg29c1fcf26990_chunk_4_8.pkl",
-      "bytes": 581434
+      "file": "state/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_outlier_mask.npy",
+      "bytes": 449,
+      "shape": [
+        321
+      ],
+      "dtype": "bool"
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg29c1fcf26990_chunk_8_11.diagnostics.json",
-      "bytes": 2058
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg3bee71a5a796.manifest.json",
+      "bytes": 2289
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg29c1fcf26990_chunk_8_11.pkl",
-      "bytes": 436432
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg3bee71a5a796_chunk_0_4.diagnostics.json",
+      "bytes": 7572
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116.manifest.json",
-      "bytes": 2371
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg3bee71a5a796_chunk_0_4.pkl",
+      "bytes": 2833614
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_0_4.diagnostics.json",
-      "bytes": 2367
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg3bee71a5a796_chunk_4_8.diagnostics.json",
+      "bytes": 7578
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_0_4.pkl",
-      "bytes": 581434
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg3bee71a5a796_chunk_4_8.pkl",
+      "bytes": 2833614
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_12_14.diagnostics.json",
-      "bytes": 2183
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg3bee71a5a796_chunk_8_11.diagnostics.json",
+      "bytes": 6327
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_12_14.diagnostics.swap1_independent_hmc.json",
-      "bytes": 838
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_R20_independent_nuts_cfg3bee71a5a796_chunk_8_11.pkl",
+      "bytes": 2125612
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_12_14.pkl",
-      "bytes": 291419
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfg8e4b6a8851cf.manifest.json",
+      "bytes": 2298
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_4_8.diagnostics.json",
-      "bytes": 3443
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfg8e4b6a8851cf_chunk_0_4.diagnostics.json",
+      "bytes": 7586
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_4_8.diagnostics.swap1_independent_hmc.json",
-      "bytes": 1014
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfg8e4b6a8851cf_chunk_0_4.pkl",
+      "bytes": 2833614
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_4_8.diagnostics.swap2_joint_nuts.json",
-      "bytes": 623
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfg8e4b6a8851cf_chunk_12_14.diagnostics.json",
+      "bytes": 5083
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_4_8.pkl",
-      "bytes": 581445
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfg8e4b6a8851cf_chunk_12_14.pkl",
+      "bytes": 1417520
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_8_12.diagnostics.json",
-      "bytes": 2801
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfg8e4b6a8851cf_chunk_4_8.diagnostics.json",
+      "bytes": 7566
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_8_12.diagnostics.swap1_independent_hmc.json",
-      "bytes": 834
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfg8e4b6a8851cf_chunk_4_8.pkl",
+      "bytes": 2833614
     },
     {
-      "file": "chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfgaf6086f2a116_chunk_8_12.pkl",
-      "bytes": 581450
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfg8e4b6a8851cf_chunk_8_12.diagnostics.json",
+      "bytes": 7578
     },
     {
-      "file": "stuff.png",
-      "bytes": 20645
+      "file": "state/chunks/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_independent_nuts_cfg8e4b6a8851cf_chunk_8_12.pkl",
+      "bytes": 2833614
     },
     {
-      "file": "whitelight_mcmc_diagnostics.json",
-      "bytes": 1374
+      "file": "state/whitelight_mcmc_diagnostics.json",
+      "bytes": 5711
+    },
+    {
+      "file": "state/whitelight_samples_by_chain.npz",
+      "bytes": 451198,
+      "arrays": [
+        "_eclipse_depth_0",
+        "_geometry_fixed",
+        "_phase_c1_0",
+        "_phase_d1_0",
+        "a_rs_0",
+        "b_0",
+        "c",
+        "cos_i_0",
+        "depths_0",
+        "duration_0",
+        "eclipse_depth",
+        "eclipse_depth_ppm",
+        "error",
+        "inc_0",
+        "log_jitter",
+        "nightside_flux_ppm",
+        "period_0",
+        "phase_amplitude_ppm",
+        "phase_c1",
+        "phase_c1_ppm",
+        "phase_d1",
+        "phase_d1_ppm",
+        "phase_offset_deg",
+        "rors_0",
+        "t0_0",
+        "u",
+        "v"
+      ]
     }
   ]
 }

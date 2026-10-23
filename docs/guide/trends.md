@@ -37,12 +37,12 @@ The shape of each trend, with made-up amplitudes and no transit.
 The ramp, step and spot shapes (the ramp's timescale, the step's time, and the position and width of each spot) are measured from the white-light curve.
 In the wavelength channels those shapes stay fixed, and only their amplitudes are fitted, along with the polynomial.
 
-For a spot crossing or a step, give koala a rough idea of where it is (times in BMJD_TDB, widths in days, amplitudes in normalized flux):
+For a spot crossing or a step, give koala a rough idea of where it is (times in BJD_TDB − 2400000, widths in days, amplitudes in normalized flux):
 
 ```yaml
 flags:
   detrending_type: spot
-  spot_center: 59787.07
+  spot_center: 59787.57
   spot_width: 0.005
   spot_amp: 0.0005
 ```

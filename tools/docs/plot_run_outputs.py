@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from generate_tutorial_figures import style, COLOR
+from generate_tutorial_figures import style, COLOR, SAVE_PAD
 
 ROOT=Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT=ROOT/'docs'/'_static'
@@ -37,7 +37,7 @@ def one(directory, pattern):
 
 
 def save(fig, out, name):
-    fig.savefig(out/name,dpi=180,facecolor='white')
+    fig.savefig(out/name,dpi=180,facecolor='white',bbox_inches='tight',pad_inches=SAVE_PAD)
     plt.close(fig)
 
 
@@ -75,9 +75,9 @@ def white_panel(ax, table, epoch=None, residual=False, ppm=False):
 def eclipse(directory,out):
     ts=pd.read_csv(one(directory,'*_whitelight_lightcurve.csv'))
     emission=pd.read_csv(one(directory,'*_Rnative_emission.csv'))
-    fig,axes=plt.subplots(3,1,figsize=(9,8),layout='constrained',
+    fig,axes=plt.subplots(3,1,figsize=(6.9,6.4),layout='constrained',
         gridspec_kw={'height_ratios':[1.5,1,1.5]})
-    epoch=60001.3081322
+    epoch=60001.8081322
     white_panel(axes[0],ts,epoch,ppm=True)
     white_panel(axes[1],ts,epoch,residual=True)
     axes[1].set_xlabel('Time from injected eclipse (h)')
@@ -95,9 +95,9 @@ def eclipse(directory,out):
 def phase(directory,out):
     ts=pd.read_csv(one(directory,'*_whitelight_lightcurve.csv'))
     emission=pd.read_csv(one(directory,'*_Rnative_emission.csv'))
-    fig,axes=plt.subplots(3,1,figsize=(9,8),layout='constrained',
+    fig,axes=plt.subplots(3,1,figsize=(6.9,6.4),layout='constrained',
         gridspec_kw={'height_ratios':[1.4,1.3,1]})
-    phase=(ts.time_bjd-60000)/2
+    phase=(ts.time_bjd-60000.5)/2   # t0 and period of the synthetic planet
     trend=ts.trend_model.to_numpy()
     flux=(ts.flux.to_numpy()/trend-1)*1e6
     model=(ts.bestfit_model.to_numpy()/trend-1)*1e6
@@ -109,18 +109,18 @@ def phase(directory,out):
     high=float(np.nanpercentile(flux[above],99))+150
     axes[0].set(xlabel='Orbital phase from transit',ylabel='Relative flux (ppm)',ylim=(low,high))
     axes[0].text(.5,.05,'Transit extends below the plotted range',transform=axes[0].transAxes,
-        ha='center',fontsize=9,color='.3')
+        ha='center',color='.3')
     for key,label,color in [('eclipse_depth_ppm','At eclipse (dayside)',COLOR),('nightside_flux_ppm','Nightside','#397b88')]:
         axes[1].errorbar(emission.wavelength,emission[key],
             yerr=np.array([emission[key+'_err_low'],emission[key+'_err_high']]),
             fmt='o',ms=4,mfc='white',color=color,elinewidth=1,label=label)
-    axes[1].set(ylabel='Planet / star flux (ppm)')
+    axes[1].set(ylabel='Planet flux (ppm)')
     axes[1].legend(frameon=False,ncol=2)
     key='phase_offset_deg'
     axes[2].errorbar(emission.wavelength,emission[key],
         yerr=np.array([emission[key+'_err_low'],emission[key+'_err_high']]),
         fmt='o',mfc='white',ms=4,color=COLOR,elinewidth=1)
-    axes[2].set(xlabel='Wavelength (µm)',ylabel='Peak offset before eclipse (deg)')
+    axes[2].set(xlabel='Wavelength (µm)',ylabel='Peak offset (deg)')
     save(fig,out,'phase_recovery.png')
     return {'channels':len(emission),'integrations':len(ts)}
 

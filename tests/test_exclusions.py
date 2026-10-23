@@ -96,7 +96,7 @@ def test_process_spectroscopy_data_applies_both_exclusions(tmp_path):
     time = 60000.0 + np.arange(n_time) * 0.01
     hdus = [fits.PrimaryHDU()] + [fits.ImageHDU(a) for a in (
         wave, np.full(30, 0.01), flux, flux * 0.01)]
-    hdus.append(fits.ImageHDU(time))
+    hdus.append(fits.ImageHDU(time - 0.5))  # JWST files carry BMJD_TDB = BJD_TDB - 2400000.5
     path = tmp_path / "spectrum.fits"
     fits.HDUList(hdus).writeto(path)
 

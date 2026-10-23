@@ -55,11 +55,11 @@ def test_ephemeris_check_accepts_covered_eclipse():
     check_ephemeris_covers_data(t, _specs(T0 + 3 * PERIOD), "eclipse")
 
 
-def test_ephemeris_check_flags_bjd_minus_2400000():
+def test_ephemeris_check_flags_bmjd():
     t = np.linspace(ECLIPSE - 0.14, ECLIPSE + 0.09, 100)
-    with pytest.raises(ValueError, match="BJD - 2400000"):
+    with pytest.raises(ValueError, match="BMJD_TDB .* add 0.5"):
         check_ephemeris_covers_data(
-            t, _specs(T0 + 0.5, T0 + 0.5 - 0.08, T0 + 0.5 + 0.08, "uniform"), "eclipse")
+            t, _specs(T0 - 0.5, T0 - 0.5 - 0.08, T0 - 0.5 + 0.08, "uniform"), "eclipse")
 
 
 def test_ephemeris_check_flags_full_bjd():

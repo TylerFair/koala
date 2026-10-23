@@ -58,7 +58,7 @@ from .geometry import (
     _write_whitelight_geometry_handoff,
     _load_whitelight_geometry_handoff,
 )
-from .readers import MJD_OFFSET
+from .readers import TIME_OFFSET, TIME_SYSTEM
 from .limb_darkening import (
     _repair_gaussian_ld_start,
     _power2_ld_initial_sites,
@@ -451,7 +451,7 @@ def _save_white_light_parameter_table(*, context, bestfit_params_wl, wl_params_p
         row = {'planet_id': i}
         for name in ('period', 'period_err', 'period_err_low', 'period_err_high', 'duration', 't0'):
             row[name] = bestfit_params_wl[name][i]
-        row['t0_bjd_tdb'] = float(bestfit_params_wl['t0'][i]) + MJD_OFFSET
+        row['t0_bjd_tdb'] = float(bestfit_params_wl['t0'][i]) + TIME_OFFSET
         for name in (
             'b', 'rors', 'depths', 'duration_err', 't0_err', 'b_err', 'rors_err',
             'depths_err', 'duration_err_low', 'duration_err_high', 't0_err_low', 't0_err_high', 'b_err_low', 'b_err_high', 'rors_err_low', 'rors_err_high', 'depths_err_low', 'depths_err_high',
@@ -1001,7 +1001,7 @@ def _summarize_white_light(*, context, U_mu_wl, wl_samples):
         if context.n_planets > 1:
             info(f'  Planet {index + 1}')
         for label, stem, unit in (('rprs', 'rors', ''), ('b', 'b', ''),
-                                  ('t0', 't0', 'BMJD_TDB'), ('duration', 'duration', 'd'),
+                                  ('t0', 't0', TIME_SYSTEM), ('duration', 'duration', 'd'),
                                   ('period', 'period', 'd'), ('a_rs', 'a_rs', '')):
             specs = context.planet_parameter_specs.get(label)
             if specs is None or not specs[index].free:
@@ -1491,10 +1491,12 @@ def _save_white_light_diagnostics(
     wl_residual = context.data.wl_flux - wl_transit_model
     wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
     wl_mad_mask = jnp.abs(wl_residual - jnp.nanmedian(wl_residual)) > context.whitelight_sigma * wl_sigma
-    from .console import residual_summary
+    if not context.whitelight_sigma:  # 0 turns the clip off
+        wl_mad_mask = jnp.zeros_like(wl_mad_mask)
+    from .console import observation_label, residual_summary
     residual_summary(float(jnp.std(wl_residual[~wl_mad_mask])) * 1e6,
                      int(jnp.sum(wl_mad_mask)), context.whitelight_sigma,
-                     f'order {context.order}' if context.order is not None else context.instrument_full_str)
+                     observation_label(context.instrument_full_str))
     if getattr(context, 'plots_mode', context.cfg.get('flags', {}).get('plots', 'full')) != 'minimal':
         try:
             plot_whitelight_corner(wl_samples, OutputPaths(context.output_dir).figure('whitelight', 'corner'),

@@ -182,8 +182,8 @@ def test_progress_display_preserves_sampler_options_and_rng():
 
 
 def test_uncertainties_units_grid_labels_and_elapsed_time():
-    assert console.parameter_summary('t0', 59787.056748, .000014, 'BMJD_TDB') == (
-        '  t0               59787.056748 ± 0.000014 BMJD_TDB')
+    assert console.parameter_summary('t0', 59787.556748, .000014, 'BJD_TDB - 2400000') == (
+        '  t0               59787.556748 ± 0.000014 BJD_TDB - 2400000')
     assert console.parameter_summary('duration', .119604, .000085, 'd').endswith(
         '0.119604 ± 0.000085 d')
     assert console.parameter_summary('rprs', .14591, .00018).endswith('0.14591 ± 0.00018')
@@ -301,10 +301,10 @@ def test_refactor_notice_is_file_only_before_configuration(tmp_path, capsys):
 
 def test_residual_wording_and_joint_collection(capsys):
     console.configure()
-    console.residual_summary(109., 1, 4)
+    console.residual_summary(109., 1, 5)
     console.residual_summary(189., 0, 4)
     output = capsys.readouterr().out
-    assert 'Residual scatter 109 ppm; 1 integration clipped at 4σ' in output
+    assert 'Residual scatter 109 ppm; 1 integration clipped at 5σ' in output
     assert 'Residual scatter 189 ppm; no integrations clipped' in output
     state = {'collect_residuals': True}
     with console.joint_presentation(state):
@@ -341,12 +341,12 @@ def test_joint_spectroscopy_heading_precedes_coefficients(monkeypatch, capsys):
         console.info('coefficients here')
         return 'unchanged coefficients'
     monkeypatch.setattr(spectroscopy, '_spectroscopic_ld_uncached', coefficients)
-    inputs = SimpleNamespace(instrument='NIRISS/SOSS', order=2)
+    inputs = SimpleNamespace(instrument='NIRISS/SOSS', order=2, instrument_full_str='WASP-39_NIRISS_SOSS_order2')
     with console.joint_presentation({}):
         result = spectroscopy._spectroscopic_ld(None, inputs, [.65, .75], None, 'R10')
     assert result == 'unchanged coefficients'
     output = capsys.readouterr().out
-    assert output.index('NIRISS/SOSS order 2: spectroscopy at R = 10, 2 channels') < output.index('coefficients here')
+    assert output.index('SOSS order 2: spectroscopy at R = 10, 2 channels') < output.index('coefficients here')
     assert 'orbit fixed to the joint white-light posterior' in output
 
 

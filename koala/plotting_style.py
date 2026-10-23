@@ -31,6 +31,28 @@ except Exception:  # pragma: no cover - availability is environment-specific.
 
 
 PLOT_DPI = 250
+
+# Figures are drawn at the size they are printed: the full text width of a journal page.
+# Included with \includegraphics[width=\textwidth], every label is then at least
+# MIN_PRINTED_POINTS for any text width from PRINT_WIDTH (an AASTeX manuscript, 6.5 in)
+# up to the 7.1 in of a two-column AASTeX page.
+PRINT_WIDTH = 6.5
+MIN_PRINTED_POINTS = 11.0
+FIGURE_WIDTH = 6.9
+SAVE_PAD = 0.05
+FONT_SIZE = 12.0
+LABEL_SIZE = 13.0
+TITLE_SIZE = 13.0
+
+
+def figsize(height):
+    """(width, height) in inches for a full-width figure."""
+    return (FIGURE_WIDTH, height)
+
+
+def scaled_figsize(width, height):
+    """A figure first laid out ``width`` inches wide, scaled to the full-width size."""
+    return (FIGURE_WIDTH, height * FIGURE_WIDTH / width)
 MODEL_COLOR = "k"
 ZERO_LINE_COLOR = "0.40"
 ERRORBAR_COLOR = "0.72"
@@ -51,10 +73,10 @@ AVAILABLE_PALETTES = (
 
 DATA_MARKER_STYLE = {
     "fmt": "o",
-    "ms": 3.6,
+    "ms": 3.2,
     "mfc": "white",
-    "mew": 1.7,
-    "elinewidth": 1.7,
+    "mew": 1.2,
+    "elinewidth": 1.2,
     "capsize": 0,
     "linestyle": "none",
 }
@@ -191,29 +213,41 @@ def _apply_science_style() -> bool:
 def apply_publication_style() -> None:
     """Apply the reference ``science``/``nature`` style or serif fallback."""
     if not _apply_science_style():
-        plt.rcParams.update(
-            {
-                "font.family": "serif",
-                "axes.spines.top": True,
-                "axes.spines.right": True,
-            }
-        )
+        plt.rcParams.update({"font.family": "serif"})
     plt.rcParams.update(
         {
-            "axes.labelsize": 18,
-            "xtick.labelsize": 15,
-            "ytick.labelsize": 15,
-            "axes.linewidth": 1.4,
-            "axes.labelpad": 12.0,
-            "xtick.major.width": 1.4,
-            "ytick.major.width": 1.4,
-            "xtick.major.size": 6.0,
-            "ytick.major.size": 6.0,
-            "xtick.major.pad": 8.0,
-            "ytick.major.pad": 8.0,
+            "font.size": FONT_SIZE,
+            "axes.labelsize": LABEL_SIZE,
+            "axes.titlesize": TITLE_SIZE,
+            "figure.titlesize": TITLE_SIZE,
+            "xtick.labelsize": FONT_SIZE,
+            "ytick.labelsize": FONT_SIZE,
+            "legend.fontsize": FONT_SIZE,
+            "legend.title_fontsize": FONT_SIZE,
+            "axes.spines.top": True,
+            "axes.spines.right": True,
+            "axes.spines.bottom": True,
+            "axes.spines.left": True,
+            "axes.linewidth": 1.0,
+            "axes.labelpad": 6.0,
+            "xtick.direction": "in",
+            "ytick.direction": "in",
+            "xtick.top": True,
+            "ytick.right": True,
+            "xtick.minor.visible": False,
+            "ytick.minor.visible": False,
+            "xtick.major.width": 1.0,
+            "ytick.major.width": 1.0,
+            "xtick.major.size": 5.0,
+            "ytick.major.size": 5.0,
+            "xtick.major.pad": 5.0,
+            "ytick.major.pad": 5.0,
+            "lines.linewidth": 1.2,
+            "figure.figsize": figsize(4.5),
             "figure.constrained_layout.use": True,
             "legend.frameon": False,
             "savefig.bbox": None,
+            "savefig.pad_inches": SAVE_PAD,
         }
     )
 
@@ -275,16 +309,18 @@ def enforce_min_major_ticks(ax, *, x: bool = True, y: bool = True) -> None:
 
 
 def style_axis(ax, *, x_locator: bool = True, y_locator: bool = True) -> None:
-    """Apply the reference inward major ticks and disable minor ticks."""
+    """Four spines, inward major ticks on every side, and no minor ticks."""
     enforce_min_major_ticks(ax, x=x_locator, y=y_locator)
+    for spine in ax.spines.values():
+        spine.set_visible(True)
     ax.tick_params(
         axis="both",
         which="major",
         direction="in",
-        top=False,
-        right=False,
-        length=6,
-        width=1.4,
+        top=True,
+        right=True,
+        length=5,
+        width=1.0,
     )
     ax.tick_params(
         axis="both",
@@ -351,19 +387,49 @@ def add_instrument_stamp(
     ax,
     label: str | None,
     *,
-    fontsize: float = 16.0,
+    fontsize: float = TITLE_SIZE,
     y_data: float | None = None,
 ):
     """Add the single allowed free-text stamp to an ordinary pipeline plot."""
     del y_data  # Titles always sit above the data, independent of the flux range.
-    return ax.set_title(format_instrument_stamp_display(label), fontsize=fontsize, pad=12)
+    return ax.set_title(format_instrument_stamp_display(label), fontsize=max(fontsize, TITLE_SIZE), pad=8)
 
 
 def save_figure(fig, filename, *, dpi: int = PLOT_DPI, close: bool = True) -> None:
     """Save consistently while retaining Matplotlib's extension semantics."""
-    fig.savefig(filename, dpi=dpi, bbox_inches='tight')
+    fig.savefig(filename, dpi=dpi, bbox_inches='tight', pad_inches=SAVE_PAD)
     if close:
         plt.close(fig)
+
+
+def print_problems(fig, width: float = PRINT_WIDTH) -> list[str]:
+    """What would stop ``fig`` printing well at ``width`` inches: small text, or axes
+    without four spines and inward ticks on every side. Empty when it's fine."""
+    from matplotlib import lines as mlines
+    from matplotlib.text import Text
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    saved = fig.get_tightbbox(renderer).width + 2 * SAVE_PAD
+    scale = width / saved
+    problems = []
+    for text in fig.findobj(Text):
+        if text.get_visible() and text.get_text().strip() and text.get_fontsize() * scale < MIN_PRINTED_POINTS - 1e-6:
+            problems.append(f'{text.get_text()!r} prints at {text.get_fontsize() * scale:.1f} pt')
+    for ax in fig.axes:
+        if not ax.get_visible() or not ax.axison or not ax.get_frame_on() or hasattr(ax, '_colorbar'):
+            continue
+        if not all(spine.get_visible() for spine in ax.spines.values()):
+            problems.append(f'axes {ax.get_title()!r} has a missing spine')
+        for axis, inward in ((ax.xaxis, (mlines.TICKUP, mlines.TICKDOWN)),
+                             (ax.yaxis, (mlines.TICKRIGHT, mlines.TICKLEFT))):
+            ticks = [tick for tick in axis.get_major_ticks() if tick.tick1line.get_visible()]
+            if not ticks:
+                continue
+            tick = ticks[0]
+            if tick.tick1line.get_marker() != inward[0] or not tick.tick2line.get_visible() \
+                    or tick.tick2line.get_marker() != inward[1]:
+                problems.append(f'axes {ax.get_title()!r} lacks inward ticks on both sides of {axis.axis_name}')
+    return problems
 
 
 def residual_colormap():
@@ -382,4 +448,4 @@ def figure_title_text(label, stage):
 
 
 def figure_title(ax, label, stage):
-    return ax.set_title(figure_title_text(label, stage), fontsize=16, pad=12)
+    return ax.set_title(figure_title_text(label, stage), fontsize=TITLE_SIZE, pad=8)

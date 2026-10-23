@@ -1,0 +1,32 @@
+# WASP-39 b with NIRSpec/G395H NRS1 (ERS 1366), one of the members of wasp39_three_instruments.yaml.
+# Every column of the file is its own channel, and the trend has a step for the jump in flux
+# part way through the visit.
+
+planet:
+  name: WASP-39
+  period: {value: 4.05528043, prior: fixed}                                  # days
+  t0: {value: 59791.610, prior: uniform, low: 59791.560, high: 59791.660}    # BJD_TDB - 2400000
+  duration: {value: 0.117, prior: log_uniform, low: 0.01, high: 1.0}         # days
+  b: {value: 0.45, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.146, prior: uniform, low: 0.01, high: 0.5}
+
+stellar:
+  teff: 5509
+  logg: 4.22
+  feh: 0.04
+
+instrument: NIRSPEC/G395H
+nrs: 1
+
+input_file: examples/data/WASP-39_g395h_nrs1_binned8.fits
+output_dir: results/WASP-39_G395H_NRS1
+
+resolution:
+  high: native
+
+exclude_times: [["min(t)", "min(t) + 0.001"]]    # the first two integrations
+
+flags:
+  detrending_type: linear_discontinuity
+  t_jump_guess: 59791.6205
+  jump_guess: -0.0015

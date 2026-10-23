@@ -4,10 +4,10 @@ planet:
     value: 2.6162644
     prior: fixed
   eclipse_time:
-    value: 60001.3081322
+    value: 60001.8081322
     prior: uniform
-    low: 60001.2231322
-    high: 60001.3931322
+    low: 60001.7231322
+    high: 60001.8931322
   a_rs:
     value: 17.04
     prior: gaussian
@@ -49,7 +49,7 @@ flags:
   detrending_type: linear
   ld_profile: quadratic
   ld_prior: fixed
-  random_seed: 20260904
+  random_seed: 1
   spectro_chunk_size: 4
   highres_num_samples: 4000
 outlier_clip:
