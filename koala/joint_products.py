@@ -4,6 +4,9 @@ No JAX imports, so the figures can also be made afterwards from a finished run:
 
     python -m koala.joint_products results/WASP-107_joint
 """
+
+from koala.console import debug, info
+from .output_paths import OutputPaths
 from pathlib import Path
 import sys
 
@@ -44,24 +47,32 @@ def _label(filename):
     """A readable label from a koala output name, e.g. 'NIRSpec G395H nrs1'."""
     words = Path(filename).name.split('_')[1:]
     keep = [w for w in words if w and not w.startswith(('Rreference', 'Rnative', 'pix'))
-            and w not in ('time', 'shift.csv') and not (w[0] == 'R' and w[1:].isdigit())]
+            and w not in ('timing.csv', 'spectrum.csv') and not (w[0] == 'R' and w[1:].isdigit())]
     return ' '.join(keep).replace('NIRSPEC', 'NIRSpec').replace('order', 'order ').replace('  ', ' ').strip()
 
 
 def collect_joint_spectra(output_dir):
     """Stack every dataset's timing table under a joint output directory."""
     tables = []
-    for member in sorted(p for p in Path(output_dir).iterdir() if p.is_dir() and p.name != 'joint'):
-        for path in sorted(member.glob('*_time_shift.csv')):
+    for member in sorted(p for p in Path(output_dir).iterdir() if p.is_dir() and p.name not in {'state', 'figures'}):
+        timing = sorted(member.glob('*_timing.csv'))
+        for path in timing or sorted(member.glob('*_spectrum.csv')):
             table = pd.read_csv(path)
-            table.insert(0, 'dataset', member.name)
-            table.insert(1, 'instrument', _instrument(path.name))
-            table.insert(2, 'label', _label(path.name))
+            if not timing:
+                table = table.rename(columns={'depth00': 'depth', 'depth_err00': 'depth_err'})
+                if 'depth' not in table:
+                    continue
+            for index, (name, value) in enumerate((('dataset', member.name),
+                    ('instrument', _instrument(path.name)), ('label', _label(path.name)))):
+                if name not in table:
+                    table.insert(index, name, value)
             tables.append(table)
     if not tables:
         return None
     combined = pd.concat(tables, ignore_index=True)
-    return combined.sort_values('wavelength', kind='stable').reset_index(drop=True)
+    result = combined.sort_values('wavelength', kind='stable').reset_index(drop=True)
+    result.attrs['target'] = path.stem.split('_', 1)[0]
+    return result
 
 
 def _edges(part):
@@ -377,7 +388,7 @@ def _wavelength_axis(top, bottom, out):
             style_axis(ax)
 
 
-def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]'):
+def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]', figure_path=None, render=True):
     """Two panels on one wavelength axis: transit depth, then the transit-time offset."""
     from .plotting_style import (
         DATA_MARKER_STYLE, SPECTRUM_COLOR, ZERO_LINE_COLOR, apply_publication_style,
@@ -389,6 +400,8 @@ def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]'):
     out = table.assign(depth_ppm=table.depth * 1e6, depth_err_ppm=table.depth_err * 1e6,
                        shown=table.wavelength <= limit)
     out.to_csv(f'{stem}.csv', index=False)
+    if not render:
+        return Path(figure_path or f'{stem}.png')
     out = out[out.shown]
     apply_publication_style()
     fig, (top, bottom) = plt.subplots(
@@ -402,15 +415,13 @@ def _draw(table, stem, label=None, t0_label=r'$t_0 - t_{0,\mathrm{ref}}$ [s]'):
     top.set_ylabel('Transit depth [ppm]')
     bottom.set_ylabel(t0_label)
     bottom.set_xlabel(r'Wavelength [$\mu$m]')
-    if label:
-        top.text(0.02, 0.95, label, transform=top.transAxes, ha='left', va='top', fontsize=15, color='0.3')
+    top.set_title(label or 'Joint spectrum', fontsize=16, pad=12)
 
     _wavelength_axis(top, bottom, out)
     fig.align_ylabels((top, bottom))
-    for extension in ('png', 'pdf'):
-        save_figure(fig, f'{stem}.{extension}', close=False)
-    plt.close(fig)
-    return Path(f'{stem}.png')
+    figure_path = figure_path or f'{stem}.png'
+    save_figure(fig, figure_path)
+    return Path(figure_path)
 
 
 def limb_spectra(table, offsets=None, draws=4000, seed=0):
@@ -476,7 +487,7 @@ def limb_spectra(table, offsets=None, draws=4000, seed=0):
     return out
 
 
-def _draw_limbs(table, stem):
+def _draw_limbs(table, stem, figure_path=None, render=True, label='Joint morning and evening limbs'):
     """Evening and morning depths in two stacked panels, the evening in front above and the morning below."""
     from .plotting_style import DATA_MARKER_STYLE, apply_publication_style, save_figure
     import matplotlib.pyplot as plt
@@ -484,6 +495,8 @@ def _draw_limbs(table, stem):
     limit = table.instrument.map(DISPLAY_MAX_WAVELENGTH).fillna(np.inf) if 'instrument' in table else np.inf
     out = table.assign(shown=table.wavelength <= limit)
     out.to_csv(f'{stem}.csv', index=False)
+    if not render:
+        return Path(figure_path or f'{stem}.png')
     out = out[out.shown]
     apply_publication_style()
     fig, (top, bottom) = plt.subplots(2, 1, figsize=(10, 8), sharex=True, sharey=True)
@@ -506,52 +519,95 @@ def _draw_limbs(table, stem):
         handles, labels = ax.get_legend_handles_labels()
         order = [labels.index(f'{front.capitalize()} limb'), 1 - labels.index(f'{front.capitalize()} limb')]
         ax.legend([handles[i] for i in order], [labels[i] for i in order], loc='upper left', frameon=False)
+    top.set_title(label, fontsize=16, pad=12)
     top.set_ylim(low, high)
     bottom.set_xlabel(r'Wavelength [$\mu$m]')
     _wavelength_axis(top, bottom, out)
     fig.align_ylabels((top, bottom))
-    for extension in ('png', 'pdf'):
-        save_figure(fig, f'{stem}.{extension}', close=False)
-    plt.close(fig)
-    return Path(f'{stem}.png')
+    figure_path = figure_path or f'{stem}.png'
+    save_figure(fig, figure_path)
+    return Path(figure_path)
 
 
-def plot_joint_spectra(output_dir):
-    """Write depth and timing figures for every finished dataset, and the joint ones for two or more.
+def _draw_depth_only(table, stem, figure_path, label='Joint spectrum', render=True):
+    """The ordinary joint spectrum has no fitted channel timing panel."""
+    from .plotting_style import (
+        DATA_MARKER_STYLE, SPECTRUM_COLOR, apply_publication_style, save_figure, style_axis,
+    )
+    import matplotlib.pyplot as plt
+    out = table.assign(depth_ppm=table.depth*1e6, depth_err_ppm=table.depth_err*1e6)
+    out.to_csv(str(stem)+'.csv', index=False)
+    if not render:
+        return Path(figure_path)
+    apply_publication_style()
+    # One spectrum colour for every dataset, as in the depth-and-timing figure.
+    fig, ax = plt.subplots(figsize=(10, 4.5), constrained_layout=True)
+    ax.errorbar(out.wavelength, out.depth_ppm, xerr=out.wavelength_err, yerr=out.depth_err_ppm,
+                color=SPECTRUM_COLOR, ecolor=SPECTRUM_COLOR, **DATA_MARKER_STYLE)
+    ax.set(xlabel=r'Wavelength [$\mu$m]', ylabel='Transit depth [ppm]')
+    ax.set_title(label, fontsize=16, pad=12)
+    style_axis(ax)
+    save_figure(fig, figure_path)
+    return Path(figure_path)
 
-    joint/joint_spectrum.*         every channel of every dataset on one wavelength axis, with the
-                                   transit times on the zero of the combined figure;
-    joint/joint_spectrum_binned.*  the same, display-binned (NIRISS R~50, NIRSpec R~100, MIRI pairs);
-    joint/datasets/<dataset>.*     each dataset on its own, in the same style (also written as
-                                   <dataset>/<prefix>_depth_and_t0.* next to its other products).
-    joint/limb_spectra.*           morning and evening depths from each channel's depth and time
-                                   (see limb_spectra), and limb_spectra_binned.* from the binned ones.
-    joint/joint_spectrum_ivw.*     when visits overlap in wavelength: all datasets averaged channel
-                                   by channel (see ivw_combine), on the same timing zero, with
-                                   limb_spectra_ivw.* and the fitted visit offsets in ivw_offsets.csv.
-    Each figure has a CSV of its values; the `shown` column marks what is plotted.
-    """
+
+def _depth_display_bin(table):
+    # The same spectral display groups as the timing figure, with no invented timing values.
+    table = table.assign(display_bin=_shared_bins(table, DISPLAY_RESOLUTION, DISPLAY_GROUP))
+    rows = []
+    for (_, _, _), sub in table.groupby(['dataset', 'instrument', 'display_bin'], sort=False):
+        lo, hi = _edges(sub)
+        depth, error = _ivw(sub.depth, sub.depth_err)
+        row = sub.iloc[0].to_dict()
+        row.update(wavelength=(lo.min()+hi.max())/2, wavelength_err=(hi.max()-lo.min())/2,
+                   depth=depth, depth_err=error, channels=len(sub))
+        rows.append(row)
+    return pd.DataFrame(rows).sort_values('wavelength', kind='stable').reset_index(drop=True)
+
+
+def plot_joint_spectra(output_dir, *, plots='full'):
+    """Regenerate the joint science tables and PNG figures from member tables."""
     table = collect_joint_spectra(output_dir)
     if table is None:
         return None
-    joint_dir = Path(output_dir) / 'joint'
-    (joint_dir / 'datasets').mkdir(parents=True, exist_ok=True)
+    paths = OutputPaths(output_dir)
+    title = lambda stage: ' | '.join(p for p in (table.attrs.get('target', ''), stage) if p)
+    stem = lambda product: str(Path(paths.joint_table(product)).with_suffix(''))
+    figure = lambda product: paths.figure('joint', product)
+    if 'dt0_s' not in table:
+        for dataset, part in table.groupby('dataset', sort=False):
+            _draw_depth_only(part, str(Path(paths.dataset_table(dataset)).with_suffix('')),
+                             paths.figure(dataset, 'spectrum'), label=title(part.label.iloc[0]), render=plots == 'full')
+        _draw_depth_only(_depth_display_bin(table), stem('spectrum_binned'), figure('spectrum_binned'), label=title('Joint spectrum | Binned'), render=plots == 'full')
+        return _draw_depth_only(table, stem('spectrum'), figure('spectrum'), label=title('Joint spectrum'))
     limbs = limb_spectra(table)
     if limbs is not None:
-        _draw_limbs(limbs, str(joint_dir / 'limb_spectra'))
-        _draw_limbs(limb_spectra(display_bin(table)), str(joint_dir / 'limb_spectra_binned'))
+        _draw_limbs(limbs, stem('limbs'), figure('limbs'), render=plots == 'full', label=title('Joint limbs'))
+        _draw_limbs(limb_spectra(display_bin(table)), stem('limbs_binned'), figure('limbs_binned'), render=plots == 'full', label=title('Joint limbs | Binned'))
     for dataset, part in table.groupby('dataset', sort=False):
-        figure = _draw(part, str(joint_dir / 'datasets' / dataset), label=part.label.iloc[0])
-        # The same figure next to the dataset's other products.
-        for source in Path(output_dir, dataset).glob('*_time_shift.csv'):
-            _draw(part, str(source).replace('_time_shift.csv', '_depth_and_t0'), label=part.label.iloc[0])
+        result = _draw(part, str(Path(paths.dataset_table(dataset)).with_suffix('')),
+                       label=title(part.label.iloc[0]), figure_path=paths.figure(dataset, 'spectrum'), render=plots == 'full')
+        # Fold the former depth-and-t0 table's display columns into the one
+        # timing table, retaining its channel order and all original names.
+        for source in Path(output_dir, dataset).glob('*_timing.csv'):
+            own = pd.read_csv(source, float_precision='round_trip')
+            instrument = _instrument(source.name)
+            for index, (name, value) in enumerate((('dataset', dataset), ('instrument', instrument),
+                                                   ('label', _label(source.name)))):
+                if name not in own:
+                    own.insert(index, name, value)
+            own = own.assign(depth_ppm=own.depth*1e6, depth_err_ppm=own.depth_err*1e6,
+                             shown=own.wavelength <= DISPLAY_MAX_WAVELENGTH.get(instrument, np.inf))
+            own.to_csv(source, index=False)
     if table['dataset'].nunique() < 2:
-        return figure
+        if plots == 'minimal':
+            return _draw(table, stem('spectrum'), figure_path=figure('spectrum'), label=title('Joint spectrum'))
+        return result
     shown, reference = _common_timing_zero(table)
     label = {} if reference is None else {'t0_label': _REFERENCE_LABEL}
-    _draw(display_bin(shown), str(joint_dir / 'joint_spectrum_binned'), **label)
-    plot_ivw_spectra(table, joint_dir)
-    return _draw(shown, str(joint_dir / 'joint_spectrum'), **label)
+    _draw(display_bin(shown), stem('spectrum_binned'), figure_path=figure('spectrum_binned'), render=plots == 'full', label=title('Joint spectrum | Binned'), **label)
+    plot_ivw_spectra(table, output_dir, render=plots == 'full')
+    return _draw(shown, stem('spectrum'), figure_path=figure('spectrum'), label=title('Joint spectrum'), **label)
 
 
 def _timing_reference(table, window=TIMING_REFERENCE_UM):
@@ -585,7 +641,7 @@ def _common_timing_zero(table):
                           t0_reference_err_s=referenced.t0_reference_err_s.iloc[0]), reference
 
 
-def plot_ivw_spectra(table, joint_dir):
+def plot_ivw_spectra(table, joint_dir, *, render=True):
     """The combined depth, timing and limb figures of overlapping datasets; None without overlap.
 
     The timing panel has its zero at the weighted mean over TIMING_REFERENCE_UM when the spectrum
@@ -595,16 +651,18 @@ def plot_ivw_spectra(table, joint_dir):
     combined, offsets = ivw_combine(table)
     if combined is None:
         return None
-    offsets.to_csv(Path(joint_dir) / 'ivw_offsets.csv', index=False)
+    paths = OutputPaths(joint_dir)
+    title = lambda stage: ' | '.join(p for p in (table.attrs.get('target', ''), stage) if p)
+    offsets.to_csv(paths.state('ivw_offsets.csv'), index=False)
     limbs = limb_spectra(combined)
     if limbs is not None:
-        _draw_limbs(limbs, str(Path(joint_dir) / 'limb_spectra_ivw'))
+        _draw_limbs(limbs, str(Path(paths.joint_table('limbs_ivw')).with_suffix('')), paths.figure('joint', 'limbs_ivw'), render=render, label=title('Joint limbs | Combined visits'))
     shown, reference = _timing_reference(combined)
     if reference is None:
-        return _draw(combined, str(Path(joint_dir) / 'joint_spectrum_ivw'))
-    return _draw(shown, str(Path(joint_dir) / 'joint_spectrum_ivw'), t0_label=_REFERENCE_LABEL)
+        return _draw(combined, str(Path(paths.joint_table('spectrum_ivw')).with_suffix('')), figure_path=paths.figure('joint', 'spectrum_ivw'), render=render, label=title('Joint spectrum | Combined visits'))
+    return _draw(shown, str(Path(paths.joint_table('spectrum_ivw')).with_suffix('')), t0_label=_REFERENCE_LABEL, figure_path=paths.figure('joint', 'spectrum_ivw'), render=render, label=title('Joint spectrum | Combined visits'))
 
 
 if __name__ == '__main__':
     for directory in sys.argv[1:]:
-        print(plot_joint_spectra(directory))
+        debug(plot_joint_spectra(directory))

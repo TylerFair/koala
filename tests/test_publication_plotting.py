@@ -105,7 +105,8 @@ def test_white_light_plot_entry_points_write_files(tmp_path):
         if line.get_marker() == "o" and line.get_linestyle() == "None"
     ]
     assert data_lines, "white-light data markers must remain visible"
-    assert len(curve_figure.axes[0].texts) == 1
+    assert not curve_figure.axes[0].texts
+    assert "NIRISS" in curve_figure.axes[0].get_title()
 
 
 def test_spectrum_and_noise_entry_points_write_files(tmp_path):
@@ -130,7 +131,7 @@ def test_spectrum_and_noise_entry_points_write_files(tmp_path):
         )
     )
     plot_transmission_spectrum(wavelength, rors, str(tmp_path / "spectrum"))
-    _assert_png(tmp_path / "spectrum_00.png")
+    _assert_png(tmp_path / "spectrum.png")
 
     bins = np.array([1, 2, 4, 8, 16])
     noise = pd.DataFrame(

@@ -43,7 +43,7 @@ def _chunk_payload(start, end, draws=3, include_a0=False):
 
 
 def test_chunk_discovery_is_numeric_and_limb_fields_concatenate(tmp_path):
-    chunks = tmp_path / "chunks"
+    chunks = tmp_path / "state" / "chunks"
     prefix = "planet_instrument_R50"
     _write_pickle(chunks / f"{prefix}_chunk_2_5.pkl", _chunk_payload(2, 5))
     _write_pickle(chunks / f"{prefix}_chunk_0_2.pkl", _chunk_payload(0, 2))
@@ -59,7 +59,7 @@ def test_chunk_discovery_is_numeric_and_limb_fields_concatenate(tmp_path):
 
 
 def test_chunk_discovery_rejects_incomplete_coverage(tmp_path):
-    chunks = tmp_path / "chunks"
+    chunks = tmp_path / "state" / "chunks"
     prefix = "planet_R50"
     _write_pickle(chunks / f"{prefix}_chunk_0_2.pkl", {})
     _write_pickle(chunks / f"{prefix}_chunk_3_4.pkl", {})
@@ -69,7 +69,7 @@ def test_chunk_discovery_rejects_incomplete_coverage(tmp_path):
 
 
 def test_half_area_chunks_preserve_deterministic_a0_for_limb_geometry(tmp_path):
-    chunks = tmp_path / "chunks"
+    chunks = tmp_path / "state" / "chunks"
     prefix = "planet_half_area_R50"
     _write_pickle(
         chunks / f"{prefix}_chunk_0_2.pkl",
@@ -101,24 +101,22 @@ def test_wavelength_axis_auto_requires_unique_channel_match():
 def test_dry_run_uses_new_names_and_refuses_existing_schema_product(tmp_path):
     prefix = "planet_instrument_R50"
     _write_pickle(
-        tmp_path / "chunks" / f"{prefix}_chunk_0_2.pkl",
+        tmp_path / "state" / "chunks" / f"{prefix}_chunk_0_2.pkl",
         _chunk_payload(0, 2),
     )
     _write_pickle(
-        tmp_path / "planet_spectroscopy_data.pkl",
+        tmp_path / "state" / "planet_spectroscopy_data.pkl",
         {
             "wavelengths_hr": np.array([1.1, 1.2]),
             "wavelengths_err_hr": np.array([0.01, 0.01]),
         },
     )
-    # A legacy product is intentionally ignored and remains protected by the
-    # distinct schema-v3 output suffix.
-    (tmp_path / f"{prefix}_limb_spectra.csv").write_text("legacy\n")
-
     summary = regenerate_limb_products(tmp_path, dry_run=True)
     expected = schema_v3_output_paths(tmp_path, prefix)
     assert summary["output_paths"] == expected
-    assert all("schema_v3" in path.name for path in expected.values())
+    assert expected['csv'].name == prefix+'_limbs.csv'
+    assert expected['outline'].parent.name == 'figures'
+    assert not any(path.suffix == '.pdf' for path in expected.values())
 
     expected["csv"].write_text("already generated\n")
     with pytest.raises(FileExistsError, match="Refusing to overwrite"):
@@ -128,11 +126,11 @@ def test_dry_run_uses_new_names_and_refuses_existing_schema_product(tmp_path):
 def test_full_regeneration_writes_schema_v3_once(tmp_path):
     prefix = "planet_R50"
     _write_pickle(
-        tmp_path / "chunks" / f"{prefix}_chunk_0_2.pkl",
+        tmp_path / "state" / "chunks" / f"{prefix}_chunk_0_2.pkl",
         _chunk_payload(0, 2, draws=5),
     )
     _write_pickle(
-        tmp_path / "planet_spectroscopy_data.pkl",
+        tmp_path / "state" / "planet_spectroscopy_data.pkl",
         {
             "wavelengths_hr": np.array([1.1, 1.2]),
             "wavelengths_err_hr": np.array([0.01, 0.01]),
@@ -153,3 +151,12 @@ def test_full_regeneration_writes_schema_v3_once(tmp_path):
 
     with pytest.raises(FileExistsError, match="Refusing to overwrite"):
         regenerate_limb_products(tmp_path)
+
+
+def test_multiple_stages_can_be_selected_by_grid(tmp_path):
+    for grid in ('R50', 'R100'):
+        _write_pickle(tmp_path/'state'/'chunks'/f'planet_{grid}_chunk_0_2.pkl', _chunk_payload(0, 2))
+    with pytest.raises(ValueError, match='--grid'):
+        discover_chunk_specs(tmp_path)
+    selected = discover_chunk_specs(tmp_path, grid='R100')
+    assert len(selected) == 1 and selected[0].prefix == 'planet_R100'

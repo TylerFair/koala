@@ -1,5 +1,7 @@
 """Read, normalize, and bin spectroscopy for white-light and channel fits."""
 
+from koala.console import debug, info
+
 import numpy as np
 import pandas as pd
 import jax
@@ -39,11 +41,11 @@ def apply_wavelength_masks(wave, wave_err, fluxcube, fluxcube_err, mask_ranges):
         in_mask_range = (wave >= wl_min) & (wave <= wl_max)
         keep_mask &= ~in_mask_range
 
-        print(f"  Masking wavelength range: {wl_min:.3f} - {wl_max:.3f} µm ({np.sum(in_mask_range)} pixels)")
+        info(f"  Masking wavelength range: {wl_min:.3f} - {wl_max:.3f} µm ({np.sum(in_mask_range)} pixels)")
 
     n_masked = np.sum(~keep_mask)
     if n_masked > 0:
-        print(f"  Total masked: {n_masked}/{len(wave)} wavelength pixels")
+        info(f"  Total masked: {n_masked}/{len(wave)} wavelength pixels")
         wave = wave[keep_mask]
         wave_err = wave_err[keep_mask]
         fluxcube = fluxcube[:, keep_mask]
@@ -71,7 +73,7 @@ def _finalize_spectra(wave, wave_err, bjd, fluxcube, fluxcube_err, instrument, o
     if ranges:
         keep = integration_keep_mask(len(bjd), ranges)
         dropped = int((~keep).sum())
-        print(f"Excluding {dropped} of {len(bjd)} integrations by index.")
+        info(f"Excluding {dropped} of {len(bjd)} integrations by index.")
         fluxcube, fluxcube_err = fluxcube[keep, :], fluxcube_err[keep, :]
         bjd = bjd[keep]
 
@@ -84,6 +86,11 @@ def _finalize_spectra(wave, wave_err, bjd, fluxcube, fluxcube_err, instrument, o
     keep = np.isfinite(wave)
     if data_range is not None:
         keep &= (wave >= data_range[0]) & (wave <= data_range[1])
+    if np.count_nonzero(~keep):
+        if (wl_min, wl_max) == data_range:
+            info(f'  Keeping {np.count_nonzero(keep)} columns between {wl_min:.2f} and {wl_max:.2f} µm (wavelength_filter)')
+        else:
+            info(f'Excluding {np.count_nonzero(~keep)} wavelength columns outside the instrument range.')
     ii = np.flatnonzero(keep)
     fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:, ii]
     wave, wave_err = wave[ii], wave_err[ii]
@@ -93,12 +100,14 @@ def _finalize_spectra(wave, wave_err, bjd, fluxcube, fluxcube_err, instrument, o
 
     if wl_min is not None and wl_max is not None:
         ii = np.where((wave >= wl_min) & (wave <= wl_max))[0]
+        if len(wave) != len(ii):
+            info(f'  Keeping {len(ii)} columns between {wl_min:.2f} and {wl_max:.2f} µm (wavelength_filter)')
         fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:, ii]
         wave, wave_err = wave[ii], wave_err[ii]
 
     if wavelength_masks is not None and len(wavelength_masks) > 0:
         label = f"NIRISS order {order}" if order is not None else instrument
-        print(f"Applying wavelength masks for {label}:")
+        debug(f"Applying wavelength masks for {label}:")
         wave, wave_err, fluxcube, fluxcube_err = apply_wavelength_masks(
             wave, wave_err, fluxcube, fluxcube_err, wavelength_masks
         )
@@ -233,7 +242,7 @@ def _filter_invalid_spectroscopic_integrations(time, flux, flux_err):
         )
         if not np.any(keep):
             raise ValueError(message + " No valid integrations remain.")
-        print(message + " Removing them globally from every wavelength channel.")
+        info(message + " Removing them globally from every wavelength channel.")
 
     return time[keep], flux[keep, :], flux_err[keep, :], keep
 
@@ -285,7 +294,7 @@ def _empty_low_resolution(n_time):
     Zero channels keep every downstream shape check valid, and the pipeline
     skips the low-resolution stage when it sees no ``low`` grid.
     """
-    print("No low-resolution grid configured; skipping low-resolution binning.")
+    debug("No low-resolution grid configured; skipping low-resolution binning.")
     empty_axis = np.zeros(0, dtype=float)
     empty_cube = np.zeros((0, int(n_time)), dtype=float)
     return empty_axis, empty_axis.copy(), empty_cube, empty_cube.copy()
@@ -330,7 +339,7 @@ def bin_spectroscopy_data(
                     "to be set in config!"
                 )
             if reference is not None:
-                print(f"Using reference wavelength grid for {level.upper()} resolution from: {reference}")
+                debug(f"Using reference wavelength grid for {level.upper()} resolution from: {reference}")
     # Binners use [wavelength, time]; readers supply [time, wavelength].
     flux = jnp.array((flux_unbinned * 1.0).T)
     error = jnp.array((flux_err_unbinned * 1.0).T)
@@ -525,7 +534,7 @@ def process_spectroscopy_data(
         | np.all(np.isnan(flux_unbinned), axis=0)
     )
     if np.any(invalid_wavelength):
-        print(
+        info(
             f"Removing {np.count_nonzero(invalid_wavelength)}/{wavelengths.size} "
             "non-science wavelength columns before integration validation."
         )
@@ -548,7 +557,7 @@ def process_spectroscopy_data(
 
     keep = time_keep_mask(time, exclude_times)
     if not np.all(keep):
-        print(f"Excluding {int((~keep).sum())} of {time.size} integrations by time.")
+        info(f"Excluding {int((~keep).sum())} of {time.size} integrations by time.")
         time = time[keep]
         flux_unbinned = flux_unbinned[keep, :]
         flux_err_unbinned = flux_err_unbinned[keep, :]

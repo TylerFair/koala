@@ -40,11 +40,11 @@ def test_corner_columns_select_and_order_scalar_sites():
     columns, labels = _corner_columns(_samples())
     assert len(columns) == len(labels) == 9
     assert labels[0].startswith("$t_0$")
-    assert "$-$ 59787 [d]" in labels[0]
+    assert "offset [s]" in labels[0]
     assert labels[1].startswith(r"$R_p/R_\star$")
     assert r"$u_1$" in labels and r"$u_2$" in labels
     assert all(np.isfinite(c).all() and np.std(c) > 0 for c in columns)
-    assert abs(np.median(columns[0]) - 0.05) < 1e-3
+    np.testing.assert_array_equal(columns[0], (_samples()['t0_0']-np.median(_samples()['t0_0']))*86400)
 
 
 def test_plot_whitelight_corner_writes_png(tmp_path):

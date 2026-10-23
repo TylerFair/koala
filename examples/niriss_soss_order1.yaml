@@ -1,34 +1,24 @@
-# WASP-39 b, NIRISS/SOSS order 1, with koala's default limb darkening (quadratic, wide
-# uniform priors on u1 + u2 and u1 - u2) and a linear baseline. This is the standard
-# starting point for a SOSS transit.
+# WASP-39 b with NIRISS/SOSS order 1: the example in "Your first fit".
+# Run from the top of the repository with: koala -c examples/niriss_soss_order1.yaml
 
 planet:
-  # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
   name: WASP-39
-  period: {value: 4.05528043, prior: fixed}      # days
-  duration: {value: 0.11693087, prior: log_uniform, low: 0.01, high: 1.0}    # days
-  t0: {value: 59787.055, prior: uniform, low: 59787.005, high: 59787.105}           # BMJD_TDB
-  b: {value: 0.4498, prior: uniform, low: 0.0, high: 1.5}
-  rprs: {value: 0.1457, prior: uniform, low: 0.01, high: 0.5}
+  period: {value: 4.05528043, prior: fixed}                                  # days
+  t0: {value: 59787.055, prior: uniform, low: 59787.005, high: 59787.105}    # BMJD_TDB
+  duration: {value: 0.117, prior: log_uniform, low: 0.01, high: 1.0}         # days
+  b: {value: 0.45, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.146, prior: uniform, low: 0.01, high: 0.5}
 
 stellar:
   teff: 5509
   logg: 4.22
   feh: 0.04
-  ld_model: "stagger"     # stellar models give the limb-darkening starting values
-  ld_data_path: "exotic_ld_data"  # downloaded automatically on first use
 
-instrument: 'NIRISS/SOSS'
+instrument: NIRISS/SOSS
 order: 1
 
-input_dir: 'examples/data'
-input_file: 'WASP-39_soss_binned8.fits'
-output_dir: 'results/WASP-39_SOSS_ORDER1'
+input_file: examples/data/WASP-39_soss_binned8.fits
+output_dir: results/WASP-39_SOSS_ORDER1
 
 resolution:
-  high: 100                          # constant resolving power; no grid file needed
-
-flags:
-  detrending_type: 'linear'
-
-host_device: "cpu"                    # portable default; use "gpu" for production
+  high: 100

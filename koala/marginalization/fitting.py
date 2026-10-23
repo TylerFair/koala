@@ -68,7 +68,8 @@ class SweepContext:
         return self._science_identity
 
     def data_path(self, fingerprint):
-        directory = self.workspace / "prepared_data"
+        from ..output_paths import OutputPaths
+        directory = Path(OutputPaths(self.workspace).state_dir) / "prepared_data"
         directory.mkdir(parents=True, exist_ok=True)
         return str(directory / f"{fingerprint}.pkl")
 

@@ -91,11 +91,11 @@ def test_failed_chunk_saves_sampler_audit_without_posterior(tmp_path, monkeypatc
             {'rors':jnp.array([.1])},1,output_dir=str(tmp_path),checkpoint_prefix='tiny',
             sampler_backend='independent_nuts',mcmc_kwargs={'num_chains':4},
             spectro_min_depth_ess=400)
-    audit = next((tmp_path/'chunks').glob('*chunk_0_1.diagnostics.json'))
+    audit = next((tmp_path/'state'/'chunks').glob('*chunk_0_1.diagnostics.json'))
     payload=json.loads(audit.read_text())
     assert [item['sampler'] for item in payload['sampler_gate_attempts']] == [
         'independent_nuts','independent_hmc','joint_nuts']
-    assert not list((tmp_path/'chunks').glob('*chunk_0_1.pkl'))
+    assert not list((tmp_path/'state'/'chunks').glob('*chunk_0_1.pkl'))
 
 
 @pytest.mark.parametrize('mode', ['uniform', 'gaussian'])
@@ -154,7 +154,7 @@ def test_sampler_fallback_can_continue_before_another_fresh_fit(tmp_path, monkey
     assert result.num_chains==4 and result.sampled_sites==('rors',)
     expected=(np.arange(1,2000,2)[:,None]*4+np.arange(4)).reshape(-1)
     np.testing.assert_array_equal(result['rors'],jnp.concatenate((first['rors'],extra['rors']))[expected])
-    path=next((tmp_path/'chunks').glob('*chunk_0_1.diagnostics.json'))
+    path=next((tmp_path/'state'/'chunks').glob('*chunk_0_1.diagnostics.json'))
     attempts=json.loads(path.read_text())['sampler_gate_attempts']
     assert [item['sampler'] for item in attempts]==[
         'independent_nuts','independent_hmc','independent_hmc']

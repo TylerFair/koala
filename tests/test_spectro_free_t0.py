@@ -115,17 +115,19 @@ def test_spherical_zero_shift_and_finite_timing_products(tmp_path):
     np.testing.assert_array_equal(table.dt0_s,0.)
     np.testing.assert_array_equal(table.t0,2460000.625)
     assert np.all(np.isfinite(table.to_numpy()))
-    prefix=str(tmp_path/'spectrum')
+    prefix=str(tmp_path/'test_R10')
     import pandas as pd
-    pd.DataFrame({'wavelength':[1.,2.]}).to_csv(prefix+'.csv', index=False)
+    pd.DataFrame({'wavelength':[1.,2.]}).to_csv(prefix+'_spectrum.csv', index=False)
     save_time_shift_products([1.,2.],[.1,.1],samples,prefix,geometry,responses=responses)
-    output=pd.read_csv(prefix+'.csv')
+    output=pd.read_csv(prefix+'_spectrum.csv')
     np.testing.assert_array_equal(output.time_shift_coefficient, 5000.)
     np.testing.assert_array_equal(output.d_dt0_dRL_s_per_Rstar, -5000.)
     assert set(('depth','depth_err','t0','t0_err_s','dt0_s','corr_depth_t0',
                 'time_shift_coefficient')) <= set(output)
-    assert (tmp_path/'spectrum_t0_spectrum.png').exists()
-    assert (tmp_path/'spectrum_t0_spectrum.pdf').exists()
+    assert (tmp_path/'figures'/'R10_timing.png').exists()
+    assert (tmp_path/'test_R10_timing.csv').exists()
+    assert (tmp_path/'test_R10_timing.json').exists()
+    assert not list(tmp_path.rglob('*.pdf'))
 
 
 def test_platon_coefficient_central_chord_and_orientation():

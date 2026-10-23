@@ -25,6 +25,8 @@ MINPACK result to its convergence tolerance (~1e-8).
 
 from __future__ import annotations
 
+from koala.console import debug, progress
+
 import functools
 import os
 
@@ -249,7 +251,7 @@ def fit_power2_batch(I_mu, mus, mu_min=POWER2_MU_MIN, chunk=8192):
 
 def build_power2_grid(combos, ranges, mode, ld_model, ld_data_path,
                       interpolate_type="trilinear", mu_min=POWER2_MU_MIN,
-                      ld_data_version="", log=print):
+                      ld_data_version="", log=debug):
     """Power-2 coefficients for every (stellar combination, bin).
 
     ``combos`` is an iterable of ``(M_H, Teff, logg)``; ``ranges`` is
@@ -276,7 +278,7 @@ def build_power2_grid(combos, ranges, mode, ld_model, ld_data_path,
     s_wvs, s_thp = _sensitivity(ld_data_path, mode, ld_data_version)
     node_I = {}
     mus_ref = None
-    for key, (mh, te, lg) in nodes.items():
+    for key, (mh, te, lg) in progress(nodes.items(), total=len(nodes), desc='Limb-darkening priors from stellar models'):
         wvs, mus, intens = _read_node(ld_model, ld_data_path, mh, te, lg,
                                       ld_data_version, remote)
         if mus_ref is None:

@@ -1,5 +1,6 @@
 """Resume-safe PSIS scores and model-marginalized transmission products."""
 from __future__ import annotations
+from koala.output_paths import OutputPaths
 
 import hashlib
 from functools import partial
@@ -177,7 +178,8 @@ def score_grid(manifest, output=None, *, stage_kind="high_resolution", method="s
         raise ValueError("Scoring requires nonempty unique model names.")
     output = Path(output).resolve() if output else manifest.parent / "marginalized"
     output.mkdir(parents=True, exist_ok=True)
-    cache_dir = output / "scores"
+    paths = OutputPaths(output)
+    cache_dir = Path(paths.state_dir) / "scores"
     cache_dir.mkdir(exist_ok=True)
     started = time.perf_counter()
     code = code_identity()
@@ -230,7 +232,7 @@ def score_grid(manifest, output=None, *, stage_kind="high_resolution", method="s
                   sample_semantics="joint spectrum" if pooling == "global" else "channel marginal samples",
                   geometry="conditional on each fitted white-light handoff unless joint geometry was enabled",
                   validation="pointwise PSIS assumes conditional independence of observed cadences")
-    (output / "scoring_diagnostics.json").write_text(json.dumps(report, indent=2))
+    Path(paths.state("scoring_diagnostics.json")).write_text(json.dumps(report, indent=2))
     if bad.any() and not allow_unreliable:
         raise ValueError(f"PSIS reliability gate failed: {report['psis_bad_points_per_model']}; "
                          "diagnostics saved. Refit/validate those observations or explicitly allow exploratory output.")
@@ -244,15 +246,18 @@ def score_grid(manifest, output=None, *, stage_kind="high_resolution", method="s
     if weight_draws is not None:
         arrays["weight_draws"] = weight_draws
     # Prepare both files before replacing a previous product.
-    temporary_csv = output / f".spectrum.{os.getpid()}.csv"
+    product_paths, grid = OutputPaths.from_stem(output / stage.meta["stage_label"].removesuffix("_"+stage_kind))
+    # A batched grid's stage label is a model name, which must not name the combined spectrum.
+    spectrum_path = Path(product_paths.table(grid, "spectrum") if grid else paths.table("marginalized", "spectrum"))
+    temporary_csv = spectrum_path.with_name(f".{spectrum_path.name}.{os.getpid()}.tmp")
     try:
         write_stacked_spectrum(temporary_csv, wavelength, summary, names, depths, weights)
-        _save_npz(output / "posterior.npz", **arrays)
-        temporary_csv.replace(output / "spectrum.csv")
+        _save_npz(Path(paths.state("posterior.npz")), **arrays)
+        temporary_csv.replace(spectrum_path)
     finally:
         temporary_csv.unlink(missing_ok=True)
     report.update(seed=seed, n_out=n_out, weight_diagnostics=weight_info,
                   total_seconds=time.perf_counter()-started,
                   exploratory=bool(bad.any()))
-    (output / "diagnostics.json").write_text(json.dumps(report, indent=2))
-    return output / "spectrum.csv"
+    Path(paths.state("diagnostics.json")).write_text(json.dumps(report, indent=2))
+    return spectrum_path

@@ -13,7 +13,7 @@ def test_emission_output_units_intervals_and_planet_labels(tmp_path):
     flux = np.arange(40, dtype=float).reshape(10, 2, 2) * 1e-6
     samples = {"eclipse_depth": flux, "phase_c1": 0.25 * flux, "phase_d1": 0.0 * flux}
     frame = save_surface_results([1., 2.], [.1, .1], samples, tmp_path / "spectrum.csv")
-    assert (tmp_path / "spectrum_emission.png").stat().st_size > 0
+    assert (tmp_path / "figures" / "spectrum_emission.png").stat().st_size > 0
     saved = pd.read_csv(tmp_path / "spectrum_emission.csv")
     assert len(frame) == len(saved) == 4
     row = saved[(saved.planet_index == 1) & (saved.wavelength == 2.)].iloc[0]
@@ -40,7 +40,7 @@ def test_spot_fit_writes_contrast_spectrum_without_emission(tmp_path):
     frame = pd.read_csv(tmp_path / "spot_stellar_spots.csv")
     np.testing.assert_allclose(frame.contrast, .3)
     np.testing.assert_allclose(frame.contrast_err_low, 0.)
-    assert (tmp_path / "spot_stellar_spots.png").stat().st_size > 0
+    assert (tmp_path / "figures" / "spot_stellar_spots.png").stat().st_size > 0
     assert not (tmp_path / "spot_emission.csv").exists()
 
 

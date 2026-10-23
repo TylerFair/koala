@@ -42,3 +42,15 @@ def pytest_collection_modifyitems(items):
             "test_flux", "test_flux_derivatives", "test_power2_vs_jaxoplanet"
         }:
             item.add_marker(pytest.mark.harmonica)
+
+
+@pytest.fixture
+def koala_caplog(caplog):
+    """Capture koala's own logger, which owns its stdout and file handlers."""
+    import logging
+    logger = logging.getLogger('koala')
+    logger.addHandler(caplog.handler)
+    try:
+        yield caplog
+    finally:
+        logger.removeHandler(caplog.handler)

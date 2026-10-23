@@ -5,6 +5,7 @@ Positive dt0 means a later transit. The trailing response multiplies
 Radii are in stellar-radius units; a visit has a free achromatic time offset.
 """
 from pathlib import Path
+from .output_paths import OutputPaths
 import json
 import numpy as np
 
@@ -98,8 +99,9 @@ def save_time_shift_products(wavelengths, wavelength_err, samples, prefix, geome
     import matplotlib.pyplot as plt
     from .artifacts import _atomic_dataframe_csv
     table = time_shift_table(wavelengths, wavelength_err, samples, geometry, responses=responses)
-    _atomic_dataframe_csv(table, prefix + '_time_shift.csv', index=False)
-    spectrum = pd.read_csv(prefix + '.csv', float_precision='round_trip')
+    paths, stage = OutputPaths.from_stem(prefix)
+    _atomic_dataframe_csv(table, paths.table(stage, 'timing'), index=False)
+    spectrum = pd.read_csv(paths.table(stage, 'spectrum'), float_precision='round_trip')
     columns = ('depth', 'depth_err', 't0', 't0_bjd', 't0_err_s', 'dt0_s',
                'corr_depth_t0', 'time_shift_coefficient',
                'd_dt0_dRL_s_per_Rstar', 'd_dt0_dRT_s_per_Rstar',
@@ -110,19 +112,26 @@ def save_time_shift_products(wavelengths, wavelength_err, samples, prefix, geome
         suffix = '' if table.planet.nunique() == 1 else f'{planet:02d}'
         for column in columns:
             spectrum[column + suffix] = part[column].to_numpy()
-    _atomic_dataframe_csv(spectrum, prefix + '.csv', index=False)
-    fig, ax = plt.subplots(figsize=(9, 4))
+    _atomic_dataframe_csv(spectrum, paths.table(stage, 'spectrum'), index=False)
+    from .plotting_style import apply_publication_style, style_axis, save_figure, figure_title, accent_color_for_label
+    apply_publication_style()
+    fig, axes = plt.subplots(2, 1, figsize=(9, 6.5), sharex=True, constrained_layout=True)
     for planet, part in table.groupby('planet', sort=True):
-        ax.errorbar(part.wavelength, part.dt0_s, yerr=part.t0_err_s,
-                    fmt='.', capsize=2, label=f'Planet {planet + 1}')
-    ax.axhline(0, color='0.5', lw=.8)
-    ax.set(xlabel='Wavelength [micron]', ylabel=r'$t_0 - t_{0,white}$ [s]')
+        color = accent_color_for_label(paths.prefix)
+        axes[0].errorbar(part.wavelength, part.depth*1e6, yerr=part.depth_err*1e6,
+                         fmt='o', ms=4, color=color, mfc='white', label=f'Planet {planet + 1}')
+        axes[1].errorbar(part.wavelength, part.dt0_s, yerr=part.t0_err_s,
+                         fmt='o', ms=4, color=color, mfc='white')
+    axes[0].set_ylabel('Depth [ppm]')
+    axes[1].axhline(0, color='.5', lw=.8)
+    axes[1].set(xlabel='Wavelength [µm]', ylabel=r'$t_0 - t_{0,white}$ [s]')
     if table.planet.nunique() > 1:
-        ax.legend()
-    fig.tight_layout()
-    for extension in ('png', 'pdf'):
-        fig.savefig(prefix + '_t0_spectrum.' + extension, dpi=180)
-    plt.close(fig)
+        axes[0].legend(fontsize=10)
+    for ax in axes:
+        style_axis(ax)
+    from .diagnostic_figures import grid_title
+    figure_title(axes[0], paths.prefix, grid_title(stage) + ' | Timing')
+    save_figure(fig, paths.figure(stage or paths.prefix, 'timing'))
     metadata = dict(
         time_scale='BJD_TDB', uncertainty='central 68 percent interval half-width',
         reference_t0_bjd=(np.atleast_1d(geometry.T0_BASE) + MJD_OFFSET).tolist(),
@@ -147,4 +156,4 @@ def save_time_shift_products(wavelengths, wavelength_err, samples, prefix, geome
         radius_response_check_metric='relative Euclidean norm over retained integrations',
         response_seconds_per_bin=response_seconds,
     )
-    Path(prefix + '_time_shift.json').write_text(json.dumps(metadata, indent=2) + '\n')
+    Path(paths.table(stage, 'timing', 'json')).write_text(json.dumps(metadata, indent=2) + '\n')

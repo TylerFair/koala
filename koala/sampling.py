@@ -1,5 +1,7 @@
 """Sampling helpers."""
 
+from koala.console import debug, info, quiet_sampling, sampling_options, channel_batches, single_batch_progress, sampling_history_notes
+
 import os
 import dataclasses
 import json
@@ -47,7 +49,7 @@ def _build_numpyro_mcmc(model, init_params, nuts_kwargs, mcmc_kwargs):
         "progress_bar": True,
         "jit_model_args": True,
     }
-    mcmc_defaults.update(mcmc_kwargs)
+    mcmc_defaults.update(sampling_options(mcmc_kwargs))
     return (
         numpyro.infer.MCMC(numpyro.infer.NUTS(model, **nuts_defaults), **mcmc_defaults),
         nuts_defaults,
@@ -629,6 +631,7 @@ def _sample_independent_chunk(
             build_independent_nuts_runner as build_runner,
             get_samples_independent as sample,
         )
+    mcmc_kwargs = sampling_options(mcmc_kwargs)
     runner_key = (backend, int(width), varying)
     runner = cache.get(runner_key)
     if runner is None:
@@ -704,11 +707,13 @@ def _continue_independent_to_gate(backend, runner, samples, diagnostics_path,
         from models.independent_nuts import IndependentNUTSDiagnostics as Diagnostics
         from models.independent_nuts import _save_diagnostics as save_diagnostics
     for block in range(1, max_extra_blocks + 1):
-        print(f'  {label} - continuing warmed {backend} chains (block {block}); '
+        debug(f'{failed.size} wavelength channel{"s" if failed.size != 1 else ""} '
+             f'need{"" if failed.size != 1 else "s"} extra draws (extension {block}).')
+        debug(f'  {label} - continuing warmed {backend} chains (block {block}); '
               f'failed local lanes {failed.tolist()}.')
         extra, raw = runner.continue_raw()
         if bool(jnp.any(raw['diverging'])):
-            print(f'  {label} - continuation diverged; changing sampler.')
+            debug(f'  {label} - continuation diverged; changing sampler.')
             break
         history = PosteriorSamples(
             {name:jnp.concatenate((history[name], extra[name]), axis=0) for name in history},
@@ -739,6 +744,7 @@ def _continue_independent_to_gate(backend, runner, samples, diagnostics_path,
     return samples, failed, attempts
 
 
+@quiet_sampling()
 def get_samples_chunked(
     model, key, t, yerr, indiv_y, init_params, chunk_size, nuts_kwargs=None, mcmc_kwargs=None,
     chunk_mode='serial', parallel_job_count=None, parallel_job_index=None, output_dir=None,
@@ -766,7 +772,7 @@ def get_samples_chunked(
         # the configured width only samples dead lanes.  Shrink to the real
         # channel count; multi-chunk stages keep the fixed width so the last
         # partial chunk reuses the compiled runner instead of recompiling.
-        print(
+        debug(
             f"Chunk width {chunk_size} exceeds the {num_lcs} channels in this "
             f"stage; using a resident width of {num_lcs} (no padded lanes)."
         )
@@ -781,7 +787,7 @@ def get_samples_chunked(
             "chunk_mode must be one of {'serial', 'parallel', 'combine'}; "
             f"received {chunk_mode!r}."
         )
-    print(
+    debug(
         f"Running chunked MCMC: {num_lcs} channels in blocks of {chunk_size} "
         f"(mode={chunk_mode})"
     )
@@ -790,7 +796,8 @@ def get_samples_chunked(
     use_checkpoints = (output_dir is not None and checkpoint_prefix is not None)
     checkpoint_fingerprint = None
     if use_checkpoints:
-        checkpoint_dir = os.path.join(output_dir, 'chunks')
+        from .output_paths import OutputPaths
+        checkpoint_dir = str(OutputPaths(output_dir).chunks_dir)
         os.makedirs(checkpoint_dir, exist_ok=True)
         logical_checkpoint_prefix = checkpoint_prefix
         checkpoint_fingerprint = _chunk_checkpoint_fingerprint(
@@ -809,8 +816,8 @@ def get_samples_chunked(
             checkpoint_dir, logical_checkpoint_prefix, checkpoint_prefix,
             checkpoint_fingerprint, checkpoint_signature,
         )
-        print(f"Checkpoint directory: {checkpoint_dir}")
-        print(f'Checkpoint fingerprint: {checkpoint_fingerprint[:12]} ({manifest_path})')
+        debug(f"Checkpoint directory: {checkpoint_dir}")
+        debug(f'Checkpoint fingerprint: {checkpoint_fingerprint[:12]} ({manifest_path})')
     elif chunk_mode != "serial":
         raise ValueError("chunk_mode='parallel' or 'combine' requires output_dir and checkpoint_prefix.")
 
@@ -837,12 +844,12 @@ def get_samples_chunked(
             idx for idx in range(len(all_chunk_ranges))
             if idx % parallel_job_count == parallel_job_index
         ]
-        print(
+        debug(
             f"Parallel chunk job {parallel_job_index + 1}/{parallel_job_count} "
             f"assigned chunk indices {target_chunk_indices}"
         )
         if not target_chunk_indices:
-            print("No chunks assigned to this job; exiting without computation.")
+            debug("No chunks assigned to this job; exiting without computation.")
             return None
     else:
         target_chunk_indices = list(range(len(all_chunk_ranges)))
@@ -851,7 +858,8 @@ def get_samples_chunked(
         missing = []
         corrupt = []
         samples_chunks = []
-        for start, end in all_chunk_ranges:
+        for batch_index in channel_batches(list(range(len(all_chunk_ranges))), all_chunk_ranges):
+            start, end = all_chunk_ranges[batch_index]
             chunk_file = _chunk_checkpoint_path(checkpoint_dir, checkpoint_prefix, start, end)
             if not os.path.exists(chunk_file):
                 missing.append((start, end))
@@ -873,9 +881,9 @@ def get_samples_chunked(
                     for start, end, error in corrupt
                 )
             )
-        print(f"\nConcatenating {len(samples_chunks)} chunks...")
+        debug(f"\nConcatenating {len(samples_chunks)} chunks...")
         samples = _concatenate_chunk_samples(samples_chunks)
-        print(f"All chunks complete! Final shape: {list(samples.values())[0].shape}")
+        debug(f"All chunks complete! Final shape: {list(samples.values())[0].shape}")
         return samples
 
     samples_chunks = []
@@ -897,7 +905,11 @@ def get_samples_chunked(
     # resumed, and array-parallel execution assign exactly the same distinct
     # key to a given chunk, independent of which earlier checkpoints exist.
     base_key = key
-    for chunk_idx in target_chunk_indices:
+    console_failures = []
+    restored_channels = 0
+    extra_draws_channels = 0
+    refitted_channels = 0
+    for chunk_idx in channel_batches(target_chunk_indices, all_chunk_ranges):
         start, end = all_chunk_ranges[chunk_idx]
         sl = slice(start, end)
 
@@ -922,21 +934,37 @@ def get_samples_chunked(
         # Check if this chunk already exists
         if use_checkpoints:
             if os.path.exists(chunk_file):
-                print(f"  chunk {start}:{end} - LOADING from checkpoint")
+                debug(f"  chunk {start}:{end} - LOADING from checkpoint")
                 try:
                     samples_chunk = _load_chunk_samples(chunk_file)
                 except (OSError, EOFError, pickle.UnpicklingError, ValueError) as error:
-                    print(
+                    info(f'Previous samples for channels {start + 1} to {end} could not be read; refitting.')
+                    debug(
                         f"  chunk {start}:{end} - checkpoint unreadable "
                         f"({type(error).__name__}); recomputing atomically"
                     )
                 else:
+                    loaded_failed, _ = _spectro_failed_lanes(samples_chunk,
+                        os.path.splitext(chunk_file)[0] + '.diagnostics.json',
+                        spectro_min_depth_ess, spectro_max_divergences,
+                        surface_science_sites=getattr(model, 'surface_science_sites', None))
+                    console_failures.extend(start + int(i) for i in loaded_failed)
+                    try:
+                        with open(os.path.splitext(chunk_file)[0] + '.diagnostics.json') as stream:
+                            history = json.load(stream).get('sampler_gate_attempts', [])
+                    except (OSError, ValueError):
+                        history = []
+                    extra_count, refit_count = sampling_history_notes(
+                        history, end - start, spectro_min_depth_ess, spectro_max_divergences)
+                    extra_draws_channels += extra_count
+                    refitted_channels += refit_count
+                    restored_channels += end - start
                     samples_chunks.append(samples_chunk)
                     continue  # Skip computation for this chunk
 
         # Compute this chunk
         key_chunk = jax.random.fold_in(base_key, chunk_idx)
-        print(f"  chunk {start}:{end} - COMPUTING ({end - start} channels)")
+        debug(f"  chunk {start}:{end} - COMPUTING ({end - start} channels)")
         diagnostics_path = (
             os.path.splitext(chunk_file)[0] + ".diagnostics.json"
             if use_checkpoints else None
@@ -964,7 +992,7 @@ def get_samples_chunked(
                     )
                     joint_mcmc_runners[resident_width] = runner
                 else:
-                    print(
+                    debug(
                         f"  chunk {start}:{end} - reusing compiled "
                         f"joint-NUTS runner (width {resident_width})"
                     )
@@ -1003,7 +1031,8 @@ def get_samples_chunked(
                 if not failed.size:
                     break
                 selected = failed.copy()
-                print(
+                debug(f'{len(selected)} wavelength channels need a fallback sampler.')
+                debug(
                     f"  chunk {start}:{end} - gate failed in local lanes "
                     f"{selected.tolist()}; re-running only those lanes with "
                     f"{fallback_backend}."
@@ -1165,7 +1194,7 @@ def get_samples_chunked(
                                 adaptive_runner
                             )
                         else:
-                            print(
+                            debug(
                                 f"  chunk {start}:{end} - reusing compiled "
                                 f"adaptive joint-NUTS runner "
                                 f"(resident width {adaptive_width}, batch "
@@ -1253,6 +1282,10 @@ def get_samples_chunked(
                 for lane in selected:
                     sampler_used[int(lane)] = fallback_backend
                 failed = selected[fallback_failed]
+        extra_count, refit_count = sampling_history_notes(
+            gate_attempts, end - start, spectro_min_depth_ess, spectro_max_divergences)
+        extra_draws_channels += extra_count
+        refitted_channels += refit_count
         samples_chunk = _SamplerSamples(samples_chunk, sampler_used=sampler_used,
             num_chains=int(dict(mcmc_kwargs or {}).get("num_chains", 1)),
             sampled_sites=getattr(samples_chunk, "sampled_sites", None))
@@ -1270,12 +1303,18 @@ def get_samples_chunked(
                 json.dump(diagnostic_payload, stream, indent=2, sort_keys=True)
             os.replace(temporary, diagnostics_path)
         if sampler_backend in {'independent_nuts', 'independent_hmc'} and failed.size:
+            info(f'{len(failed)} wavelength channels failed the convergence checks. See koala.log and the diagnostics files.')
             # Retain the complete audit even when the gate prevents saving a
             # posterior checkpoint or starting downstream stages.
             raise RuntimeError(
                 f"chunk {start}:{end} failed the spectroscopic ESS/divergence "
                 f"gate after adaptive NUTS in local lanes {failed.tolist()}"
             )
+        if sampler_backend == 'joint_nuts':
+            observed_failed, _ = _spectro_failed_lanes(samples_chunk, diagnostics_path,
+                spectro_min_depth_ess, spectro_max_divergences,
+                surface_science_sites=getattr(model, 'surface_science_sites', None))
+            console_failures.extend(start + int(i) for i in observed_failed)
         samples_chunk = jax.device_get(samples_chunk)
         samples_chunks.append(samples_chunk)
 
@@ -1292,7 +1331,7 @@ def get_samples_chunked(
                      'sampled_sites': samples_chunk.sampled_sites}, f
                 )
             os.replace(temporary_chunk, chunk_file)
-            print(f"  chunk {start}:{end} - SAVED checkpoint")
+            debug(f"  chunk {start}:{end} - SAVED checkpoint")
 
     if chunk_mode == "parallel":
         existing = [
@@ -1300,19 +1339,26 @@ def get_samples_chunked(
             for start, end in all_chunk_ranges
         ]
         done = sum(existing)
-        print(
+        debug(
             f"Parallel chunk job complete: {done}/{len(all_chunk_ranges)} checkpoint files present. "
             "Run the compatibility combine step after all chunks are finished."
         )
         return None
 
     # Concatenate all chunks
-    print(f"\nConcatenating {len(samples_chunks)} chunks...")
+    debug(f"\nConcatenating {len(samples_chunks)} chunks...")
     samples = _concatenate_chunk_samples(samples_chunks)
-    print(f"All chunks complete! Final shape: {list(samples.values())[0].shape}")
+    samples.console_failed_indices = console_failures
+    samples.console_extra_draws = extra_draws_channels
+    samples.console_refitted = refitted_channels
+    if restored_channels:
+        info(f'Reusing previous spectroscopy samples for {restored_channels} wavelength channels.')
+    debug(f"All chunks complete! Final shape: {list(samples.values())[0].shape}")
     return samples
 
 
+@quiet_sampling()
+@single_batch_progress
 def _run_sampling_stage(
     model,
     key,
@@ -1426,7 +1472,7 @@ def _run_sampling_stage(
             indiv_y,
             init_params,
             nuts_kwargs=nuts_kwargs,
-            mcmc_kwargs=mcmc_kwargs,
+            mcmc_kwargs=sampling_options(mcmc_kwargs),
             lane_width=int(indiv_y.shape[0]),
             channel_varying_kwargs=tuple(
                 (name for name in channel_varying_kwargs if name in model_kwargs),

@@ -1,6 +1,11 @@
 """Outputs helpers."""
 
+from .output_paths import OutputPaths
+
+from koala.console import debug, info
+
 import json
+import os
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -197,7 +202,7 @@ def save_whitelight_timeseries(time, flux, flux_err, bestfit_model, output_csv,
 
     df = pd.DataFrame(data)
     df.to_csv(output_csv, index=False)
-    print(f"Saved white-light time series to {output_csv}")
+    debug(f"Saved white-light time series to {output_csv}")
 
 
 def _save_mcmc_diagnostics(
@@ -311,7 +316,7 @@ def save_results(wavelengths,wavelength_err,  samples, csv_filename):
         frame = pd.DataFrame(np.column_stack(output_cols), columns=header_cols[:-1])
         frame["sampler_used"] = sampler_used
         _atomic_dataframe_csv(frame, csv_filename, index=False)
-    print(f"Transmission spectroscopy data saved to {csv_filename}")
+    info(f"Spectrum: {os.path.normpath(csv_filename)}")
 
 
 def summarize_joint_geometry(samples, joint_geometry):
@@ -371,17 +376,18 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
                                total_error_fit=None, gp_trend=None, spot_trend=None, jump_trend=None,
                                joint_geometry=None):
     n_wavelengths = len(wavelengths)
-    print(f"Saving detailed fit results to {output_prefix}_*.csv")
+    debug(f"Saving detailed fit results to {output_prefix}_*.csv")
     param_rows = []
     shared_columns = {}
     if joint_geometry:
         shared_columns, joint_rows = summarize_joint_geometry(samples, joint_geometry)
         joint_df = pd.DataFrame(joint_rows)
-        joint_path = f"{output_prefix}_joint_geometry.csv"
+        paths, stage = OutputPaths.from_stem(output_prefix)
+        joint_path = paths.table(stage, "joint_geometry")
         joint_df.to_csv(joint_path, index=False)
-        print(f"Saved joint geometry posterior to {joint_path}")
+        debug(f"Saved joint geometry posterior to {joint_path}")
         for entry in joint_rows:
-            print(
+            debug(
                 f"  joint {entry['parameter']}[{entry['planet']}] = "
                 f"{entry['median']:.6f} +/- {entry['std']:.6f} "
                 f"(white light {entry['whitelight_median']:.6f} +/- "
@@ -463,10 +469,12 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
         param_rows.append(row)
 
     params_df = pd.DataFrame(param_rows)
-    params_df.to_csv(f"{output_prefix}_bestfit_params.csv", index=False)
+    paths, stage = OutputPaths.from_stem(output_prefix)
+    params_df.to_csv(paths.table(stage, "params"), index=False)
     outlier_indices = np.flatnonzero(depth_error_ratios > 5.0)
     if outlier_indices.size:
-        print(
+        info('Some depth uncertainties exceed five times the channel median; see the detailed fit results.')
+        debug(
             "WARNING: depth uncertainties exceed 5x the channel median at "
             f"channel indices {outlier_indices.tolist()}."
         )
@@ -477,13 +485,8 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
     wavelengths = np.asarray(wavelengths)
     wavelengths_err = np.asarray(wavelengths_err)
 
-    meta_path = f"{output_prefix}_wavelengths.csv"
-    meta_df = pd.DataFrame(
-        {'wavelength_center': wavelengths, 'wavelength_err': wavelengths_err},
-    )
-    meta_df.to_csv(meta_path, index=False)
-
-    wide_path = f"{output_prefix}_lightcurves_wide.csv"
+    # flux_000 and flux_err_000 correspond to row 0 of the spectrum table.
+    wide_path = paths.table(stage, "lightcurves")
     columns = ["time"]
     data_cols = [time]
     for i in range(n_wavelengths):

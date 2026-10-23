@@ -443,7 +443,8 @@ def test_corner_plot_shows_a_sampled_period_first():
         "rors_0": 0.1 + rng.normal(0, 1e-3, 300),
     }
     columns, labels = _corner_columns(samples)
-    assert labels[0] == r"$P$ [d]"
+    assert labels[0].startswith(r"$t_0$")
+    assert labels[2] == r"$P$ [d]"
     assert len(columns) == 3
 
 

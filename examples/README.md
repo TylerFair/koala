@@ -1,49 +1,29 @@
 # Examples
 
-Start with `niriss_soss_order1.yaml`.
-It includes a complete fit to the bundled WASP-39 b observation and uses numeric $R=100$ bins, so you don't need a separate wavelength-grid file:
+These are configuration files to start from.
+Run them from the top of the repository, for example:
 
 ```bash
-cp examples/niriss_soss_order1.yaml my_transit.yaml
-# edit the data paths and target parameters
-koala -c my_transit.yaml
-# Equivalent: python -m koala -c my_transit.yaml
+koala -c examples/niriss_soss_order1.yaml
 ```
 
-The SOSS example reads `data/WASP-39_soss_binned8.fits` and downloads the ExoTiC-LD files it needs on first use.
-It uses the default quadratic limb darkening with uniform priors on the sum and difference of the coefficients.
-For the other observed targets, supply your own exoTEDRF, SPARTA, or Eureka! extraction.
-Set `path`, `input_dir`, `input_file`, and `stellar.ld_data_path` to your local copies.
-The input format is detected automatically.
-The eclipse, phase-curve, and stellar-spot examples have separate instructions for generating synthetic data.
+The WASP-39 b examples use the NIRISS/SOSS observation in `data/`, so they run as they are:
 
-Choose the example closest to your observation:
+- `niriss_soss_order1.yaml` is the fit in [Your first fit](https://koala-jwst.readthedocs.io/en/latest/quickstart.html).
+- `joint_soss_orders.yaml` fits one orbit to both SOSS orders (with `joint_soss_order1.yaml` and `joint_soss_order2.yaml`), as in the [both-orders case study](https://koala-jwst.readthedocs.io/en/latest/case_studies/transmission_soss.html).
 
-- `niriss_soss_order1.yaml` fits a SOSS order-1 transit with a linear trend.
-- `nirspec_g395m.yaml` selects a NIRSpec detector and masks an integration interval.
-- `nirspec_g395h.yaml` fits G395H/NRS1 with a quadratic baseline.
-- `nirspec_prism.yaml` fits native-grid PRISM with an exponential ramp and small GPU batches.
-- The [Harmonica case study](../docs/case_studies/harmonica.md) fits an asymmetric planetary boundary.
-- `limb_darkening_stack.yaml` compares limb-darkening choices for the same observation.
-- `eclipse.yaml` fits a synthetic rocky-planet MIRI/LRS eclipse.
-- `phase_curve.yaml` fits a generated thermal phase curve.
-- `stellar_spots.yaml` fits a generated transit with rotating Starry spots.
-- `plot_spectrum.py` reads and plots a spectrum CSV.
+The eclipse, phase-curve and spotted-star examples use generated data, made with `python tools/example_phase_curves.py eclipse` (or `phase_curve`, or `stellar_spots`):
 
-The YAML files specify the dataset and scientific choices.
-They generally keep the sampler defaults, with explicit overrides where the example needs them.
-Copy the closest example and change the settings your observation requires.
+- `eclipse.yaml` is a synthetic MIRI/LRS eclipse of a rocky planet.
+- `phase_curve.yaml` is a synthetic NIRSpec/G395M phase curve.
+- `stellar_spots.yaml` is a transit across a rotating spotted star.
 
-To fit the initial eight-model grid with white light and high resolution, use:
+The others are set up for real observations whose extracted spectra aren't included, so you'll need to point `path`, `input_dir` and `input_file` at your own:
 
-```bash
-JAX_ENABLE_X64=1 python -m koala.marginalization run my_transit.yaml \
-  --workspace analysis/my_transit_grid --execution batched --method stacking
-```
+- `nirspec_g395h.yaml`: WASP-121 b with G395H, a quadratic trend and power-2 limb darkening with stellar-model priors.
+- `nirspec_g395m.yaml`: HAT-P-18 b with G395M, leaving out a range of integrations.
+- `nirspec_prism.yaml`: WASP-6 b with PRISM at the native resolution and an exponential ramp.
+- `nircam_f322w2.yaml`: HAT-P-18 b with the NIRCam F322W2 grism.
+- `limb_darkening_stack.yaml`: a list of limb-darkening models to combine, for the [model stacking case study](https://koala-jwst.readthedocs.io/en/latest/case_studies/model_stacking.html).
 
-The [combining models tutorial](../docs/tutorials/combining_models.md) explains the comparison.
-The [model-grid reference](../docs/reference/model_marginalization.md) describes supported models, caching, weights, and diagnostic checks.
-
-For a complete analysis, follow the [SOSS case study](../docs/case_studies/transmission_soss.md).
-The tutorials cover [limb darkening](../docs/tutorials/limb_darkening.md) and [eclipses, phase curves, and stellar spots](../docs/tutorials/eclipses_and_phase_curves.md).
-The [configuration reference](../docs/configuration.md) lists the available settings.
+`plot_spectrum.py` reads a spectrum CSV and plots it.

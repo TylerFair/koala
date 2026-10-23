@@ -116,7 +116,7 @@ def test_variant_paths_resolve_relative_to_manifest(tmp_path):
 
 
 def _write_family(output, prefix, ranges, *, stage_kind, value):
-    chunks = output / "chunks"
+    chunks = output / "state" / "chunks"
     chunks.mkdir(parents=True, exist_ok=True)
     (chunks / f"{prefix}.manifest.json").write_text(
         json.dumps({"checkpoint_signature": {"stage": stage_kind}}),
@@ -179,7 +179,7 @@ def test_load_chunks_rejects_stale_incomplete_or_ambiguous_family(tmp_path):
     with pytest.raises(ValueError, match="Incomplete checkpoint families"):
         _load_chunks(tmp_path, stage)
 
-    for path in (tmp_path / "chunks").glob("target_stale*"):
+    for path in (tmp_path / "state" / "chunks").glob("target_stale*"):
         path.unlink()
     _write_family(
         tmp_path, "target_other", [(0, 3)], stage_kind="high_resolution", value=3

@@ -188,7 +188,7 @@ def sample_power2_coefficients(mean, sigma, mode, *, shape=(), decorrelated=Fals
         else:
             # Uniform in the Maxted coordinates (h1, h2) = (I(1/2), I(1/2) - I(0)) on 0 < h1 < 1,
             # 0 < h2 < min(1, h1 + 0.5): c < 1.5 and any alpha > 0. A flat (c, alpha) box truncated alpha at 1 and
-            # biased native depths (HATS-6 injection-recovery, 2026-10-07); see docs/tutorials/limb_darkening.md.
+            # biased native depths (HATS-6 injection-recovery, 2026-10-07); see docs/guide/limb_darkening.md.
             prior = Power2MaxtedUniform(batch_shape=tuple(shape))
         if maxted_smooth and mode in {'gaussian', 'uniform'}:
             transform = power2_smooth_transform(mode)

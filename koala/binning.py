@@ -8,6 +8,8 @@ errors, which inflated the errors of bins made mostly of edge pixels.) Pixel
 binning uses Koala's wavelength-first layout, matching bin_at_resolution.
 """
 
+from koala.console import debug, info
+
 import numpy as np
 
 
@@ -164,7 +166,7 @@ def bin_at_resolution(wave, flux, flux_err, res, method='sum'):
     if res > average_input_res:
         raise ValueError('You are trying to bin at a higher resolution than the input.')
     else:
-        print('Binning from an average resolution of R={:.0f} to R={}'
+        debug('Binning from an average resolution of R={:.0f} to R={}'
                    .format(average_input_res, res))
 
     # Create binned wavelength axis at resolution res.

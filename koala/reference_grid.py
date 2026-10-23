@@ -9,13 +9,15 @@ Usage:
     from .reference_grid import load_reference_grid, bin_to_reference_grid
 
     # Load reference grid from PRISM native fit
-    wavelengths, wavelength_errs = load_reference_grid('prism_native_bestfit_params.csv')
+    wavelengths, wavelength_errs = load_reference_grid('prism_native_params.csv')
 
     # Bin NIRISS data to match PRISM grid
     wl_binned, wl_err_binned, flux_binned, err_binned = bin_to_reference_grid(
         niriss_wavelengths, niriss_flux, niriss_err, wavelengths, wavelength_errs
     )
 """
+
+from koala.console import debug, info
 
 import numpy as np
 import pandas as pd
@@ -24,12 +26,12 @@ from koala.binning import bin_at_bins
 
 def load_reference_grid(reference_params_csv):
     """
-    Load wavelength grid from a reference fit's bestfit_params.csv file.
+    Load wavelength grid from a reference fit's params.csv file.
 
     Parameters
     ----------
     reference_params_csv : str
-        Path to the reference bestfit_params.csv file (e.g., from NIRSpec/PRISM native fit)
+        Path to the reference params.csv file (e.g., from NIRSpec/PRISM native fit)
 
     Returns
     -------
@@ -42,9 +44,9 @@ def load_reference_grid(reference_params_csv):
     wavelengths = df['wavelength'].values
     wavelength_errs = df['wavelength_err'].values
 
-    print(f"Loaded reference grid: {len(wavelengths)} bins")
-    print(f"  Wavelength range: {wavelengths.min():.4f} - {wavelengths.max():.4f} μm")
-    print(f"  Median resolution: R ~ {np.median(wavelengths / (2 * wavelength_errs)):.0f}")
+    debug(f"Loaded reference grid: {len(wavelengths)} bins")
+    debug(f"  Wavelength range: {wavelengths.min():.4f} - {wavelengths.max():.4f} μm")
+    debug(f"  Median resolution: R ~ {np.median(wavelengths / (2 * wavelength_errs)):.0f}")
 
     return wavelengths, wavelength_errs
 
@@ -120,8 +122,8 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
         ref_wave_low = ref_wave_low[mask]
         ref_wave_up = ref_wave_up[mask]
 
-        print(f"Trimming to overlap region: {overlap_min:.4f} - {overlap_max:.4f} μm")
-        print(f"  Output bins: {len(ref_wavelengths)}")
+        debug(f"Trimming to overlap region: {overlap_min:.4f} - {overlap_max:.4f} μm")
+        debug(f"  Output bins: {len(ref_wavelengths)}")
 
     # Check if there's any overlap
     if len(ref_wavelengths) == 0:
@@ -134,7 +136,7 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
     input_flux_2d = input_flux.T
     input_err_2d = input_err.T
 
-    print(f"Binning {len(input_wavelengths)} input bins to {len(ref_wavelengths)} reference bins...")
+    debug(f"Binning {len(input_wavelengths)} input bins to {len(ref_wavelengths)} reference bins...")
 
     # Call bin_at_bins
     # Call bin_at_bins for flux (we'll recalculate errors properly)
@@ -167,24 +169,24 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
         binned_flux = binned_flux.T
         binned_err = binned_err.T
 
-    print(f"\n=== AFTER AVERAGING ===")
-    print(f"binned_flux range: {np.min(binned_flux):.1f} - {np.max(binned_flux):.1f}")
-    print(f"binned_err range: {np.min(binned_err):.6f} - {np.max(binned_err):.6f}")
-    print(f"binned_err / binned_flux: {np.median(binned_err / binned_flux):.6f}")
-    print(f"Binning complete!")
-    print(f"  Output shape: {binned_flux.shape}")
+    debug(f"\n=== AFTER AVERAGING ===")
+    debug(f"binned_flux range: {np.min(binned_flux):.1f} - {np.max(binned_flux):.1f}")
+    debug(f"binned_err range: {np.min(binned_err):.6f} - {np.max(binned_err):.6f}")
+    debug(f"binned_err / binned_flux: {np.median(binned_err / binned_flux):.6f}")
+    debug(f"Binning complete!")
+    debug(f"  Output shape: {binned_flux.shape}")
     # Filter out bins with no valid data
     valid_mask = (np.nansum(binned_flux, axis=1) > 0) & (np.nansum(binned_err, axis=1) > 0)
     n_removed = np.sum(~valid_mask)
     if n_removed > 0:
-        print(f"  Removing {n_removed} bins with no valid data")
+        info(f"  Removing {n_removed} bins with no valid data")
         wavelengths_out = wavelengths_out[valid_mask]
         wavelength_errs_out = wavelength_errs_out[valid_mask]
         binned_flux = binned_flux[valid_mask]
         binned_err = binned_err[valid_mask]
 
-    print(f"Binning complete!")
-    print(f"  Output shape: {binned_flux.shape}")
+    debug(f"Binning complete!")
+    debug(f"  Output shape: {binned_flux.shape}")
 
     return wavelengths_out, wavelength_errs_out, binned_flux, binned_err
 
@@ -202,7 +204,7 @@ def bin_to_reference_grid_simple(input_wavelengths, input_flux, input_err,
     input_err : ndarray
         Input flux errors
     reference_params_csv : str
-        Path to reference bestfit_params.csv file
+        Path to reference params.csv file
     **kwargs : dict
         Additional arguments passed to bin_to_reference_grid()
 
@@ -238,20 +240,20 @@ Example:
   # Bin to match PRISM native grid
   wl_out, wl_err_out, flux_out, err_out = bin_to_reference_grid_simple(
       wavelengths, flux, err,
-      'output/planet_NIRSPEC_PRISM_Rnative_bestfit_params.csv'
+      'output/planet_NIRSPEC_PRISM_Rnative_params.csv'
   )
         """
     )
 
-    parser.add_argument('reference_csv', help='Reference bestfit_params.csv file')
+    parser.add_argument('reference_csv', help='Reference params.csv file')
     args = parser.parse_args()
 
     # Just load and show info
     wavelengths, wavelength_errs = load_reference_grid(args.reference_csv)
 
-    print("\nReference grid loaded successfully!")
-    print("Use this grid in your Python code with:")
-    print(f"  from koala.reference_grid import load_reference_grid, bin_to_reference_grid")
-    print(f"  ref_wl, ref_wl_err = load_reference_grid('{args.reference_csv}')")
-    print(f"  wl_out, wl_err_out, flux_out, err_out = bin_to_reference_grid(")
-    print(f"      your_wavelengths, your_flux, your_err, ref_wl, ref_wl_err)")
+    debug("\nReference grid loaded successfully!")
+    debug("Use this grid in your Python code with:")
+    debug(f"  from koala.reference_grid import load_reference_grid, bin_to_reference_grid")
+    debug(f"  ref_wl, ref_wl_err = load_reference_grid('{args.reference_csv}')")
+    debug(f"  wl_out, wl_err_out, flux_out, err_out = bin_to_reference_grid(")
+    debug(f"      your_wavelengths, your_flux, your_err, ref_wl, ref_wl_err)")

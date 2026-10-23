@@ -1,5 +1,6 @@
 """Opt-in two-program grid fitting with independently adapted model lanes."""
 from __future__ import annotations
+from koala.output_paths import OutputPaths
 
 import copy
 from collections import OrderedDict
@@ -592,7 +593,7 @@ def run_batched_grid(manifest):
             name = variant['name']
             begin, end = member*channels, (member+1)*channels
             fit_dir, input_dir = root / 'batched_fits' / name, root / 'batched_stage_inputs' / name
-            (fit_dir / 'chunks').mkdir(parents=True, exist_ok=True)
+            OutputPaths(fit_dir).chunks_dir.mkdir(parents=True, exist_ok=True)
             input_dir.mkdir(parents=True, exist_ok=True)
             payload = dict(schema_version=1, model_builder=dict(
                 identity='koala.marginalization.batched.create_batched_model', kwargs=builder_kwargs),
@@ -603,12 +604,12 @@ def run_batched_grid(manifest):
             with (input_dir / f'{name}_high_resolution_inputs.pkl').open('wb') as stream:
                 pickle.dump(payload, stream, protocol=5)
             for suffix in ('pkl', 'npz'):
-                for old in (fit_dir/'chunks').glob(f'{name}_chunk_*.{suffix}'):
+                for old in OutputPaths(fit_dir).chunks_dir.glob(f'{name}_chunk_*.{suffix}'):
                     old.unlink()
-            highres.export(begin, end, fit_dir/'chunks', name)
-            _save_npz(fit_dir / 'white_light_posterior.npz',
+            highres.export(begin, end, OutputPaths(fit_dir).chunks_dir, name)
+            _save_npz(Path(OutputPaths(fit_dir).state('white_light_posterior.npz')),
                       **{key: np.asarray(value)[:, member:member+1] for key, value in white.items()})
-            (fit_dir / 'diagnostics.json').write_text(json.dumps(dict(white=white_report, highres=hr_report), indent=2))
+            Path(OutputPaths(fit_dir).state('diagnostics.json')).write_text(json.dumps(dict(white=white_report, highres=hr_report), indent=2))
             variant.update(fit_dir=str(fit_dir.relative_to(root)), stage_inputs=str(input_dir.relative_to(root)))
         del white, highres, white_model, hr_model
         sweep.finish_target(first.cfg['flags'].get('grid_cache_memory_mb'))

@@ -113,7 +113,7 @@ def test_all_known_keys_are_silent_including_legacy_stage_overrides():
 
 
 def test_configuration_guide_tracks_the_public_surface_only():
-    guide = (ROOT / "docs/configuration.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/reference/settings.md").read_text(encoding="utf-8")
     for key in koala_constants.PUBLIC_FLAGS | koala_constants.ADVANCED_FLAGS:
         assert re.search(rf"\b{re.escape(key)}\b", guide), key
     for key in koala_constants.INTERNAL_FLAGS:

@@ -128,7 +128,7 @@ def test_tiny_exact_model_selectively_swaps_nuts_to_hmc(tmp_path, monkeypatch):
     assert samples["rors"].shape == (20, 1)
     assert samples.sampler_used == ["independent_hmc"]
     assert samples.sampled_sites == ('rors',)
-    checkpoint = next((tmp_path / "chunks").glob("*.pkl"))
+    checkpoint = next((tmp_path / "state" / "chunks").glob("*.pkl"))
     loaded = koala_sampling._load_chunk_samples(checkpoint)
     assert loaded.sampler_used == ["independent_hmc"]
     assert loaded.sampled_sites == ('rors',)
