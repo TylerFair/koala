@@ -19,8 +19,8 @@ Lowering the thresholds (`spectro_min_depth_ess`, `spectro_max_divergences`) wil
 
 Start with `figures/whitelight_start.png` in the output directory, which shows the starting model on top of the data.
 If the model's transit or eclipse is nowhere near the one in the data, the time system is the usual culprit.
-koala works in BMJD_TDB = BJD_TDB − 2400000.5, and times quoted as BJD − 2400000 are half a day off from that.
-koala converts the times in Eureka! and SPARTA files, but never the times in your YAML.
+koala works in BJD_TDB − 2400000, and times quoted as BMJD_TDB (BJD_TDB − 2400000.5) are half a day off from that.
+koala converts the times in the data files, but never the times in your YAML.
 
 ## Installation problems
 
@@ -42,7 +42,7 @@ If your compute nodes have no internet access, run a fit once on a machine that 
 
 | What you see | What to try |
 |---|---|
-| An error that mentions a 0.5 d offset | The YAML times use BJD − 2400000 rather than BMJD_TDB. Subtract 0.5 d. |
+| An error that mentions a 0.5 d offset | The YAML times are in BMJD_TDB rather than BJD_TDB − 2400000. Add 0.5 d. |
 | A GPU runs out of memory | Lower `flags.spectro_chunk_size` so fewer channels are fitted at once. |
 | The first batch of channels is much slower than the rest | That's JAX compiling the model. Later batches, and later runs, reuse it. |
 | A warning that a key in `flags` is unknown | It's probably misspelled. The warning suggests the closest name. |

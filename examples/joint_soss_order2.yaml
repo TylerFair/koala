@@ -4,7 +4,7 @@
 planet:
   name: WASP-39
   period: {value: 4.05528043, prior: fixed}                                  # days
-  t0: {value: 59787.055, prior: uniform, low: 59787.005, high: 59787.105}    # BMJD_TDB
+  t0: {value: 59787.555, prior: uniform, low: 59787.505, high: 59787.605}    # BJD_TDB - 2400000
   duration: {value: 0.117, prior: log_uniform, low: 0.01, high: 1.0}         # days
   b: {value: 0.45, prior: uniform, low: 0.0, high: 1.5}
   rprs: {value: 0.146, prior: uniform, low: 0.01, high: 0.5}

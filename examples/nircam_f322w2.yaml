@@ -7,7 +7,7 @@ planet:
   name: HAT-P-18
   period: {value: 5.50802941, prior: fixed}
   duration: {value: 0.10999998, prior: log_uniform, low: 0.01, high: 1.0}
-  t0: {value: 60795.39, prior: uniform, low: 60795.34, high: 60795.44}
+  t0: {value: 60795.89, prior: uniform, low: 60795.84, high: 60795.94}
   b: {value: 0.148, prior: uniform, low: 0.0, high: 1.5}
   rprs: {value: 0.1356, prior: uniform, low: 0.01, high: 0.5}
 
@@ -37,8 +37,8 @@ flags:
   detrending_type: 'linear'
   ld_profile: 'power2'
   ld_prior: 'stellarprior'
-  mask_start: 60795.15    # drop cadences between these times (BMJD_TDB)
-  mask_end: 60795.26
+  mask_start: 60795.65    # drop cadences between these times (BJD_TDB - 2400000)
+  mask_end: 60795.76
 
 outlier_clip:
   whitelight_sigma: 5

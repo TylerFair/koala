@@ -42,6 +42,6 @@ When koala reads the file, it prints the number of integrations, the wavelength 
 
 A few things are worth knowing about the inputs:
 
-- Times should be barycentric (BJD_TDB). koala works in BMJD_TDB = BJD_TDB − 2400000.5, and converts full BJDs in Eureka! and SPARTA files itself. If no transit allowed by your YAML falls inside the data, koala stops with an error, which is usually a sign that the two use different zero points.
+- Times should be barycentric (BJD_TDB). koala works in BJD_TDB − 2400000, and converts the BMJD_TDB (BJD_TDB − 2400000.5) that JWST files carry, or full BJDs, when it reads them. If no transit allowed by your YAML falls inside the data, koala stops with an error, which is usually a sign that the two use different zero points.
 - koala fits every integration you give it. Integrations with a non-finite time, flux or uncertainty are dropped.
 - Pixels a pipeline has flagged as bad (Eureka! and SPARTA) are kept but given a huge uncertainty, so they carry no weight in the fit.

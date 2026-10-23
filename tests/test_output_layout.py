@@ -37,7 +37,7 @@ def small_fit(tmp_path_factory):
     hdus = [fits.PrimaryHDU()] + [fits.ImageHDU(a) for a in
             (wavelength, np.full(15, .03), flux, error)]
     hdus += [fits.ImageHDU(np.zeros(1)) for _ in range(4)]
-    hdus.append(fits.ImageHDU(time))
+    hdus.append(fits.ImageHDU(time - 0.5))  # JWST files carry BMJD_TDB = BJD_TDB - 2400000.5
     filename = directory / 'spectra.fits'
     fits.HDUList(hdus).writeto(filename)
     planet = {'name': 'test', **{key: {'value': value, 'prior': 'fixed'}

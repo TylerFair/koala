@@ -12,7 +12,7 @@ Each property of the orbit has a starting value and a prior:
 planet:
   name: WASP-39
   period: {value: 4.05528043, prior: fixed}
-  t0: {value: 59787.055, prior: uniform, low: 59787.005, high: 59787.105}
+  t0: {value: 59787.555, prior: uniform, low: 59787.505, high: 59787.605}
   duration: {value: 0.117, prior: log_uniform, low: 0.01, high: 1.0}
   b: {value: 0.45, prior: uniform, low: 0.0, high: 1.5}
   rprs: {value: 0.146, prior: uniform, low: 0.01, high: 0.5}
@@ -35,8 +35,8 @@ Eccentricity `ecc` and argument of periastron `omega` (in radians) can be given 
 If you let the period vary, it's fitted in white light and then held fixed for the wavelength channels.
 If your observation has more than one transit of the same planet, all of them are fitted together.
 
-Times are in BMJD_TDB, that is BJD_TDB − 2400000.5.
-Values in papers are often quoted as BJD − 2400000, which is half a day later, so watch out for that.
+Times are in BJD_TDB − 2400000, the form most papers quote.
+The JWST pipelines (and so exoTEDRF, Eureka! and SPARTA files) use BMJD_TDB = BJD_TDB − 2400000.5 instead, which koala converts when it reads the data, but it doesn't convert the times in your YAML.
 koala stops with an error if no transit allowed by your priors falls inside the data, and points out the half-day offset when that's the cause.
 
 For a secondary eclipse on a circular orbit, you can give `eclipse_time` instead of `t0`, and koala works out the transit time from it.
@@ -47,8 +47,8 @@ To fit two planets that transit in the same light curve, give a list with one en
 ```yaml
 planet:
   period: [{value: 3.0782, prior: fixed}, {value: 7.4203, prior: fixed}]
-  t0: [{value: 60010.214, prior: uniform, low: 60010.18, high: 60010.25},
-       {value: 60010.831, prior: uniform, low: 60010.80, high: 60010.86}]
+  t0: [{value: 60010.714, prior: uniform, low: 60010.68, high: 60010.75},
+       {value: 60011.331, prior: uniform, low: 60011.30, high: 60011.36}]
 ```
 
 A single entry instead of a list gives every planet the same starting value and prior.
@@ -108,7 +108,7 @@ exclude_integrations: [[400, 405], [-5, null]]
 
 This drops the first 10 minutes, integrations 400 to 405, and the last five integrations.
 Ranges include both ends, integrations count from zero, negative numbers count from the end, and `null` leaves that end open.
-Times are in BMJD_TDB days, and `t` in an expression is the array of integration times.
+Times are in BJD_TDB − 2400000, and `t` in an expression is the array of integration times.
 
 Separately, koala clips integrations that are more than 5σ from the white-light model, and leaves them out of the channel fits too.
 The channels themselves aren't clipped unless you ask.

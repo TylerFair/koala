@@ -55,11 +55,12 @@ def test_example_injection_matches_fixed_config_geometry(monkeypatch, scenario):
         ("impact_parameter", "b"), ("radius_ratio", "rprs"),
     ):
         assert truth[truth_key] == planet[config_key]["value"]
+    # The synthetic files carry BMJD_TDB like JWST products; the configs use BJD_TDB - 2400000.
     if "t0" in planet:
-        assert truth["t0_bmjd_tdb"] == planet["t0"]["value"]
+        assert truth["t0_bmjd_tdb"] + 0.5 == planet["t0"]["value"]
     else:
         # Circular orbit: the configured eclipse time is half a period after t0.
-        assert truth["t0_bmjd_tdb"] + 0.5 * truth["period_days"] == pytest.approx(
+        assert truth["t0_bmjd_tdb"] + 0.5 + 0.5 * truth["period_days"] == pytest.approx(
             planet["eclipse_time"]["value"], abs=1e-9
         )
     if scenario == "stellar_spots":

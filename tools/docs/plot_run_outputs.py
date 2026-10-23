@@ -75,9 +75,9 @@ def white_panel(ax, table, epoch=None, residual=False, ppm=False):
 def eclipse(directory,out):
     ts=pd.read_csv(one(directory,'*_whitelight_lightcurve.csv'))
     emission=pd.read_csv(one(directory,'*_Rnative_emission.csv'))
-    fig,axes=plt.subplots(3,1,figsize=(9,8),layout='constrained',
+    fig,axes=plt.subplots(3,1,figsize=(6.9,6.4),layout='constrained',
         gridspec_kw={'height_ratios':[1.5,1,1.5]})
-    epoch=60001.3081322
+    epoch=60001.8081322
     white_panel(axes[0],ts,epoch,ppm=True)
     white_panel(axes[1],ts,epoch,residual=True)
     axes[1].set_xlabel('Time from injected eclipse (h)')
@@ -95,9 +95,9 @@ def eclipse(directory,out):
 def phase(directory,out):
     ts=pd.read_csv(one(directory,'*_whitelight_lightcurve.csv'))
     emission=pd.read_csv(one(directory,'*_Rnative_emission.csv'))
-    fig,axes=plt.subplots(3,1,figsize=(9,8),layout='constrained',
+    fig,axes=plt.subplots(3,1,figsize=(6.9,6.4),layout='constrained',
         gridspec_kw={'height_ratios':[1.4,1.3,1]})
-    phase=(ts.time_bjd-60000)/2
+    phase=(ts.time_bjd-60000.5)/2   # t0 and period of the synthetic planet
     trend=ts.trend_model.to_numpy()
     flux=(ts.flux.to_numpy()/trend-1)*1e6
     model=(ts.bestfit_model.to_numpy()/trend-1)*1e6

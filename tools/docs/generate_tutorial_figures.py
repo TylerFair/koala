@@ -157,7 +157,8 @@ def eclipse_scan(fits_path=None):
     yw=y/err
     residual=yw-Q@(Q.T@yw)
     null_chi2=float(residual@residual)
-    epochs=np.unique(np.r_[np.linspace(t.min()-.03,t.max()+.03,700),true,true+.5])
+    # A BMJD_TDB epoch in a YAML that koala reads as BJD_TDB - 2400000 lands half a day early.
+    epochs=np.unique(np.r_[np.linspace(t.min()-.03,t.max()+.03,700),true,true-.5])
     delta=[]; depths=[]; errors=[]
     for epoch in epochs:
         e=-occulted_fraction(t,epoch)/err
@@ -184,11 +185,11 @@ def eclipse_scan(fits_path=None):
     axes[0].legend(frameon=False)
     axes[1].plot((epochs-true)*24,delta,color=COLOR,lw=1.7)
     axes[1].axvline(0,color='k',ls='--',label='Injected eclipse')
-    axes[1].axvline(12,color='#b16e24',ls=':',lw=2,label='Wrong time origin (+0.5 d)')
+    axes[1].axvline(-12,color='#b16e24',ls=':',lw=2,label='BMJD used by mistake (-0.5 d)')
     axes[1].axvspan(hours.min(),hours.max(),color=COLOR,alpha=.07,label='Observed time range')
     axes[1].set(xlabel='Trial eclipse time relative to injected epoch (h)',
-        ylabel=r'$\chi^2_{\mathrm{baseline}}-\chi^2_{\mathrm{eclipse}}$',xlim=(hours.min()-.5,13))
-    axes[1].legend(frameon=False,loc='upper right',fontsize=9)
+        ylabel=r'$\chi^2_{\mathrm{baseline}}-\chi^2_{\mathrm{eclipse}}$',xlim=(-13,hours.max()+.5))
+    axes[1].legend(frameon=False,loc='upper left',bbox_to_anchor=(.08,1))
     finish(fig,'eclipse_time_scan.png')
     result={'source':'realistic_eclipse_white.csv','n_integrations':len(t),'injected_epoch_bmjd_tdb':true,
         'injected_depth_ppm':70.,'baseline_tau_days':float(tau),

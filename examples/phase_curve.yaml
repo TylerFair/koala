@@ -5,7 +5,7 @@ planet:
   # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
   name: Synthetic-Phase-Curve
   period: {value: 2.0, prior: fixed}
-  t0: {value: 60000.0, prior: fixed}
+  t0: {value: 60000.5, prior: fixed}
   b: {value: 0.25, prior: fixed}
   rprs: {value: 0.10, prior: fixed}
   a_rs: {value: 6.0, prior: fixed}

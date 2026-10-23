@@ -25,7 +25,7 @@ from generate_tutorial_figures import COLOR, OUT, ROOT, style
 
 def data_figure():
     with fits.open(ROOT / "examples/data/WASP-39_soss_binned8.fits") as hdul:
-        time = hdul["TIME"].data          # BMJD_TDB
+        time = hdul["TIME"].data          # BMJD_TDB, as in every JWST file
         wave = hdul["WAVE O1"].data       # microns
         flux = hdul["FLUX O1"].data       # (integration, wavelength)
 

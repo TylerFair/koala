@@ -37,8 +37,8 @@ For several planets, give a list with one entry per planet.
 |---|---|---|
 | `name` | | target name, used in file names |
 | `period` | days | orbital period |
-| `t0` | BMJD_TDB | mid-transit time |
-| `eclipse_time` | BMJD_TDB | mid-eclipse time, instead of `t0` (circular orbit, fixed period) |
+| `t0` | BJD_TDB − 2400000 | mid-transit time |
+| `eclipse_time` | BJD_TDB − 2400000 | mid-eclipse time, instead of `t0` (circular orbit, fixed period) |
 | `duration` | days | transit duration |
 | `a_rs` | | scaled semi-major axis $a/R_*$, instead of `duration` |
 | `b` | | impact parameter |
@@ -107,7 +107,7 @@ In the channel fits, the polynomial coefficients have uniform(−10, 10) priors 
 | `ld_uniform_basis` | `uplus_uminus` | uniform quadratic priors on $u_1 \pm u_2$, or `coefficients` for a box in $u_1, u_2$ |
 | `ld_uniform_coefficient_bounds` | `[0, 1]` | that box, which also bounds the free $u_2$ of `fixed_u1` |
 | `ld_parameterization` | `auto` | power-2 sampling coordinates: `maxted_smooth`, `decorrelated` or `coefficients` |
-| `spot_center`, `spot_width`, `spot_amp` | | starting guesses for a spot crossing (BMJD_TDB, days, flux) |
+| `spot_center`, `spot_width`, `spot_amp` | | starting guesses for a spot crossing (BJD_TDB − 2400000, days, flux) |
 | `spot_center2`, `spot_width2`, `spot_amp2` | | the same for a second spot (`spot_center_2`, `spot_width_2`, `spot_amp_2` also work) |
 | `t_jump_guess`, `jump_guess` | | starting time and size of a step |
 | `mask_start`, `mask_end` | | an older way of leaving out time ranges, combined with `exclude_times` |

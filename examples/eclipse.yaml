@@ -6,9 +6,9 @@ planet:
   # Every planet parameter is {value, prior[, sigma, low, high]}; prior is fixed, uniform, log_uniform, or gaussian.
   name: ROCKY-1
   period: {value: 2.6162644, prior: fixed}
-  # Secondary-eclipse mid-time (BMJD_TDB) searched over +/- 0.085 d; koala
+  # Secondary-eclipse mid-time (BJD_TDB - 2400000) searched over +/- 0.085 d; koala
   # derives the transit epoch t0 = eclipse_time - period / 2 (circular orbit).
-  eclipse_time: {value: 60001.3081322, prior: uniform, low: 60001.2231322, high: 60001.3931322}
+  eclipse_time: {value: 60001.8081322, prior: uniform, low: 60001.7231322, high: 60001.8931322}
   a_rs: {value: 17.04, prior: gaussian, sigma: 0.5}
   b: {value: 0.208, prior: gaussian, sigma: 0.15, low: 0.0, high: 1.0}   # i = 89.3 +/- 0.5 deg
   rprs: {value: 0.0318, prior: fixed}

@@ -20,7 +20,7 @@ The interesting part of the {download}`configuration <../../examples/eclipse.yam
 planet:
   name: ROCKY-1
   period: {value: 2.6162644, prior: fixed}
-  eclipse_time: {value: 60001.3081322, prior: uniform, low: 60001.2231322, high: 60001.3931322}
+  eclipse_time: {value: 60001.8081322, prior: uniform, low: 60001.7231322, high: 60001.8931322}
   a_rs: {value: 17.04, prior: gaussian, sigma: 0.5}
   b: {value: 0.208, prior: gaussian, sigma: 0.15, low: 0.0, high: 1.0}
   rprs: {value: 0.0318, prior: fixed}
@@ -59,7 +59,7 @@ Now for a harder case: a 70 ppm eclipse on top of a 3,000 ppm exponential ramp, 
 :alt: A shallow eclipse on an exponential ramp, and a scan of the fit quality against eclipse time
 
 The white-light curve, and a simple least-squares scan over the eclipse time.
-The true eclipse is at BMJD_TDB 60001.3081322.
+The true eclipse is at 60001.8081322 (BJD_TDB − 2400000).
 The best depth in the scan is $66.8 \pm 19.9$ ppm, with $\Delta\chi^2 = 11.3$ between the best time and no eclipse.
 ```
 
@@ -75,7 +75,7 @@ If the planet transits, the transit fit gives its orbit and the time of the ecli
 planet:
   name: ROCKY-1
   period: {value: 2.6162644, prior: fixed}
-  eclipse_time: {value: 60001.3081322, prior: fixed}
+  eclipse_time: {value: 60001.8081322, prior: fixed}
   a_rs: {value: 17.04, prior: fixed}
   b: {value: 0.208, prior: fixed}
   rprs: {value: 0.0318, prior: fixed}
@@ -86,5 +86,5 @@ With the timing fixed, the white-light depth is $68 \pm 20$ ppm, and all 14 chan
 
 A couple of other things to look out for with shallow eclipses.
 A ramp with a free timescale can trade off against the eclipse depth, as can a Gaussian process, so check the depth against a simpler trend, and consider leaving out the start of the observation rather than fitting a strong ramp.
-And if the model's eclipse doesn't line up with the data at all, check the time system: the eclipse time is in BMJD_TDB, half a day earlier than BJD − 2400000.
+And if the model's eclipse doesn't line up with the data at all, check the time system: the eclipse time is in BJD_TDB − 2400000, half a day later than BMJD_TDB.
 `eclipse_time` needs a circular orbit and a fixed period, and koala works out the transit time from it as $t_0 = t_{\rm eclipse} - P/2$.

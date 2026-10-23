@@ -6,8 +6,8 @@ Every reader returns the same tuple::
 
 * ``wavelength``     float64 (n_wave,)  bin or pixel centres in microns
 * ``wavelength_err`` float64 (n_wave,)  half-widths in microns
-* ``time``           float64 (n_int,)   BMJD_TDB (BJD_TDB - 2400000.5), Koala's
-                                        time convention throughout
+* ``time``           float64 (n_int,)   BJD_TDB - 2400000, Koala's time
+                                        convention throughout
 * ``flux``           float64 (n_int, n_wave)
 * ``flux_err``       float64 (n_int, n_wave)
 
@@ -22,9 +22,9 @@ Supported products:
 * ``eureka`` - Eureka! Stage 3 ``*_SpecData.h5`` (native per-column ``optspec``)
   or Stage 4 ``*_LCData.h5`` (binned ``data``) xarray datasets.
 
-SPARTA and Eureka! copy the JWST ``INT_TIMES['int_mid_BJD_TDB']`` column, which
-is already in the modified form, so times pass through unchanged. A full Julian
-date (above 1e6) is converted.
+exoTEDRF, SPARTA and Eureka! copy the JWST ``INT_TIMES['int_mid_BJD_TDB']``
+column, which is in the modified form BMJD_TDB = BJD_TDB - 2400000.5, so the
+readers add 0.5 d. A full Julian date (above 1e6) has 2400000 subtracted.
 """
 from __future__ import annotations
 
@@ -38,17 +38,21 @@ from astropy.io import fits
 
 INPUT_FORMATS = ('exotedrf', 'sparta', 'eureka')
 
+TIME_OFFSET = 2400000.0
+TIME_SYSTEM = 'BJD_TDB - 2400000'
 MJD_OFFSET = 2400000.5
 _MJD_JD_SPLIT = 1.0e6
 
 
-def _to_bmjd(t, label):
+def _to_koala_time(t, label):
+    """BMJD_TDB (what JWST products carry) or full BJD_TDB to BJD_TDB - 2400000."""
     t = np.asarray(t, dtype=np.float64)
     if t.size and np.nanmedian(t) > _MJD_JD_SPLIT:
-        info("Times are full Julian dates; converting to BMJD_TDB.")
-        debug(f"[{label}] time array is a full JD; subtracting {MJD_OFFSET} to obtain BMJD_TDB")
-        return t - MJD_OFFSET
-    return t
+        info(f"Times are full Julian dates; converting to {TIME_SYSTEM}.")
+        debug(f"[{label}] time array is a full JD; subtracting {TIME_OFFSET}")
+        return t - TIME_OFFSET
+    debug(f"[{label}] times are BMJD_TDB; adding {MJD_OFFSET - TIME_OFFSET} d to obtain {TIME_SYSTEM}")
+    return t + (MJD_OFFSET - TIME_OFFSET)
 
 
 def _half_widths_from_centres(wave):
@@ -124,7 +128,7 @@ def read_exotedrf(path, order=None):
     k = EXOTEDRF_EDGE_TRIM
     wave, wave_err = wave[k:-k], wave_err[k:-k]
     flux, flux_err = flux[:, k:-k], flux_err[:, k:-k]
-    return _as_float64(wave, wave_err, bjd, flux, flux_err)
+    return _as_float64(wave, wave_err, _to_koala_time(bjd, 'exotedrf'), flux, flux_err)
 
 
 # --------------------------------------------------------------------------- #
@@ -137,7 +141,7 @@ def read_sparta(path, use_uncut=False, verbose=True):
     """Read a SPARTA ``gather_and_filter.py`` pickle.
 
     The dictionary holds per-column wavelength centres in microns
-    (``wavelengths``), ``times`` in BMJD_TDB, and ``data``/``errors`` cubes of
+    (``wavelengths``), ``times`` in BMJD_TDB (or full BJD_TDB), and ``data``/``errors`` cubes of
     shape (n_int, n_wave) in electrons per group. ``use_uncut`` returns the
     ``uncut_*`` arrays taken before SPARTA's integration and column rejection
     and pixel cleaning. SPARTA stores no bin edges, so half-widths are half the
@@ -154,7 +158,7 @@ def read_sparta(path, use_uncut=False, verbose=True):
         raise KeyError(f"{path}: SPARTA pickle missing keys {missing}")
 
     wave = np.asarray(d[prefix + 'wavelengths'], dtype=np.float64)
-    time = _to_bmjd(d[prefix + 'times'], 'sparta')
+    time = _to_koala_time(d[prefix + 'times'], 'sparta')
     flux = np.asarray(d[prefix + 'data'], dtype=np.float64)
     flux_err = np.asarray(d[prefix + 'errors'], dtype=np.float64)
     if flux.shape != (time.size, wave.size):
@@ -168,7 +172,7 @@ def read_sparta(path, use_uncut=False, verbose=True):
     wave, wave_err, flux, flux_err = _sort_by_wavelength(wave, wave_err, flux, flux_err)
     if verbose:
         debug(f"[sparta] {os.path.basename(path)}: n_int={time.size} n_wave={wave.size} "
-              f"wave {wave.min():.4f}-{wave.max():.4f} um, t {time.min():.5f}-{time.max():.5f} BMJD_TDB")
+              f"wave {wave.min():.4f}-{wave.max():.4f} um, t {time.min():.5f}-{time.max():.5f} {TIME_SYSTEM}")
     return wave, wave_err, time, flux, flux_err
 
 
@@ -193,7 +197,7 @@ def read_eureka(path, order=None, verbose=True):
     NaN and half-widths come from the column spacing. Stage 4 provides binned
     ``data``/``err``/``mask`` with dimensions (wavelength, time) and exact
     ``wave_mid``/``wave_err``. ``order`` selects the NIRISS/SOSS order when the
-    Stage 3 file carries an ``order`` dimension. Times are ``BMJD_TDB``.
+    Stage 3 file carries an ``order`` dimension. Times are ``BMJD_TDB`` in the file.
     """
     ds = _open_eureka(path)
     try:
@@ -211,7 +215,7 @@ def read_eureka(path, order=None, verbose=True):
             flux = np.asarray(spec.values, dtype=np.float64)
             flux_err = np.asarray(err.values, dtype=np.float64)
             bad = np.asarray(mask.values, dtype=bool)
-            time = _to_bmjd(spec['time'].values, 'eureka-S3')
+            time = _to_koala_time(spec['time'].values, 'eureka-S3')
             units_da, stage = wave_da, 'S3'
         elif 'data' in ds and 'wave_low' in ds:
             spec = ds['data'].transpose('wavelength', 'time')
@@ -222,7 +226,7 @@ def read_eureka(path, order=None, verbose=True):
             flux_err = np.asarray(err.values, dtype=np.float64).T
             bad = (np.asarray(ds['mask'].transpose('wavelength', 'time').values, dtype=bool).T
                    if 'mask' in ds else np.zeros(flux.shape, dtype=bool))
-            time = _to_bmjd(spec['time'].values, 'eureka-S4')
+            time = _to_koala_time(spec['time'].values, 'eureka-S4')
             units_da, stage = ds['wave_mid'], 'S4'
         else:
             raise ValueError(f"{path}: no Eureka! optspec (Stage 3) or data/wave_low (Stage 4) variables found")
@@ -248,7 +252,7 @@ def read_eureka(path, order=None, verbose=True):
     flux, flux_err = neutralize_bad_pixels(flux, flux_err, bad)
     if verbose:
         debug(f"[eureka-{stage}] {os.path.basename(path)}: n_int={time.size} n_wave={wave.size} "
-              f"wave {wave.min():.4f}-{wave.max():.4f} um, t {time.min():.5f}-{time.max():.5f} BMJD_TDB")
+              f"wave {wave.min():.4f}-{wave.max():.4f} um, t {time.min():.5f}-{time.max():.5f} {TIME_SYSTEM}")
     return wave, wave_err, time, flux, flux_err
 
 

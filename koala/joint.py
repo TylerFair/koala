@@ -15,6 +15,7 @@ from numpyro.handlers import Messenger, scope, seed, trace
 from models.priors import sample_parameter, latent_init_site
 from .config import load_config, parse_planet_parameter_specs, parse_parameter_spec
 from .artifacts import _science_artifact_fingerprint
+from .readers import TIME_SYSTEM
 from .white_light import (
     prepare_white_light_ld, _initialize_white_light, _whitelight_geometry_sites,
     _sample_white_light, run_white_light_stage,
@@ -318,7 +319,7 @@ def run_joint(cfg, config_path=None, verbose=False):
             if contexts[group[0]].planet_parameter_specs['t0'][0].free and name in samples:
                 values = np.asarray(samples[name])
                 label = 't0' if len(visits) == 1 else f't0 visit {visit_index + 1}'
-                info(parameter_summary(label, float(np.median(values)), float(np.std(values)), 'BMJD_TDB'))
+                info(parameter_summary(label, float(np.median(values)), float(np.std(values)), TIME_SYSTEM))
         for member_index, member_context in enumerate(contexts):
             name = f'member{member_index}/rors_0'
             if member_context.planet_parameter_specs['rprs'][0].free and name in samples:

@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 
 with fits.open("examples/data/WASP-39_soss_binned8.fits") as hdul:
-    time = hdul["TIME"].data          # BMJD_TDB
+    time = hdul["TIME"].data          # BMJD_TDB, as in every JWST file
     wave = hdul["WAVE O1"].data       # microns
     flux = hdul["FLUX O1"].data       # shape (integration, wavelength)
 
@@ -55,7 +55,7 @@ Here's the one for this observation, which is also in `examples/niriss_soss_orde
 planet:
   name: WASP-39
   period: {value: 4.05528043, prior: fixed}
-  t0: {value: 59787.055, prior: uniform, low: 59787.005, high: 59787.105}
+  t0: {value: 59787.555, prior: uniform, low: 59787.505, high: 59787.605}
   duration: {value: 0.117, prior: log_uniform, low: 0.01, high: 1.0}
   b: {value: 0.45, prior: uniform, low: 0.0, high: 1.5}
   rprs: {value: 0.146, prior: uniform, low: 0.01, high: 0.5}
@@ -78,7 +78,7 @@ resolution:
 The `planet` block gives a starting value and a prior for each property of the orbit.
 We hold the period fixed, since one transit can't measure it better than the published ephemeris.
 The others are fitted with broad priors: the mid-transit time `t0` anywhere in a 2.4-hour window, the transit duration, the impact parameter `b`, and the radius ratio `rprs` ($R_p/R_*$).
-Times are in BMJD_TDB (that's BJD_TDB − 2400000.5) and the period and duration are in days.
+Times are in BJD_TDB − 2400000, the way most papers quote them, and the period and duration are in days.
 Literature values often use a different zero point, so it's worth checking this when you set up your own planet.
 
 The `stellar` block is the star's effective temperature, surface gravity and metallicity.
