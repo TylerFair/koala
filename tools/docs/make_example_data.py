@@ -70,7 +70,7 @@ def main(source):
     keep = np.zeros(wave.size, bool)
     keep[inside[0] - 5:inside[-1] + 6] = True
     header.update(CONTENTS=('Teaching subset; 4.9 to 12.1 um', 'Description'),
-                  PROGID=(2783, 'JWST GO program'), OBSNUM=(1, 'JWST program observation'),
+                  PROGID=(2783, 'JWST DDT program'), OBSNUM=(1, 'JWST program observation'),
                   ORIGNPIX=(wave.size, 'Input detector columns'), SRCFILE=(name.name, 'Local source extraction'),
                   SRCSHA=(sha(name)[:32], 'Start of source SHA256'))
     write(OUT / 'WASP-39_miri_lrs.fits', header,

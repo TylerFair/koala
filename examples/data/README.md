@@ -57,4 +57,4 @@ SHA-256:
 
 - `WASP-39_g395h_nrs1_binned8.fits`: `805b8ea63ca2e3e4f31c4cfe7a28ed38bce093b504dc16fea2184e677920565c`
 - `WASP-39_g395h_nrs2_binned8.fits`: `f5c4d7f3669677b399487bb271ef26a731488d02b14061dc110ad58b9e949340`
-- `WASP-39_miri_lrs.fits`: `88f9529b501ae4528933ff7229cfffbfab9b1948334b11cde2dddb3f50cc1cb7`
+- `WASP-39_miri_lrs.fits`: `259ed992dd3c024fdc963c28a7d34ec4a08ce16002bfd99929ba5d731ecdaf2a`
