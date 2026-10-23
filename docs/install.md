@@ -1,9 +1,6 @@
 # Installation
 
-koala needs Python 3.10 or newer, Git, and a C++ compiler.
-The compiler is for [Harmonica](https://github.com/DavoGrant/harmonica), one of koala's dependencies, which is built when you install.
-Linux systems usually have one already.
-On a Mac, run `xcode-select --install` first if you haven't before.
+koala needs Python 3.10 or newer and Git, and is tested on Linux with Python 3.10 and 3.11.
 
 We recommend installing koala into a fresh environment.
 With conda, that looks like:
@@ -17,7 +14,7 @@ python -m pip install .
 ```
 
 (If you don't use conda, `python -m venv .venv` followed by `source .venv/bin/activate` works just as well.)
-The install takes a couple of minutes, most of which is spent compiling Harmonica.
+The install takes a minute or two.
 Cloning the repository also gets you the example data and configurations used in these docs.
 
 To check that it worked, run:
@@ -54,4 +51,16 @@ koala uses [ExoTiC-LD](https://exotic-ld.readthedocs.io) to get limb darkening f
 The first fit for a given star downloads the stellar-model and instrument-throughput files it needs (only a few MB for the first-fit example) into `~/.cache/koala/exotic_ld_data`, and later fits reuse them.
 If your compute nodes can't reach the internet, run one fit somewhere that can and copy the files across (see [troubleshooting](guide/troubleshooting.md)).
 
-koala is tested on Linux with Python 3.10 and 3.11.
+## Harmonica
+
+You only need [Harmonica](https://github.com/DavoGrant/harmonica) if you want to fit the planet's [morning and evening limbs](case_studies/harmonica.md) separately.
+It compiles C++ code when it installs, so you need a C++ compiler.
+Linux systems usually have one already.
+On a Mac, run `xcode-select --install` first if you haven't before.
+Then, from the `koala` folder, run:
+
+```bash
+python -m pip install ".[harmonica]"
+```
+
+This takes about a minute, most of which is spent compiling.

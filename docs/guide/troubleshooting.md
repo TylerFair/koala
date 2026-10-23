@@ -24,8 +24,8 @@ koala converts the times in the data files, but never the times in your YAML.
 
 ## Installation problems
 
-Installing needs Git, internet access and a C++ compiler (for Harmonica).
-If the build fails, check that `g++` or `clang++` works and that Git can reach GitHub.
+Installing needs Git and internet access, so check that Git can reach GitHub.
+If Harmonica fails to build, check that `g++` or `clang++` works.
 A fresh environment fixes most other problems, especially after changing the versions of JAX or NumPy.
 
 If JAX doesn't see your GPU, check `python -c "import jax; print(jax.devices())"` on the GPU node itself, and that you installed `jax[cuda12]` (see [installation](../install.md)).

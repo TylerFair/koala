@@ -5,15 +5,16 @@ If you're planning something big, it's worth opening an issue first so we can ta
 
 ## Setting up
 
-Install koala in editable mode, along with the test dependencies, in a fresh environment:
+Install koala in editable mode, along with Harmonica and the test dependencies, in a fresh environment:
 
 ```bash
 git clone https://github.com/TylerFair/koala.git
 cd koala
-python -m pip install -e . pytest pytest-xdist batman-package
+python -m pip install -e ".[harmonica]" pytest pytest-xdist batman-package
 ```
 
 batman is only used by the tests, as an independent check of koala's transit models.
+Without Harmonica, the tests that need it are skipped.
 The exact versions the continuous integration uses are in `tests/requirements-ci.txt`, and you can install against them with `PIP_CONSTRAINT=tests/requirements-ci.txt`.
 
 ## Running the tests

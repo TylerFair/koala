@@ -99,7 +99,7 @@ In the channel fits, the polynomial coefficients have uniform(−10, 10) priors 
 | Key | Default | |
 |---|---|---|
 | `light_curve_model` | `transit` | `transit`, `eclipse` or `phase_curve` |
-| `transit_engine` | `jaxoplanet` | `jaxoplanet` or `harmonica` |
+| `transit_engine` | `jaxoplanet` | `jaxoplanet` or `harmonica` ([installed separately](../install.md#harmonica)) |
 | `detrending_type` | `linear` | see [trends](../guide/trends.md) |
 | `ld_profile` | `quadratic` | `quadratic`, `power2` or `kipping`, see [limb darkening](../guide/limb_darkening.md) |
 | `ld_prior` | `uniform` | `uniform`, `stellarprior`, `gaussian`, `sing`, `fixed` or `fixed_u1` |

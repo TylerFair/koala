@@ -30,6 +30,8 @@ docs = [
 ]
 test = ["pytest"]
 plots = ["SciencePlots", "cmcrameri"]
+# Harmonica (transit_engine: harmonica) compiles C++ when it installs, so it is optional.
+harmonica = ["planet-harmonica @ git+https://github.com/TylerFair/harmonica@c8e9233bfc99ba55edbffc0dcc4e562b163a8d21"]
 
 [project.scripts]
 koala = "koala.cli:main"

@@ -27,6 +27,8 @@ if worker and hasattr(os, "sched_getaffinity"):
 
 
 def pytest_collection_modifyitems(items):
+    from models.harmonica.core import HARMONICA_AVAILABLE
+    no_harmonica = pytest.mark.skip(reason='Harmonica is not installed (pip install ".[harmonica]")')
     # Per-case timing marks retain faster variants in the CI selection.
     # PR 05: 30.40 s; fresh full suite: 229.68 s / 287.29 s for the C++ checks.
     slow_cases = {
@@ -42,6 +44,20 @@ def pytest_collection_modifyitems(items):
             "test_flux", "test_flux_derivatives", "test_power2_vs_jaxoplanet"
         }:
             item.add_marker(pytest.mark.harmonica)
+            if not HARMONICA_AVAILABLE:
+                item.add_marker(no_harmonica)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    # Without Harmonica, skip the cases of other tests that evaluate a Harmonica model.
+    from models.harmonica.core import HARMONICA_MISSING
+    try:
+        return (yield)
+    except ImportError as error:
+        if str(error) != HARMONICA_MISSING:
+            raise
+        pytest.skip('Harmonica is not installed (pip install ".[harmonica]")')
 
 
 @pytest.fixture

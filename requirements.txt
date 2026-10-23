@@ -15,8 +15,6 @@ jaxopt>=0.8.3
 # associative-scan quasiseparable solver; branch koala-stable, pinned by commit).
 tinygp @ git+https://github.com/TylerFair/tinygp.git@96d110c8fb4350b0daf50f7f1f86a9196b82fcd4
 
-planet-harmonica @ git+https://github.com/TylerFair/harmonica@c8e9233bfc99ba55edbffc0dcc4e562b163a8d21
-
 # Scientific arrays, FITS/CSV input, configuration, and limb darkening
 numpy
 scipy

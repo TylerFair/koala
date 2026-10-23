@@ -8,6 +8,13 @@ Ingress is mostly shaped by one limb and egress by the other, so a transit can t
 With koala, you can fit that outline in every wavelength channel and get a spectrum for each limb.
 (If you'd rather measure the effect through the transit time, see [timing spectra](timing_spectra.md).)
 
+Harmonica isn't installed with koala by default.
+It needs a C++ compiler (see [installation](../install.md#harmonica)); then, from the `koala` folder, run:
+
+```bash
+python -m pip install ".[harmonica]"
+```
+
 ## Setting up the fit
 
 Start from a copy of the first-fit configuration:

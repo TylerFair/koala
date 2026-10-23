@@ -15,7 +15,7 @@ It's built on JAX and NumPyro, so the same fit runs on a laptop or a GPU, and ev
 
 ## Installation
 
-koala needs Python 3.10 or newer, Git and a C++ compiler:
+koala needs Python 3.10 or newer and Git:
 
 ```bash
 conda create -n koala python=3.11
@@ -25,7 +25,7 @@ cd koala
 python -m pip install .
 ```
 
-For GPUs, see the [installation page](https://koala-jwst.readthedocs.io/en/latest/install.html).
+For GPUs, and for Harmonica (which needs a C++ compiler), see the [installation page](https://koala-jwst.readthedocs.io/en/latest/install.html).
 
 ## Usage
 

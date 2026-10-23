@@ -30,6 +30,8 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
+import pytest
+pytest.importorskip("harmonica", reason="Harmonica is not installed")
 from harmonica.jax import harmonica_transit_power2_ld, harmonica_transit_quad_ld
 
 from jaxoplanet.light_curves import limb_dark_light_curve
