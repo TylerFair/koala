@@ -114,13 +114,13 @@ def phase(directory,out):
         axes[1].errorbar(emission.wavelength,emission[key],
             yerr=np.array([emission[key+'_err_low'],emission[key+'_err_high']]),
             fmt='o',ms=4,mfc='white',color=color,elinewidth=1,label=label)
-    axes[1].set(ylabel='Planet / star flux (ppm)')
+    axes[1].set(ylabel='Planet flux (ppm)')
     axes[1].legend(frameon=False,ncol=2)
     key='phase_offset_deg'
     axes[2].errorbar(emission.wavelength,emission[key],
         yerr=np.array([emission[key+'_err_low'],emission[key+'_err_high']]),
         fmt='o',mfc='white',ms=4,color=COLOR,elinewidth=1)
-    axes[2].set(xlabel='Wavelength (µm)',ylabel='Peak offset before eclipse (deg)')
+    axes[2].set(xlabel='Wavelength (µm)',ylabel='Peak offset (deg)')
     save(fig,out,'phase_recovery.png')
     return {'channels':len(emission),'integrations':len(ts)}
 

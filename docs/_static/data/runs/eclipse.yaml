@@ -49,7 +49,7 @@ flags:
   detrending_type: linear
   ld_profile: quadratic
   ld_prior: fixed
-  random_seed: 20260904
+  random_seed: 1
   spectro_chunk_size: 4
   highres_num_samples: 4000
 outlier_clip:

@@ -1,8 +1,8 @@
 [
   {
-    "file": "eclipse/ROCKY-1_MIRI_LRS__whitelight_timeseries.csv",
-    "source": "ROCKY-1_MIRI_LRS__whitelight_timeseries.csv",
-    "sha256": "459b4b37df74ae415db4811444319fed261c361a81ad09427d9aef884128b605",
+    "file": "eclipse/ROCKY-1_MIRI_LRS_whitelight_lightcurve.csv",
+    "source": "ROCKY-1_MIRI_LRS_whitelight_lightcurve.csv",
+    "sha256": "5cd430add8a82e9eae7b3a75a832ff75c467c99b527495669fb6af4b4e27c452",
     "columns": [
       "time_bjd",
       "time_from_t0_hr",
@@ -18,9 +18,9 @@
     ]
   },
   {
-    "file": "eclipse/ROCKY-1_MIRI_LRS__whitelight_bestfit_params.csv",
-    "source": "ROCKY-1_MIRI_LRS__whitelight_bestfit_params.csv",
-    "sha256": "974447890f1a5394651541c5dcc228928e92af14526bc456126832dfe115752d",
+    "file": "eclipse/ROCKY-1_MIRI_LRS_whitelight_params.csv",
+    "source": "ROCKY-1_MIRI_LRS_whitelight_params.csv",
+    "sha256": "6b8c39fc76209629c7405cb251f7f324102deed7cec0b740651c8e38a3634b26",
     "columns": [
       "planet_id",
       "period",
@@ -82,9 +82,9 @@
     ]
   },
   {
-    "file": "eclipse/ROCKY-1_MIRI_LRS__whitelight_bestfit_params_emission.csv",
-    "source": "ROCKY-1_MIRI_LRS__whitelight_bestfit_params_emission.csv",
-    "sha256": "9ceb8a9d4495173b08aee99588948c79659aae36970dbaeb90c9bb5d116eba7b",
+    "file": "eclipse/ROCKY-1_MIRI_LRS_whitelight_emission.csv",
+    "source": "ROCKY-1_MIRI_LRS_whitelight_emission.csv",
+    "sha256": "21dd89c1ebd73e9830af4d804f82e1ae6c946c128b9c804276e2edca4dd65480",
     "columns": [
       "wavelength",
       "wavelength_err",
@@ -95,9 +95,9 @@
     ]
   },
   {
-    "file": "eclipse/ROCKY-1_MIRI_LRS__Rnative_emission.csv",
-    "source": "ROCKY-1_MIRI_LRS__Rnative_emission.csv",
-    "sha256": "ea0127f120fd207aeee6d03bc2b4d211bbc72572d4ffae62a387815b3ab110ce",
+    "file": "eclipse/ROCKY-1_MIRI_LRS_Rnative_emission.csv",
+    "source": "ROCKY-1_MIRI_LRS_Rnative_emission.csv",
+    "sha256": "0ac48fcaf01cc8eb6bb83d5b59152fb340c6ef9840b00fc807ceb39c29e17ac9",
     "columns": [
       "wavelength",
       "wavelength_err",
@@ -109,9 +109,9 @@
     ]
   },
   {
-    "file": "phase_curve/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_timeseries.csv",
-    "source": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_timeseries.csv",
-    "sha256": "5dfd5752c394275a81d1f7f99d9052d86cc091a83abf7fdec1f74b3691bfaa09",
+    "file": "phase_curve/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_lightcurve.csv",
+    "source": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_lightcurve.csv",
+    "sha256": "1a127b256bbcd07f12c2e5824c570fcecb2b274ca1502430bcba17677a4e8527",
     "columns": [
       "time_bjd",
       "time_from_t0_hr",
@@ -127,9 +127,9 @@
     ]
   },
   {
-    "file": "phase_curve/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_bestfit_params.csv",
-    "source": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_bestfit_params.csv",
-    "sha256": "dab0dd1ec46e141fff11339946e3aa6f742edea7e55ce77ad0d67bbf3bcb2633",
+    "file": "phase_curve/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_params.csv",
+    "source": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_params.csv",
+    "sha256": "e8b7cfc4a9eeb3a45442c9af4486e5eeb0a37026fc255d4cf279cb639e229832",
     "columns": [
       "planet_id",
       "period",
@@ -185,53 +185,80 @@
       "u1_err_high",
       "u2_err_low",
       "u2_err_high",
-      "dayside_flux",
-      "dayside_flux_err_low",
-      "dayside_flux_err_high",
+      "eclipse_depth",
+      "eclipse_depth_err_low",
+      "eclipse_depth_err_high",
+      "phase_c1",
+      "phase_c1_err_low",
+      "phase_c1_err_high",
+      "phase_d1",
+      "phase_d1_err_low",
+      "phase_d1_err_high",
       "nightside_flux",
       "nightside_flux_err_low",
       "nightside_flux_err_high",
-      "hotspot_offset",
-      "hotspot_offset_err_low",
-      "hotspot_offset_err_high"
+      "phase_amplitude",
+      "phase_amplitude_err_low",
+      "phase_amplitude_err_high",
+      "phase_offset_deg",
+      "phase_offset_deg_err_low",
+      "phase_offset_deg_err_high"
     ]
   },
   {
-    "file": "phase_curve/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_bestfit_params_emission.csv",
-    "source": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_bestfit_params_emission.csv",
-    "sha256": "d30c0ac7868cc249027221276e26bb994bfd1ea3440baa0f7df4551b814b6b9b",
+    "file": "phase_curve/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_emission.csv",
+    "source": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_whitelight_emission.csv",
+    "sha256": "59265e0ad31d39e7c7c7cbdc6d918c2741f821392780a04684bebc4bab00b58e",
     "columns": [
       "wavelength",
       "wavelength_err",
       "planet_index",
-      "dayside_flux_ppm",
-      "dayside_flux_ppm_err_low",
-      "dayside_flux_ppm_err_high",
+      "eclipse_depth_ppm",
+      "eclipse_depth_ppm_err_low",
+      "eclipse_depth_ppm_err_high",
+      "phase_c1_ppm",
+      "phase_c1_ppm_err_low",
+      "phase_c1_ppm_err_high",
+      "phase_d1_ppm",
+      "phase_d1_ppm_err_low",
+      "phase_d1_ppm_err_high",
       "nightside_flux_ppm",
       "nightside_flux_ppm_err_low",
       "nightside_flux_ppm_err_high",
-      "hotspot_offset_deg",
-      "hotspot_offset_deg_err_low",
-      "hotspot_offset_deg_err_high"
+      "phase_amplitude_ppm",
+      "phase_amplitude_ppm_err_low",
+      "phase_amplitude_ppm_err_high",
+      "phase_offset_deg",
+      "phase_offset_deg_err_low",
+      "phase_offset_deg_err_high"
     ]
   },
   {
     "file": "phase_curve/Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_emission.csv",
     "source": "Synthetic-Phase-Curve_NIRSPEC_G395M_nrs1_Rnative_emission.csv",
-    "sha256": "9e2c758336efe55443c1bed5be0b867d1b42063822797c88fe1167750c69491f",
+    "sha256": "5725a1c5f4acf509462f57e1ac82b7bd31a50014f9c609bcf092788c8d8c7123",
     "columns": [
       "wavelength",
       "wavelength_err",
       "planet_index",
-      "dayside_flux_ppm",
-      "dayside_flux_ppm_err_low",
-      "dayside_flux_ppm_err_high",
+      "eclipse_depth_ppm",
+      "eclipse_depth_ppm_err_low",
+      "eclipse_depth_ppm_err_high",
+      "phase_c1_ppm",
+      "phase_c1_ppm_err_low",
+      "phase_c1_ppm_err_high",
+      "phase_d1_ppm",
+      "phase_d1_ppm_err_low",
+      "phase_d1_ppm_err_high",
       "nightside_flux_ppm",
       "nightside_flux_ppm_err_low",
       "nightside_flux_ppm_err_high",
-      "hotspot_offset_deg",
-      "hotspot_offset_deg_err_low",
-      "hotspot_offset_deg_err_high",
+      "phase_amplitude_ppm",
+      "phase_amplitude_ppm_err_low",
+      "phase_amplitude_ppm_err_high",
+      "phase_offset_deg",
+      "phase_offset_deg_err_low",
+      "phase_offset_deg_err_high",
       "sampler_used"
     ]
   }

@@ -47,7 +47,7 @@ The white-light eclipse and its residuals, and below, the eclipse depth in each 
 The dashed line is the injected 100 ppm.
 ```
 
-The white-light eclipse depth comes out at $94.3^{+7.3}_{-7.2}$ ppm, consistent with the 100 ppm we put in, and so does every channel.
+The white-light eclipse depth comes out at $93.8^{+7.6}_{-7.1}$ ppm, consistent with the 100 ppm we put in, and so does every channel.
 The emission spectrum is in `*_Rnative_emission.csv`, with an `eclipse_depth_ppm` column and lower and upper errors.
 (The ordinary depth columns in an eclipse run are still $(R_p/R_*)^2$, so be careful not to read those by mistake.)
 
