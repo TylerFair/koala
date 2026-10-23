@@ -115,7 +115,7 @@ import koala
 koala.fit("examples/niriss_soss_order1.yaml")
 ```
 
-This fit took just under 6 minutes on 16 cores of a cluster node (Intel Xeon Gold 6248R).
+This fit took about 5 minutes on 16 cores of a cluster node (Intel Xeon Gold 6248R).
 Here's what koala printed along the way:
 
 ```text
@@ -126,41 +126,41 @@ Reading examples/data/WASP-39_soss_binned8.fits
   Binned to 115 channels at R = 100
 Planet parameters:
   period    fixed at 4.05528043
-  t0        uniform(59787.005, 59787.105), start 59787.055
+  t0        uniform(59787.505, 59787.605), start 59787.555
   duration  log-uniform(0.01, 1.0), start 0.117
   b         uniform(0.0, 1.5), start 0.45
   rprs      uniform(0.01, 0.5), start 0.146
 Limb darkening: quadratic law with uniform priors on u1 + u2 and u1 - u2
+Stagger has no models above solar metallicity, so limb darkening uses its [Fe/H] = 0 models.
 Downloaded stellar limb-darkening data.
 White light: transit with a linear trend, 4 chains of 1000 draws
-sample: 100%|██████████████████████████████████████████████████| 1200/1200 [00:35<00:00, 33.33it/s]
-White-light sampling had divergences; retrying with smaller steps.
-sample: 100%|██████████████████████████████████████████████████| 1200/1200 [01:00<00:00, 19.94it/s]
-  Converged: R-hat <= 1.001, bulk effective sample size >= 1278, no divergences
+sample: 100%|██████████████████████████████████████████████████| 1200/1200 [00:37<00:00, 32.05it/s]
+  Converged: R-hat <= 1.003, bulk effective sample size >= 1948, no divergences
   rprs             0.14591 ± 0.00018
-  b                0.4511 ± 0.0047
-  t0               59787.056748 ± 0.000014 BMJD_TDB
-  duration         0.119602 ± 0.000088 d
+  b                0.4510 ± 0.0048
+  t0               59787.556749 ± 0.000014 BJD_TDB - 2400000
+  duration         0.119600 ± 0.000088 d
   Residual scatter 109 ppm; 1 integration clipped at 5σ
-Limb darkening from stellar models: 100%|██████████████████████| 115/115 [00:00<00:00, 1533.79it/s]
+Limb darkening from stellar models: 100%|███████████████████████| 115/115 [00:00<00:00, 679.57it/s]
 Spectroscopy at R = 100: 115 channels, orbit fixed to the white-light posterior
-Channels: 100%|██████████████████████████████████████████████████| 115/115 [03:04<00:00,  1.60s/it]
+Channels: 100%|██████████████████████████████████████████████████| 115/115 [03:03<00:00,  1.60s/it]
 All 115 channels passed the convergence checks!
 Spectrum: results/WASP-39_SOSS_ORDER1/WASP-39_NIRISS_SOSS_order1_R100_spectrum.csv
 Figures: results/WASP-39_SOSS_ORDER1/figures/
 Full log: results/WASP-39_SOSS_ORDER1/koala.log
-Done in 5 min 51 s.
+Done in 5 min 7 s.
 ```
 
 Let's go through that.
 First koala reads the file and tells us what it found, which is a good moment to check that the instrument, the number of integrations and the wavelength range are what you expect.
-It then prints the priors it's going to use.
-The first time you fit a star, it also downloads the stellar models it needs for the limb darkening.
+It then prints the priors it's going to use, and which stellar models it will use for the limb darkening.
+That's the 3D Stagger grid, and since WASP-39 is a little more metal-rich than the Sun, where Stagger stops, koala uses its solar-metallicity models.
+The first time you fit a star, it also downloads the stellar models it needs.
 
 Next it fits the white-light curve.
 Adding up all the wavelengths gives the most precise light curve we have, so this is where koala measures the orbit: the transit time, duration and impact parameter, along with the white-light radius ratio, limb darkening, trend and jitter.
-Here the first set of chains had divergent transitions, which happens when the sampler's steps are too big for the shape of the posterior, so koala ran them again with smaller steps.
 Once the four chains agreed, it printed the results and how many outlying integrations it clipped.
+(If the chains have divergent transitions, which happens when the sampler's steps are too big for the shape of the posterior, koala says so and runs them again with smaller steps.)
 
 Then it looks up the limb darkening at each wavelength and fits each channel with the orbit held fixed at the white-light result.
 Each channel gets its own radius ratio, limb darkening, trend and jitter.
@@ -208,14 +208,14 @@ print(params[["t0", "t0_err", "duration", "duration_err", "b", "b_err", "rors", 
 ```
 
 ```text
-t0              59787.056748
+t0              59787.556749
 t0_err              0.000014
-duration            0.119602
+duration            0.119600
 duration_err        0.000088
-b                   0.451094
-b_err               0.004747
-rors                0.145913
-rors_err            0.000178
+b                   0.451028
+b_err               0.004754
+rors                0.145912
+rors_err            0.000177
 ```
 
 The transit time is measured to about a second and the radius ratio to about 0.1%, which is why it pays to fit the orbit once with all the light and then hold it fixed.

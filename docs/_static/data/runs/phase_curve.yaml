@@ -21,18 +21,21 @@ planet:
   omega:
     value: 0.0
     prior: fixed
-  dayside_flux_ppm:
+  eclipse_depth_ppm:
     value: 1000.0
-    prior: gaussian
-    sigma: 150.0
-  nightside_flux_ppm:
-    value: 300.0
-    prior: gaussian
-    sigma: 75.0
-  hotspot_offset_deg:
-    value: 18.0
-    prior: gaussian
-    sigma: 10.0
+    prior: uniform
+    low: 0.0
+    high: 3000.0
+  phase_c1_ppm:
+    value: 350.0
+    prior: uniform
+    low: -1500.0
+    high: 1500.0
+  phase_d1_ppm:
+    value: -100.0
+    prior: uniform
+    low: -1500.0
+    high: 1500.0
 stellar:
   ld_coefficients:
   - 0.3

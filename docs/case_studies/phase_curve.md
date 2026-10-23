@@ -63,8 +63,8 @@ emission = pd.read_csv(next(out.glob("*_Rnative_emission.csv")))
 print(emission[["wavelength", "eclipse_depth_ppm", "nightside_flux_ppm", "phase_offset_deg"]])
 ```
 
-At 4.03 µm, the eclipse depth is $985^{+35}_{-36}$ ppm (we put in 1031 ppm), the nightside $256 \pm 34$ ppm (300 ppm), and the brightest point $16.8 \pm 1.9$° before eclipse (18°).
-Across all 14 channels, every quantity is within 0.4σ of the truth on average.
+At 4.03 µm, the eclipse depth is $985^{+36}_{-35}$ ppm (we put in 1031 ppm), the nightside $258^{+32}_{-36}$ ppm (300 ppm), and the brightest point $16.8 \pm 1.9$° before eclipse (18°).
+Across all 14 channels, every quantity is within 0.5σ of the truth on average, and the channels scatter around it by about as much as their uncertainties say they should.
 Each column has `_err_low` and `_err_high` errors alongside it.
 
 If your observation covers only an eclipse, it can't usually pin down both $C_1$ and $D_1$, and the [uniform eclipse model](rocky_eclipse.md) is a better choice.
