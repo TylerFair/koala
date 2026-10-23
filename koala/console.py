@@ -281,6 +281,14 @@ def grid_description(label):
     return 'on the configured wavelength grid'
 
 
+def observation_label(prefix):
+    """'SOSS order 1', 'G395H NRS1', 'MIRI/LRS', ... from a koala output prefix."""
+    from .plotting_style import format_instrument_stamp
+    label = format_instrument_stamp(prefix).removeprefix('JWST ')
+    label = label.replace('NIRISS/', '').replace('NIRSpec ', '').replace('NIRCam ', '').replace('/NRS', ' NRS')
+    return label.replace('ORDER', 'order ')
+
+
 def parameter_summary(label, value, uncertainty, unit=''):
     """Two significant figures in the error; matching decimals in the value."""
     if math.isfinite(uncertainty) and uncertainty > 0:

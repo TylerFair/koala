@@ -488,11 +488,9 @@ def _initialize_spectroscopic_start(
 
 def _spectroscopic_ld(model, inputs, wavelengths, widths, bin_str):
     if joint_display.get() is not None:
-        label = inputs.instrument
-        if inputs.order is not None:
-            label += f' order {inputs.order}'
-        else:
-            label = inputs.instrument_full_str
+        from .console import observation_label
+        prefix = getattr(inputs, 'instrument_full_str', None)
+        label = observation_label(prefix) if prefix else inputs.instrument
         info('')
         info(f'{label}: spectroscopy {grid_description(bin_str)}, {len(wavelengths)} channels, '
              'orbit fixed to the joint white-light posterior')

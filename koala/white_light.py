@@ -1493,10 +1493,10 @@ def _save_white_light_diagnostics(
     wl_mad_mask = jnp.abs(wl_residual - jnp.nanmedian(wl_residual)) > context.whitelight_sigma * wl_sigma
     if not context.whitelight_sigma:  # 0 turns the clip off
         wl_mad_mask = jnp.zeros_like(wl_mad_mask)
-    from .console import residual_summary
+    from .console import observation_label, residual_summary
     residual_summary(float(jnp.std(wl_residual[~wl_mad_mask])) * 1e6,
                      int(jnp.sum(wl_mad_mask)), context.whitelight_sigma,
-                     f'order {context.order}' if context.order is not None else context.instrument_full_str)
+                     observation_label(context.instrument_full_str))
     if getattr(context, 'plots_mode', context.cfg.get('flags', {}).get('plots', 'full')) != 'minimal':
         try:
             plot_whitelight_corner(wl_samples, OutputPaths(context.output_dir).figure('whitelight', 'corner'),

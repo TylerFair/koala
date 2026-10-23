@@ -221,7 +221,7 @@ def compose_joint_model(contexts, pieces, visits, shared_specs):
 def run_joint(cfg, config_path=None, verbose=False):
     """Fit all white lights, write their posterior products, then spectroscopy."""
     from .pipeline import run
-    from .console import (configure, parent_log, finish_run, parameter_summary,
+    from .console import (configure, parent_log, finish_run, parameter_summary, observation_label,
                           joint_presentation, clipping_description)
     from .config import describe_planet_parameter_specs
     from models.mcmc_diagnostics import PosteriorSamples
@@ -235,9 +235,20 @@ def run_joint(cfg, config_path=None, verbose=False):
             group_visits([name for name, _, _ in members], [], cfg['joint']['visits'])
         with joint_presentation(presentation):
             contexts = [run(deepcopy(member), config_path=path, prepare_only=True, verbose=verbose) for _, member, path in members]
-        for line in describe_planet_parameter_specs({
-                key: entries for key, entries in contexts[0].planet_parameter_specs.items()
-                if key in members[0][1]['planet']}):
+        visits = group_visits([name for name, _, _ in members],
+                              [(float(c.data.wl_time.min()), float(c.data.wl_time.max())) for c in contexts],
+                              cfg['joint'].get('visits', 'auto'))
+        specs = {}
+        for key, entries in contexts[0].planet_parameter_specs.items():
+            if key not in members[0][1]['planet']:
+                continue
+            if key == 't0' and len(visits) > 1:
+                # Each visit has its own transit time, from the first file of the visit.
+                for index, group in enumerate(visits):
+                    specs[f't0 visit {index + 1}'] = contexts[group[0]].planet_parameter_specs['t0']
+            else:
+                specs[key] = entries
+        for line in describe_planet_parameter_specs(specs):
             info(line)
         first = contexts[0]
         ld_description = first.ld_prior_mode + ' priors'
@@ -246,9 +257,6 @@ def run_joint(cfg, config_path=None, verbose=False):
         info(f'Limb darkening: {first.ld_profile} law with {ld_description}')
         info('')
         presentation['reading'] = False
-        visits = group_visits([name for name, _, _ in members],
-                              [(float(c.data.wl_time.min()), float(c.data.wl_time.max())) for c in contexts],
-                              cfg['joint'].get('visits', 'auto'))
         pieces = []
         for context in contexts:
             center, width = prepare_white_light_ld(context)
@@ -324,8 +332,8 @@ def run_joint(cfg, config_path=None, verbose=False):
             name = f'member{member_index}/rors_0'
             if member_context.planet_parameter_specs['rprs'][0].free and name in samples:
                 values = np.asarray(samples[name])
-                order = getattr(member_context, 'order', None)
-                label = f'rprs order {order}' if order is not None else f'rprs observation {member_index + 1}'
+                prefix = getattr(member_context, 'instrument_full_str', None)
+                label = f'rprs {observation_label(prefix)}' if prefix else f'rprs observation {member_index + 1}'
                 info(parameter_summary(label, float(np.median(values)), float(np.std(values))))
         with np.load(joint_dir / 'whitelight_samples_by_chain.npz') as saved:
             grouped = dict(saved)

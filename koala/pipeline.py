@@ -776,7 +776,8 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
 
     mini_instrument = detector_label(instrument, nrs=nrs, order=order)
 
-    instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
+    # MIRI/LRS and the NIRCam grisms have no detector or order to name.
+    instrument_full_str = '_'.join(part for part in (planet_str, instrument.replace('/', '_'), mini_instrument) if part)
     lr_label = 'no' if low_resolution_bins is None else str(low_resolution_bins)
     if bins == resolution:
         spectro_data_file = state_path(output_dir, f'{instrument_full_str}_spectroscopy_data_{lr_label}LR_{high_resolution_bins}HR.pkl')
