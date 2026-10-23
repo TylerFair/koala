@@ -22,13 +22,19 @@ def test_fit_prepares_devices_and_forwards_config(tmp_path):
             return original_import(name, *args, **kwargs)
         builtins.__import__ = checked_import
         pipeline = ModuleType('koala.pipeline')
-        def run(cfg, config_path=None):
+        seen_verbose = []
+        def run(cfg, config_path=None, verbose=False):
+            seen_verbose.append(verbose)
             assert cfg['host_device'] == 'cpu'
+            assert 'verbose' not in cfg
+            assert isinstance(verbose, bool)
             assert config_path == sys.argv[1]
             return 'pipeline result'
         pipeline.run = run
         sys.modules['koala.pipeline'] = pipeline
         assert koala.fit(Path(sys.argv[1])) == 'pipeline result'
+        assert koala.fit(Path(sys.argv[1]), verbose=True) == 'pipeline result'
+        assert seen_verbose == [False, True]
     ''')
     import os
     env = dict(os.environ)

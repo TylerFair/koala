@@ -201,9 +201,15 @@ def test_orchestration_preserves_configs_and_hands_off_slices(monkeypatch, tmp_p
     for name in ('a', 'b', 'c'):
         (tmp_path/f'{name}.yaml').write_text(yaml.safe_dump(dict(planet=planet)))
     completed = []
-    def run(cfg, config_path=None, *, prepare_only=False, white_light_posterior=None):
+    def run(cfg, config_path=None, *, prepare_only=False, white_light_posterior=None, verbose=False, prepared_white_light=None):
+        from koala.console import joint_display
+        presentation = joint_display.get()
+        assert presentation is not None
+        assert presentation['reading'] == (prepare_only or white_light_posterior is None)
         specs = parse_planet_parameter_specs(cfg['planet'])
         if not prepare_only:
+            if white_light_posterior is not None:
+                assert prepared_white_light == ('mask', 'parameters', 'geometry')
             completed.append((cfg, white_light_posterior))
             return
         context, piece = make_piece(mode='fixed')
@@ -214,6 +220,9 @@ def test_orchestration_preserves_configs_and_hands_off_slices(monkeypatch, tmp_p
         context.cfg = cfg
         context.key_master = jax.random.PRNGKey(0)
         context.ld_profile = 'quadratic'
+        context.ld_prior_mode = 'uniform'
+        context.ld_uniform_basis = 'uplus_uminus'
+        context.output_dir = cfg['output_dir']
         context.uses_surface_model = False
         context.whitelight_laplace_options = {}
         context.whitelight_mcmc_kwargs = {}
@@ -223,7 +232,8 @@ def test_orchestration_preserves_configs_and_hands_off_slices(monkeypatch, tmp_p
     monkeypatch.setattr(pipeline, 'run', run)
     monkeypatch.setattr(joint, 'prepare_white_light_ld', lambda context: (jnp.array([.3,.2]), None))
     monkeypatch.setattr(joint, '_initialize_white_light', lambda **kw: kw['context'].piece)
-    monkeypatch.setattr(joint, '_write_joint_products', lambda *args: None)
+    monkeypatch.setattr(joint, '_write_joint_products', lambda *args, **kwargs: None)
+    monkeypatch.setattr(joint, 'run_white_light_stage', lambda context, posterior: ('mask', 'parameters', 'geometry'))
     def sample(**kwargs):
         assert kwargs['whitelight_mcmc_kwargs']['num_chains'] == 4
         c = kwargs['context']
@@ -231,7 +241,7 @@ def test_orchestration_preserves_configs_and_hands_off_slices(monkeypatch, tmp_p
             c.data.wl_time, c.data.wl_flux_err, y=c.data.wl_flux)
         grouped = {name: np.broadcast_to(np.asarray(site['value']), (4, 10)+np.shape(site['value']))
                    for name, site in sites.items() if site['type'] in {'sample', 'deterministic'} and name.split('/')[-1] != 'obs'}
-        np.savez_compressed(tmp_path/'out/joint/whitelight_samples_by_chain.npz', **grouped)
+        np.savez_compressed(tmp_path/'out/state/whitelight_samples_by_chain.npz', **grouped)
         return PosteriorSamples({name: value.reshape((40,)+value.shape[2:]) for name, value in grouped.items()}, num_chains=4)
     monkeypatch.setattr(joint, '_sample_white_light', sample)
     joint.run_joint(dict(joint=dict(members=['a.yaml','b.yaml'], apply_to=['c.yaml']),

@@ -1,3 +1,7 @@
+from .output_paths import OutputPaths, state_path
+from koala.console import debug, info, configure, koala_version, finish_run, grid_description, reading, joint_display
+from .paths import DEFAULT_LD_DATA_PATH
+
 from types import SimpleNamespace
 import os
 import sys
@@ -192,6 +196,18 @@ def resolve_host_device(requested):
         )
     return platform
 
+def resolve_input_path(cfg, planet_name):
+    base = cfg.get('path', '.')
+    filename = cfg.get('input_file', cfg.get('fits_file'))
+    if filename is None:
+        raise KeyError("'input_file' (or the older 'fits_file') is required.")
+    original = os.path.join(base, cfg.get('input_dir', planet_name + '_NIRSPEC'), filename)
+    direct = os.path.join(base, filename)
+    if 'input_dir' not in cfg and not os.path.exists(original) and os.path.exists(direct):
+        return direct
+    return original
+
+
 def _align_trend_to_time(trend, trend_time, target_time):
     trend = np.asarray(trend)
     target_time = np.asarray(target_time)
@@ -216,24 +232,30 @@ def _resolve_need_lowres(flags, low_resolution_bins):
             "flags.need_lowres is true but no low-resolution grid is set; "
             "add resolution.low (or pixels.low) or remove flags.need_lowres."
         )
-    print("No low-resolution grid configured; the low-resolution stage is skipped.")
+    debug("No low-resolution grid configured; the low-resolution stage is skipped.")
     return False
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run transit analysis with YAML config.")
     parser.add_argument("-c", "--config", required=True, help="Path to YAML configuration file")
+    parser.add_argument('-v', '--verbose', action='store_true', help='Show detailed diagnostics')
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    return run(cfg, config_path=args.config)
+    return run(cfg, config_path=args.config, verbose=args.verbose)
 
 
 def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
-        white_light_posterior=None):
+        white_light_posterior=None, verbose=False, prepared_white_light=None):
+    started = time.perf_counter()
+    configure(verbose)
+    presentation = joint_display.get()
+    detail = debug if white_light_posterior is not None or presentation is not None else info
+    reading_detail = info if presentation is not None and presentation.get('reading') else detail
     if "joint" in cfg:
         from .joint import run_joint
-        return run_joint(cfg, config_path=config_path)
+        return run_joint(cfg, config_path=config_path, verbose=verbose)
     from models.spectro_trends import resolve_spectral_trend_defaults
     flags = resolve_spectral_trend_defaults(cfg.get('flags', {}))
     cfg['flags'] = flags
@@ -243,6 +265,7 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     nrs, order = resolve_detector(instrument, cfg)
 
     planet_cfg = cfg['planet']
+    configured_planet_keys = frozenset(planet_cfg)
     stellar_cfg = cfg['stellar']
     if 'period' not in planet_cfg:
         raise KeyError("'planet.period' is required.")
@@ -253,7 +276,7 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
             {key: (spec,) for key, spec in trend_priors.items()},
             title="White-light trend priors (trend_priors)",
         ):
-            print(line)
+            debug(line)
     from models.jaxoplanet.config import parse_surface_config
     _early_engine = str(flags.get('transit_engine', 'jaxoplanet')).strip().lower()
     _early_model = str(flags.get('light_curve_model', 'transit')).strip().lower()
@@ -265,7 +288,7 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
         parameter_specs=planet_parameter_specs, param_method=_early_param_method,
     )
     for line in describe_planet_parameter_specs(planet_parameter_specs):
-        print(line)
+        debug(line)
     _surface_spec_names = [k for k in surface_config if k.endswith('_spec')]
     if _surface_spec_names:
         _surface_specs = {
@@ -274,7 +297,7 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
         for line in describe_planet_parameter_specs(
             _surface_specs, title="Planet surface parameters (model units)"
         ):
-            print(line)
+            debug(line)
     is_prism = instrument == 'NIRSPEC/PRISM'
     is_explinear = 'explinear' in str(flags.get('detrending_type', 'linear'))
     flags.setdefault('spectro_sampler', 'independent_nuts')
@@ -294,7 +317,8 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
             probe = tempfile.NamedTemporaryFile(dir=compilation_cache_dir, delete=True)
             probe.close()
         except OSError as error:
-            print(
+            info('The compilation cache is unavailable; continuing without it.')
+            debug(
                 "Persistent JAX cache unavailable at "
                 f"{compilation_cache_dir} ({error}); continuing without it."
             )
@@ -324,13 +348,16 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     input_file = cfg.get('input_file', cfg.get('fits_file'))
     if input_file is None:
         raise KeyError("'input_file' (or the older 'fits_file') is required.")
-    fits_file = os.path.join(input_dir, input_file)
+    fits_file = resolve_input_path(cfg, planet_str)
     if not os.path.exists(output_dir): os.makedirs(output_dir, exist_ok=True)
+    configure(verbose, output_dir, config_path)
     plots_mode = str(flags.get('plots', 'full')).strip().lower()
+    if presentation is not None and presentation.get('plots') is not None:
+        plots_mode = str(presentation['plots']).strip().lower()
     if plots_mode not in {'full', 'minimal'}:
         raise ValueError("flags.plots must be one of {'full', 'minimal'}.")
     if plots_mode == 'minimal':
-        print("Minimal plots enabled: diagnostic noise/poly/light-curve grids skipped.")
+        debug("Minimal plots enabled: diagnostic noise/poly/light-curve grids skipped.")
 
     detrending_type = flags.get('detrending_type', 'linear')
     need_lowres = _resolve_need_lowres(flags, low_resolution_bins)
@@ -393,9 +420,9 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
         host_devices = int(os.environ.get(CPU_HOST_DEVICES_ENV, 0))
         vmap_chunk_size = (
             'auto' if transit_engine == 'jaxoplanet'
-            and str(cfg.get('host_device', 'gpu')).lower() == 'gpu' else host_devices or 40
+            and str(cfg.get('host_device', 'auto')).lower() == 'gpu' else host_devices or 40
         )
-        print(
+        debug(
             f"flags.spectro_sampler='{spectro_sampler}' without "
             f"flags.vmap_chunk; using resident width {vmap_chunk_size}."
         )
@@ -481,7 +508,7 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
             "coefficients, uniform, fixed_u1, or flags.ld_prior: 'sing'."
         )
     if ld_prior_mode == 'uniform' and ld_profile != 'power2':
-        print(
+        debug(
             "[LD prior] flags.ld_prior='uniform' was requested for a non-power2 profile; "
             "the underlying model will sample the free LD coefficients uniformly within its native bounds.",
             flush=True,
@@ -631,24 +658,37 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
         name for name, _ in harmonica_odd_coeff_specs(max_harmonic_order)
     )
 
-    host_device = cfg.get('host_device', 'gpu').lower()
+    host_device = cfg.get('host_device', 'auto').lower()
     # The old C++ FFI custom calls are CPU-only. N_c<=1 power-2 and standard
     # direct-u1/u2 quadratic transits use the pure-JAX path on GPU.
     if transit_engine == 'harmonica' and host_device != 'cpu':
         if max_harmonic_order > 1:
-            print(
+            info('This transit model requires the CPU; using the CPU for this run.')
+            debug(
                 f"Harmonica N_c>{1} requires CPU-only FFI custom calls; "
                 f"overriding host_device='{host_device}' to 'cpu'."
             )
             host_device = 'cpu'
         else:
-            print(f'Using pure JAX harmonica GPU path (N_c=1 {ld_profile} LD).')
+            debug(f'Using pure JAX harmonica GPU path (N_c=1 {ld_profile} LD).')
     host_device = resolve_host_device(host_device)
     verify_cpu_host_devices(jax, host_device)
-    print(f"JAX backend verified: {host_device}; devices={jax.devices()}")
+    debug(f"JAX backend verified: {host_device}; devices={jax.devices()}")
+    device_label = (f'CPU, {len(jax.devices("cpu"))} cores' if host_device == 'cpu'
+                    else str(jax.devices()[0].device_kind))
+    detector_description = detector_label(instrument, nrs=nrs, order=order).replace('order', 'order ')
+    if presentation is None:
+        info(f'koala {koala_version()} | {planet_str} | {instrument} {detector_description} | {device_label}')
+        info('')
+    elif presentation.get('reading'):
+        if not presentation.get('header_printed'):
+            info(f'koala {koala_version()} | {planet_str} | joint fit of {presentation["count"]} observations | {device_label}')
+            presentation['header_printed'] = True
+            info('')
+        info(f'{instrument} {detector_description} ({os.path.basename(config_path)})')
     master_seed = int(flags.get("random_seed", 555))
     key_master = jax.random.PRNGKey(master_seed)
-    print(f"Master random seed: {master_seed}")
+    debug(f"Master random seed: {master_seed}")
 
     whitelight_sigma = outlier_clip.get('whitelight_sigma', 4)
     spectroscopic_sigma = outlier_clip.get('spectroscopic_sigma', 4)
@@ -686,7 +726,7 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
             periods, _planet_centers('a_rs'), _planet_centers('b'),
             _planet_centers('rprs'), ecc=_ecc_tmp, omega=_omega_tmp,
         )
-        print(f"Computed duration prior from a_rs geometry: {durations}")
+        debug(f"Computed duration prior from a_rs geometry: {durations}")
         # The data preparation stage uses duration only to identify an
         # out-of-transit normalization window.
         planet_cfg['duration'] = np.asarray(durations, dtype=float).tolist()
@@ -726,44 +766,6 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     if jnp.any((HARMONICA_ECC < 0.0) | (HARMONICA_ECC >= 1.0)):
         raise ValueError("`planet.ecc` must satisfy 0 <= ecc < 1.")
 
-    explicit_ld = stellar_cfg.get('ld_coefficients')
-    if (explicit_ld is None and ld_uniform_basis == 'kipping' and ld_prior_mode == 'uniform'
-            and not all(k in stellar_cfg for k in ('teff', 'logg', 'feh'))):
-        # Kipping-uniform needs no stellar grid; start from the centre of the (q1, q2) square.
-        print("[LD prior] Kipping q1, q2 ~ U(0, 1) without a stellar grid; starting at q = (0.5, 0.5).",
-              flush=True)
-        explicit_ld = np.asarray(kipping_u_from_q(np.array([0.5, 0.5])), dtype=float)
-        sld = None
-    elif explicit_ld is not None:
-        explicit_ld = np.asarray(explicit_ld, dtype=float)
-        if explicit_ld.shape != (2,) or not np.all(np.isfinite(explicit_ld)):
-            raise ValueError("stellar.ld_coefficients must contain two finite values.")
-        if ld_uniform_basis == 'kipping':
-            if not np.all((explicit_ld >= 0.0) & (explicit_ld <= 1.0)):
-                raise ValueError(
-                    "With flags.ld_profile='kipping', stellar.ld_coefficients are [q1, q2] in [0, 1]."
-                )
-            explicit_ld = np.asarray(kipping_u_from_q(explicit_ld), dtype=float)
-        if ld_prior_mode not in {'fixed', 'fixed_u1'}:
-            raise ValueError(
-                "stellar.ld_coefficients is an explicit fixed profile and requires "
-                "flags.ld_prior='fixed' or 'fixed_u1'."
-            )
-        sld = None
-    else:
-        stellar_feh = stellar_cfg['feh']
-        stellar_teff = stellar_cfg['teff']
-        stellar_logg = stellar_cfg['logg']
-        ld_model = stellar_cfg.get('ld_model', 'mps1')
-        ld_data_path = stellar_cfg.get('ld_data_path', '../exotic_ld_data')
-        ld_interpolate_type = stellar_cfg.get('ld_interpolate_type', 'trilinear')
-        stellar_factory = (StellarLimbDarkening if execution_context is None else
-                           lambda **kw: execution_context.stellar(StellarLimbDarkening, **kw))
-        sld = stellar_factory(
-            M_H=stellar_feh, Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
-            ld_data_path=ld_data_path, interpolate_type=ld_interpolate_type,
-        )
-
     def _explicit_ld_grid(wavelengths=None):
         if wavelengths is None:
             return jnp.asarray(explicit_ld, dtype=jnp.float64)
@@ -776,9 +778,9 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
     lr_label = 'no' if low_resolution_bins is None else str(low_resolution_bins)
     if bins == resolution:
-        spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{lr_label}LR_{high_resolution_bins}HR.pkl'
+        spectro_data_file = state_path(output_dir, f'{instrument_full_str}_spectroscopy_data_{lr_label}LR_{high_resolution_bins}HR.pkl')
     elif bins == pixels:
-        spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{lr_label}pix_{high_resolution_bins}pix.pkl'
+        spectro_data_file = state_path(output_dir, f'{instrument_full_str}_spectroscopy_data_{lr_label}pix_{high_resolution_bins}pix.pkl')
 
     if low_resolution_bins is None:
         lr_bin_str = 'nolr'
@@ -855,24 +857,81 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
             _compute_spectro_data,
             _save_spectro_data,
             load_errors=(OSError, EOFError, pickle.UnpicklingError, ValueError, TypeError),
-            on_loaded=lambda: print("Reusing fingerprinted spectroscopy data cache."),
-            on_load_error=lambda: print(
-                "Spectroscopy data cache is unreadable; rebuilding atomically."
+            on_loaded=lambda: reading_detail("  Reusing the prepared spectra from a previous run"),
+            on_load_error=lambda: (
+                info("The prepared spectra could not be read; preparing them again."),
+                debug("Spectroscopy data cache is unreadable; rebuilding atomically."),
             ),
         )
-    data = (load_stage_data() if execution_context is None else
-            execution_context.load_data(spectro_artifact_set, load_stage_data))
+    with reading(fits_file, enabled=white_light_posterior is None):
+        data = (load_stage_data() if execution_context is None else
+                execution_context.load_data(spectro_artifact_set, load_stage_data))
+        for stage_label, waves, label in (('Low resolution', data.wavelengths_lr, lr_bin_str),
+                                         ('Spectroscopy', data.wavelengths_hr, hr_bin_str)):
+            if len(waves):
+                stage_suffix = ' (low resolution)' if stage_label == 'Low resolution' else ''
+                reading_detail(f'  Binned to {len(waves)} channels {grid_description(label)}{stage_suffix}')
 
+    if white_light_posterior is None:
+        info('')
     check_ephemeris_covers_data(
         np.asarray(data.wl_time), planet_parameter_specs,
         str(flags.get('light_curve_model', 'transit')).strip().lower(),
     )
-    print("Data loaded.")
-    print(f"Data length: {data.time.shape}")
+    for line in describe_planet_parameter_specs({
+            key: entries for key, entries in planet_parameter_specs.items()
+            if key in configured_planet_keys}):
+        detail(line)
+    ld_description = ld_prior_mode + ' priors'
+    if ld_profile == 'quadratic' and ld_prior_mode == 'uniform' and ld_uniform_basis == 'uplus_uminus':
+        ld_description = 'uniform priors on u1 + u2 and u1 - u2'
+    detail(f'Limb darkening: {ld_profile} law with {ld_description}')
+    if presentation is None:
+        info('')
+    explicit_ld = stellar_cfg.get('ld_coefficients')
+    if (explicit_ld is None and ld_uniform_basis == 'kipping' and ld_prior_mode == 'uniform'
+            and not all(k in stellar_cfg for k in ('teff', 'logg', 'feh'))):
+        # Kipping-uniform needs no stellar grid; start from the centre of the (q1, q2) square.
+        debug("[LD prior] Kipping q1, q2 ~ U(0, 1) without a stellar grid; starting at q = (0.5, 0.5).",
+              flush=True)
+        explicit_ld = np.asarray(kipping_u_from_q(np.array([0.5, 0.5])), dtype=float)
+        sld = None
+    elif explicit_ld is not None:
+        explicit_ld = np.asarray(explicit_ld, dtype=float)
+        if explicit_ld.shape != (2,) or not np.all(np.isfinite(explicit_ld)):
+            raise ValueError("stellar.ld_coefficients must contain two finite values.")
+        if ld_uniform_basis == 'kipping':
+            if not np.all((explicit_ld >= 0.0) & (explicit_ld <= 1.0)):
+                raise ValueError(
+                    "With flags.ld_profile='kipping', stellar.ld_coefficients are [q1, q2] in [0, 1]."
+                )
+            explicit_ld = np.asarray(kipping_u_from_q(explicit_ld), dtype=float)
+        if ld_prior_mode not in {'fixed', 'fixed_u1'}:
+            raise ValueError(
+                "stellar.ld_coefficients is an explicit fixed profile and requires "
+                "flags.ld_prior='fixed' or 'fixed_u1'."
+            )
+        sld = None
+    else:
+        stellar_feh = stellar_cfg['feh']
+        stellar_teff = stellar_cfg['teff']
+        stellar_logg = stellar_cfg['logg']
+        ld_model = stellar_cfg.get('ld_model', 'mps1')
+        ld_data_path = stellar_cfg.get('ld_data_path', DEFAULT_LD_DATA_PATH)
+        ld_interpolate_type = stellar_cfg.get('ld_interpolate_type', 'trilinear')
+        stellar_factory = (StellarLimbDarkening if execution_context is None else
+                           lambda **kw: execution_context.stellar(StellarLimbDarkening, **kw))
+        sld = stellar_factory(
+            M_H=stellar_feh, Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
+            ld_data_path=ld_data_path, interpolate_type=ld_interpolate_type,
+        )
+
+    debug("Data loaded.")
+    debug(f"Data length: {data.time.shape}")
 
 
     white_light_context = SimpleNamespace(
-        execution_context=execution_context,
+        execution_context=execution_context, joint_member_products=white_light_posterior is not None,
         HARMONICA_A_RS=HARMONICA_A_RS, HARMONICA_ECC=HARMONICA_ECC,
         HARMONICA_ODD_HARMONICS=HARMONICA_ODD_HARMONICS, HARMONICA_OMEGA=HARMONICA_OMEGA,
         NUTS_KWARGS=NUTS_KWARGS, PERIOD_FIXED=PERIOD_FIXED, PRIOR_B=PRIOR_B,
@@ -885,6 +944,7 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
         jaxoplanet_kernel=jaxoplanet_kernel, jump_guess=jump_guess, key_master=key_master,
         ld_prior_mode=ld_prior_mode, ld_profile=ld_profile, ld_uniform_basis=ld_uniform_basis,
         n_planets=n_planets, order=order, output_dir=output_dir, param_method=param_method,
+        plots_mode=plots_mode,
         planet_parameter_specs=planet_parameter_specs, planet_str=planet_str,
         trend_priors=trend_priors,
         quadratic_uniform_physical_bounds=quadratic_uniform_physical_bounds, sld=sld,
@@ -906,9 +966,11 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     prepare_hook = getattr(execution_context, 'prepare_white_light', None)
     if prepare_hook is not None:
         prepare_hook(white_light_context)
-    wl_mad_mask, bestfit_params_wl_df, wl_geometry_handoff = run_white_light_stage(
-        white_light_context, posterior=white_light_posterior,
-    )
+    wl_mad_mask, bestfit_params_wl_df, wl_geometry_handoff = (
+        prepared_white_light if prepared_white_light is not None else run_white_light_stage(
+            white_light_context, posterior=white_light_posterior))
+    if presentation is None:
+        info('')
 
     if wl_geometry_handoff is None:
         raise RuntimeError(
@@ -919,7 +981,7 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     # exactly like t0, b, and duration.
     PERIOD_FIXED = jnp.asarray(fixed_geometry["period"], dtype=jnp.float64)
     if period_is_free:
-        print(
+        debug(
             "Spectroscopic stages use the white-light posterior median period "
             f"{np.asarray(PERIOD_FIXED, dtype=float).tolist()}."
         )
@@ -930,14 +992,14 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     A_RS_BASE = np.asarray(fixed_geometry["a_rs"], dtype=float)
     COSI_BASE = np.asarray(fixed_geometry["cos_i"], dtype=float)
     DEPTH_BASE = RORS_BASE**2
-    print(
+    debug(
         "Using white-light geometry handoff "
         f"({wl_geometry_handoff['estimator']}, "
         f"fingerprint={wl_geometry_handoff['artifact_fingerprint_sha256'][:12]}) "
         "for spectroscopic fitting."
     )
     if analysis_stage == 'whitelight':
-        print("White-light-only analysis complete.")
+        finish_run(output_dir, started)
         return None
 
     spec_good_mask = (~wl_mad_mask if len(wl_mad_mask) == len(data.time)
@@ -1033,7 +1095,8 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     valid, spot_trend, spot_trend2, jump_trend = _stage_result
 
     if analysis_stage == 'prep':
-        print("\nPrep stage complete. Skipping high-resolution analysis.")
+        info("Preparation complete.")
+        finish_run(output_dir, started)
         return
 
 
@@ -1047,7 +1110,7 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
         vmap_chunk_size_hr=vmap_chunk_size_hr,
     ) is None:
         return
-    print(f"Results written to {output_dir}")
+    finish_run(output_dir, started)
 
 if __name__ == "__main__":
     main()

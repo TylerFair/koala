@@ -192,7 +192,7 @@ def test_fit_chunk_router_reuses_one_independent_runner_per_padded_width(
 
 
 def test_fit_chunk_router_shrinks_width_for_a_single_partial_chunk(
-    monkeypatch, capsys
+    monkeypatch, koala_caplog
 ):
     built = []
     calls = []
@@ -241,7 +241,7 @@ def test_fit_chunk_router_shrinks_width_for_a_single_partial_chunk(
     assert len(built) == 1
     assert built[0][1] == 5
     assert calls == [(5, built[0][2])]
-    assert "resident width of 5" in capsys.readouterr().out
+    assert "resident width of 5" in koala_caplog.text
     np.testing.assert_array_equal(
         np.asarray(samples["x"]), np.arange(5.0)[None, :]
     )

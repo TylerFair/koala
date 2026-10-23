@@ -24,19 +24,21 @@ def reset_selection():
         function.cache_clear()
 
 
-def test_cpu_never_searches_for_compiler_and_logs_once(monkeypatch, capsys):
+def test_cpu_never_searches_for_compiler_and_logs_once(monkeypatch, koala_caplog):
+    koala_caplog.set_level('DEBUG', logger='koala')
     monkeypatch.setattr(quadratic_cuda, '_architectures', lambda: ())
     def unexpected():
         pytest.fail('CPU evaluation must not look for nvcc')
     monkeypatch.setattr(quadratic_cuda, '_nvcc', unexpected)
     assert quadratic_cuda.fixed_orbit_evaluator() is quadratic_closed.fixed_orbit_evaluator()
     assert quadratic_cuda.fixed_orbit_evaluator() is quadratic_closed.fixed_orbit_evaluator()
-    output = capsys.readouterr().out
+    output = koala_caplog.text
     assert output.count('Quadratic transit: JAX closed form') == 1
 
 
 @pytest.mark.parametrize('failure', ['missing', 'unsupported', 'compile', 'load'])
-def test_unavailable_accelerator_keeps_jax(monkeypatch, capsys, failure):
+def test_unavailable_accelerator_keeps_jax(monkeypatch, koala_caplog, failure):
+    koala_caplog.set_level('DEBUG', logger='koala')
     monkeypatch.setattr(quadratic_cuda, '_architectures', lambda: ('sm_70',))
     monkeypatch.setattr(quadratic_cuda, '_nvcc', lambda: None if failure == 'missing' else '/nvcc')
     def build(*args):
@@ -48,7 +50,7 @@ def test_unavailable_accelerator_keeps_jax(monkeypatch, capsys, failure):
     monkeypatch.setattr(quadratic_cuda, '_build', build)
     assert quadratic_cuda.fixed_orbit_evaluator() is quadratic_closed.fixed_orbit_evaluator()
     assert quadratic_cuda._accelerator() is None
-    assert capsys.readouterr().out.count('Quadratic transit: JAX closed form') == 1
+    assert koala_caplog.text.count('Quadratic transit: JAX closed form') == 1
 
 
 def test_nvidia_architectures_only(monkeypatch):
@@ -58,7 +60,8 @@ def test_nvidia_architectures_only(monkeypatch):
     assert quadratic_cuda._architectures() == ('sm_70', 'sm_80')
 
 
-def test_success_registers_cuda_and_retains_library(monkeypatch, capsys):
+def test_success_registers_cuda_and_retains_library(monkeypatch, koala_caplog):
+    koala_caplog.set_level('DEBUG', logger='koala')
     monkeypatch.setattr(quadratic_cuda, '_architectures', lambda: ('sm_70',))
     monkeypatch.setattr(quadratic_cuda, '_nvcc', lambda: '/nvcc')
     builds = []
@@ -80,7 +83,7 @@ def test_success_registers_cuda_and_retains_library(monkeypatch, capsys):
     assert len(calls) == 2 and all(kw == {'platform': 'CUDA'} for _, kw in calls)
     assert set(result[1]) == {'partials', 'likelihood'}
     assert quadratic_cuda._accelerator() is result
-    assert capsys.readouterr().out.count('Quadratic transit: CUDA accelerator') == 1
+    assert koala_caplog.text.count('Quadratic transit: CUDA accelerator') == 1
 
 
 def test_cached_build_identity_and_user_cache(monkeypatch, tmp_path):

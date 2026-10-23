@@ -1,5 +1,9 @@
 """Limb Darkening helpers."""
 
+from .paths import DEFAULT_LD_DATA_PATH
+
+from koala.console import debug, info, progress, stellar_output, grid_description, exotic_output
+
 import os
 import sys
 import json
@@ -33,6 +37,11 @@ class CachedStellarLimbDarkening(StellarLimbDarkening):
     masks and narrow-bin fallback. Throughputs are cached per stellar object,
     rather than globally, so independent runs still read their input files.
     """
+
+    def __init__(self, *args, **kwargs):
+        with exotic_output(), stellar_output(kwargs.get('ld_model', 'stellar'), kwargs.get('Teff', 0),
+                            kwargs.get('logg', 0), kwargs.get('M_H', 0)):
+            super().__init__(*args, **kwargs)
 
     def _integrate_I_mu(self, wavelength_range, mode, custom_wavelengths,
                         custom_throughput):
@@ -108,7 +117,8 @@ def _clip_ld_initial_values(coefficients, ld_profile, stage_label='ld'):
     clipped = jnp.clip(coefficients, low, high)
     n_moved = int(jnp.sum(jnp.any(clipped != coefficients, axis=-1)))
     if n_moved:
-        print(
+        info('Some limb-darkening starting values were outside their prior support; moving them inside it.')
+        debug(
             f"[LD init {stage_label}] {n_moved} channel(s) had prior means outside "
             "the physical support; their starting values were clipped inside it.",
             flush=True,
@@ -347,6 +357,7 @@ def _compute_ld_coeffs_with_retry(sld, ld_profile, range_min, range_max, mode,
         try:
             return fn(wavelength_range=[lo, hi], mode=mode, return_sigmas=return_sigmas, **mu_kwargs)
         except RuntimeError as err:
+            info(f'Limb-darkening fit at {centre / 1e4:.3f} µm failed; retrying with a wider stellar passband.')
             last_err = err
             half *= 2.0
     raise RuntimeError(
@@ -355,6 +366,7 @@ def _compute_ld_coeffs_with_retry(sld, ld_profile, range_min, range_max, mode,
     )
 
 
+@exotic_output()
 def get_limb_darkening(sld, wavelengths, wavelength_err, instrument, order=None, ld_profile='quadratic', return_sigmas=False, ld_mu_min=None):
     mode, wl_min, wl_max = _get_ld_mode_bounds(instrument, order)
 
@@ -364,7 +376,7 @@ def get_limb_darkening(sld, wavelengths, wavelength_err, instrument, order=None,
 
     if has_vector_err:
         results = []
-        for index, wavelength in enumerate(wavelengths):
+        for index, wavelength in enumerate(progress(wavelengths, desc='Limb darkening from stellar models')):
             center = wavelength * 1e4
             half_width = wavelength_err[index] * 1e4
             low, high = _clip_ld_range(center - half_width, center + half_width, wl_min, wl_max)
@@ -407,10 +419,11 @@ def build_sing_ld_prior(quadratic_coefficients, flags, stellar_cfg, offsets_over
         }
         source = 'newly-fitted gray calibration'
     if offsets_override is None:
-        print("[Sing LD] no fitted gray-offset artifact supplied; using tabulated fallback for this first pass.", flush=True)
+        info('No fitted limb-darkening offsets were supplied; using the tabulated values.')
+        debug("[Sing LD] no fitted gray-offset artifact supplied; using tabulated fallback for this first pass.", flush=True)
     centers = np.column_stack((model_l + offsets['l'], model_delta + offsets['delta']))
     scales = np.broadcast_to(np.array([SING_TABULATED_SCATTER['l'], SING_TABULATED_SCATTER['delta']]), centers.shape).copy()
-    print(
+    debug(
         f"[Sing LD] offset source={source}: delta_l={offsets['l']:+.6f}, "
         f"delta_delta={offsets['delta']:+.6f}; mu_min={float(stellar_cfg.get('ld_mu_min', 0.2)):.3f}",
         flush=True,
@@ -479,13 +492,14 @@ def get_or_build_quadratic_ld_prior(*args, **kwargs):
     return _get_or_build_stellar_ld_prior(*args, **kwargs, ld_profile='quadratic')
 
 
+@exotic_output()
 def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, instrument, order=None, output_dir='.', cache_label='ld', ld_profile='power2'):
     if ld_profile not in {'quadratic', 'power2'}:
         raise ValueError('Stellar LD grid requires quadratic or power2.')
     coefficient_names = ('u1', 'u2') if ld_profile == 'quadratic' else ('c1', 'c2')
     ld_mu_min = stellar_cfg.get('ld_mu_min') if ld_profile == 'quadratic' else None
     ld_prior_model = stellar_cfg.get('ld_prior_model', stellar_cfg.get('ld_model', 'stagger'))
-    ld_data_path = stellar_cfg.get('ld_data_path', '../exotic_ld_data')
+    ld_data_path = stellar_cfg.get('ld_data_path', DEFAULT_LD_DATA_PATH)
     ld_interpolate_type = stellar_cfg.get('ld_interpolate_type', 'trilinear')
     teff = float(stellar_cfg['teff'])
     logg = float(stellar_cfg['logg'])
@@ -518,7 +532,8 @@ def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, ins
             probe = tempfile.NamedTemporaryFile(dir=cache_dir, delete=True)
             probe.close()
         except OSError as error:
-            print(
+            info('The limb-darkening cache is unavailable; computing the prior for this run.')
+            debug(
                 f"[LD prior] Cache directory {cache_dir} is unavailable "
                 f"({error}); continuing without a persistent cache.",
                 flush=True,
@@ -582,13 +597,15 @@ def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, ins
             if not np.all(np.isfinite(mu)) or not np.all(np.isfinite(sigma)):
                 raise ValueError("contains non-finite coefficients or uncertainties")
         except (OSError, ValueError, TypeError, KeyError) as error:
-            print(
+            info('The cached limb-darkening prior could not be read; rebuilding it.')
+            debug(
                 f"[LD prior] Ignoring invalid cache {cache_path}: {error}; "
                 "rebuilding atomically.",
                 flush=True,
             )
         else:
-            print(
+            info(f'Reusing the cached stellar limb-darkening prior {grid_description(cache_label)}.')
+            debug(
                 f"[LD prior] Loading cached {ld_profile} grid for {instrument} "
                 f"({cache_label}) from {cache_path}",
                 flush=True,
@@ -600,7 +617,7 @@ def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, ins
 
     combos = _stellar_grid_combos(teff, teff_sigma, logg, logg_sigma, feh, feh_sigma, n_grid, nsigma)
 
-    print(
+    debug(
         f"[LD prior] Building {ld_profile} grid for {instrument} ({cache_label}) with {len(combos)} stellar combinations using model={ld_prior_model}",
         flush=True,
     )
@@ -629,7 +646,7 @@ def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, ins
             ld_prior_model, ld_data_path, interpolate_type=ld_interpolate_type,
         )
         bad = ~(np.all(np.isfinite(mu_grid), axis=-1) & (grad_norm < 1e-6))
-        print(
+        debug(
             f"[LD prior fast] {mu_grid.shape[0]} combinations x {mu_grid.shape[1]} bins "
             f"in {time.perf_counter() - fast_started:.1f} s; "
             f"{int(bad.sum())} fit(s) sent to the legacy path",
@@ -649,7 +666,7 @@ def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, ins
         # Fit the actual quadratic law at every declared stellar-grid point.
         # Reuse passband setup per star; never substitute power-2 coefficients.
         mu_grid = np.empty((len(combos), len(ranges), 2))
-        for ci, (mh_i, teff_i, logg_i, _) in enumerate(combos):
+        for ci, (mh_i, teff_i, logg_i, _) in enumerate(progress(combos, desc='Limb-darkening priors from stellar models')):
             sld_grid = CachedStellarLimbDarkening(
                 M_H=mh_i, Teff=teff_i, logg=logg_i, ld_model=ld_prior_model,
                 ld_data_path=ld_data_path, interpolate_type=ld_interpolate_type, verbose=0)
@@ -658,7 +675,7 @@ def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, ins
                     sld_grid, 'quadratic', lo, hi, mode, ld_mu_min, False, wl_min, wl_max), dtype=float)
         if not np.all(np.isfinite(mu_grid)):
             raise ValueError('Non-finite quadratic stellar-grid coefficients.')
-    for ci, (_, _, _, weight) in enumerate(combos):
+    for ci, (_, _, _, weight) in enumerate(progress(combos, desc='Limb-darkening priors from stellar models')):
         successful_mu.append(mu_grid[ci])
         weights.append(weight)
     mu_stack = np.stack(successful_mu, axis=0)
@@ -693,7 +710,8 @@ def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, ins
         try:
             _atomic_dataframe_csv(pd.DataFrame(columns), cache_path, index=False)
         except OSError as error:
-            print(
+            info('The limb-darkening prior could not be cached; continuing with the computed prior.')
+            debug(
                 f"[LD prior] Could not write cache {cache_path} ({error}); "
                 "continuing with the newly computed prior.", flush=True,
             )

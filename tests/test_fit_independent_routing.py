@@ -47,7 +47,7 @@ def test_fit_sampling_router_independent_chunks_and_padding(tmp_path):
 
     assert samples["x"].shape == (5, num_channels)
     assert jnp.all(jnp.isfinite(samples["x"]))
-    checkpoint_dir = tmp_path / "chunks"
+    checkpoint_dir = tmp_path / "state" / "chunks"
     assert len(
         list(checkpoint_dir.glob("toy_independent_nuts_cfg*_chunk_*.pkl"))
     ) == 2

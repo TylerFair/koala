@@ -30,7 +30,7 @@ def available_cpu_cores():
 
 def _runs_on_cpu(cfg):
     """Whether ``host_device`` resolves to CPU, decided without starting JAX."""
-    requested = str(cfg.get('host_device', 'gpu')).lower()
+    requested = str(cfg.get('host_device', 'auto')).lower()
     if requested == 'cpu' or os.environ.get('JAX_PLATFORMS', '').lower() == 'cpu':
         return True
     if requested not in {'gpu', 'auto', 'cuda', 'rocm'}:

@@ -1,5 +1,7 @@
 """Configuration loading, validation, and option resolution."""
 
+from koala.console import debug, info
+
 import difflib
 import numbers
 import warnings
@@ -670,7 +672,7 @@ def _resolve_stage_vmap_width(
         # Keep one compiled width but spread channels evenly. A 42-channel
         # stage then uses 21+21 lanes, rather than 40+2 padded to 40+40.
         width = (num_channels + batches - 1) // batches
-    print(
+    debug(
         f"[spectro auto-width] stage={stage_name}, cadences={num_cadences}, "
         f"bytes_limit={bytes_limit}, headroom=25%, speed_cap={speed_cap}, "
         f"cadence_acceleration={accelerated_long_cadence}, "

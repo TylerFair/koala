@@ -14,6 +14,8 @@ latent variables are not.
 
 from __future__ import annotations
 
+from koala.console import debug, info
+
 import json
 import math
 from dataclasses import dataclass
@@ -564,7 +566,7 @@ def _report_invalid_initial_point(model, init_values, model_args, model_kwargs):
         from numpyro import handlers
         with handlers.seed(rng_seed=0):
             tr = handlers.trace(handlers.substitute(model, data=init_values)).get_trace(*model_args, **model_kwargs)
-        print("[init diagnostics] per-site status at the initial point:", flush=True)
+        debug("[init diagnostics] per-site status at the initial point:", flush=True)
         for name, site in tr.items():
             if site["type"] != "sample":
                 continue
@@ -581,13 +583,13 @@ def _report_invalid_initial_point(model, init_values, model_args, model_kwargs):
             except Exception as lp_err:  # pragma: no cover - diagnostics only
                 lp_finite, lp_sum = None, f"error: {lp_err}"
             flag = "" if (in_support in (True, None) and lp_finite in (True, None)) else "  <-- PROBLEM"
-            print(
+            debug(
                 f"[init diagnostics]   {name}: in_support={in_support} "
                 f"log_prob_finite={lp_finite} log_prob={lp_sum}{flag}",
                 flush=True,
             )
     except Exception as diag_err:  # pragma: no cover - diagnostics only
-        print(f"[init diagnostics] could not trace the model: {diag_err}", flush=True)
+        debug(f"[init diagnostics] could not trace the model: {diag_err}", flush=True)
 
 
 def _first_lane_initial_values(init_params, num_channels):

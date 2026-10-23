@@ -3,6 +3,8 @@
 Only fixed duration geometry can use this table. Outside its radius/exponent
 domain the direct kernel remains the target; the table never truncates priors.
 """
+
+from koala.console import debug, info
 from functools import lru_cache
 
 import jax
@@ -136,7 +138,7 @@ def validated_grid_size(*, impact, radius_bounds, exponent_bounds=(0., 1.),
             actual,gradient = evaluate(p)
             error=max(error,float(jnp.max(jnp.abs(actual-expected))))
             gradient_error=max(gradient_error,float(jnp.max(jnp.abs(gradient-expected_gradient))))
-        print(f'[power2 grid validation] nodes={nodes}, flux_error_ppm={error*1e6:.3g}, '
+        debug(f'[power2 grid validation] nodes={nodes}, flux_error_ppm={error*1e6:.3g}, '
               f'gradient_error={gradient_error:.3g}', flush=True)
         if error <= 2e-9 and gradient_error <= 2e-7:
             return nodes

@@ -250,7 +250,7 @@ def test_joint_geometry_posterior_is_written(tmp_path):
     np.testing.assert_allclose(joint["whitelight_median"], [0.05, 0.3, 0.08])
     np.testing.assert_allclose(joint["prior_sigma"], [3e-4, 0.03, 3e-3])
     assert np.all(np.abs(joint["shift_in_whitelight_sigma"]) < 1.0)
-    written = pd.read_csv(f"{prefix}_bestfit_params.csv")
+    written = pd.read_csv(f"{prefix}_params.csv")
     assert len(written) == 2
     assert np.allclose(written["t0"], joint.loc[0, "median"])
     assert np.allclose(written["duration_err"], joint.loc[2, "std"])

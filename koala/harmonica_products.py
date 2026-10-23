@@ -1,5 +1,7 @@
 """Harmonica Products helpers."""
 
+from koala.console import debug, info
+
 import logging
 import jax.numpy as jnp
 import numpy as np
@@ -470,7 +472,7 @@ def _save_harmonica_limb_posterior_samples(
     payload.update(coeff_samp)
     payload.update(products)
     _atomic_savez_compressed(path, **payload)
-    print(f"Saved joint limb posterior samples to {path}")
+    debug(f"Saved joint limb posterior samples to {path}")
 
 
 def save_harmonica_limb_products(
@@ -485,7 +487,7 @@ def save_harmonica_limb_products(
         bandpass_max=bandpass_max, planet_index=planet_index,
     )
     _atomic_dataframe_csv(limb_df, csv_path, index=False)
-    print(f"Saved limb spectra to {csv_path}")
+    debug(f"Saved limb spectra to {csv_path}")
 
     if posterior_samples_path is not None:
         _save_harmonica_limb_posterior_samples(
@@ -494,10 +496,11 @@ def save_harmonica_limb_products(
         )
 
     wl_arr = limb_df["wavelength"].values
-    plot_harmonica_limb_spectra(
-        limb_df, limb_spectrum_path, instrument_label=title_prefix,
-    )
-    print(f"Saved limb spectra plot to {limb_spectrum_path}")
+    if limb_spectrum_path is not None:
+        plot_harmonica_limb_spectra(
+            limb_df, limb_spectrum_path, instrument_label=title_prefix,
+        )
+    debug(f"Saved limb spectra plot to {limb_spectrum_path}")
 
     theta = np.linspace(-np.pi, np.pi, 1000)
     ht = HarmonicaTransit()
@@ -509,7 +512,7 @@ def save_harmonica_limb_products(
         if f"{name}_median" in limb_df
     }
 
-    if wl_arr.size > 1:
+    if wl_arr.size > 1 and transmission_strings_path is not None:
         radius_curves = []
         for i in range(len(wl_arr)):
             r_i = _harmonica_r_vector_from_values(
@@ -521,8 +524,8 @@ def save_harmonica_limb_products(
             theta, radius_curves, a0_med, transmission_strings_path,
             instrument_label=title_prefix,
         )
-        print(f"Saved transmission string plot to {transmission_strings_path}")
-    else:
+        debug(f"Saved transmission string plot to {transmission_strings_path}")
+    elif wl_arr.size == 1 and posterior_strings_path is None:
         posterior_strings_path = transmission_strings_path
 
     if posterior_strings_path is not None:
@@ -548,6 +551,6 @@ def save_harmonica_limb_products(
             theta, posterior_radius_curves, rp_med, a0_med[i_show], posterior_strings_path,
             instrument_label=title_prefix,
         )
-        print(f"Saved transmission string posterior plot to {posterior_strings_path}")
+        debug(f"Saved transmission string posterior plot to {posterior_strings_path}")
 
     return limb_df

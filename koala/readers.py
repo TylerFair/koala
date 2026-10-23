@@ -28,6 +28,8 @@ date (above 1e6) is converted.
 """
 from __future__ import annotations
 
+from koala.console import debug, info, announce_reading
+
 import os
 import pickle
 
@@ -43,7 +45,8 @@ _MJD_JD_SPLIT = 1.0e6
 def _to_bmjd(t, label):
     t = np.asarray(t, dtype=np.float64)
     if t.size and np.nanmedian(t) > _MJD_JD_SPLIT:
-        print(f"[{label}] time array is a full JD; subtracting {MJD_OFFSET} to obtain BMJD_TDB")
+        info("Times are full Julian dates; converting to BMJD_TDB.")
+        debug(f"[{label}] time array is a full JD; subtracting {MJD_OFFSET} to obtain BMJD_TDB")
         return t - MJD_OFFSET
     return t
 
@@ -81,7 +84,8 @@ def neutralize_bad_pixels(flux, flux_err, bad):
     rows, cols = np.nonzero(bad)
     flux[rows, cols] = channel_median[cols]
     flux_err[rows, cols] = fill_err
-    print(f"[readers] {bad.sum()} flagged pixels replaced by channel medians with error {fill_err:.3g}")
+    info(f"Replacing {bad.sum()} flagged pixels with channel medians and a large error.")
+    debug(f"[readers] {bad.sum()} flagged pixels replaced by channel medians with error {fill_err:.3g}")
     return flux, flux_err
 
 
@@ -163,7 +167,7 @@ def read_sparta(path, use_uncut=False, verbose=True):
     wave_err = _half_widths_from_centres(wave)
     wave, wave_err, flux, flux_err = _sort_by_wavelength(wave, wave_err, flux, flux_err)
     if verbose:
-        print(f"[sparta] {os.path.basename(path)}: n_int={time.size} n_wave={wave.size} "
+        debug(f"[sparta] {os.path.basename(path)}: n_int={time.size} n_wave={wave.size} "
               f"wave {wave.min():.4f}-{wave.max():.4f} um, t {time.min():.5f}-{time.max():.5f} BMJD_TDB")
     return wave, wave_err, time, flux, flux_err
 
@@ -243,7 +247,7 @@ def read_eureka(path, order=None, verbose=True):
         raise ValueError(f"{path}: flux {flux.shape} != (n_int={time.size}, n_wave={wave.size})")
     flux, flux_err = neutralize_bad_pixels(flux, flux_err, bad)
     if verbose:
-        print(f"[eureka-{stage}] {os.path.basename(path)}: n_int={time.size} n_wave={wave.size} "
+        debug(f"[eureka-{stage}] {os.path.basename(path)}: n_int={time.size} n_wave={wave.size} "
               f"wave {wave.min():.4f}-{wave.max():.4f} um, t {time.min():.5f}-{time.max():.5f} BMJD_TDB")
     return wave, wave_err, time, flux, flux_err
 
@@ -302,11 +306,16 @@ def read_spectra(path, input_format='auto', order=None, **kwargs):
     fmt = str(input_format or 'auto').strip().lower()
     if fmt == 'auto':
         fmt = detect_input_format(path)
-        print(f"Detected input format '{fmt}' for {os.path.basename(path)}")
-    if fmt == 'exotedrf':
-        return fmt, read_exotedrf(path, order=order)
-    if fmt == 'sparta':
-        return fmt, read_sparta(path, **kwargs)
-    if fmt == 'eureka':
-        return fmt, read_eureka(path, order=order, **kwargs)
-    raise ValueError(f"Unknown input_format {input_format!r}; expected one of {INPUT_FORMATS} or 'auto'.")
+        debug(f"Detected input format '{fmt}' for {os.path.basename(path)}")
+    readers = {'exotedrf': lambda: read_exotedrf(path, order=order),
+               'sparta': lambda: read_sparta(path, **kwargs),
+               'eureka': lambda: read_eureka(path, order=order, **kwargs)}
+    if fmt not in readers:
+        raise ValueError(f"Unknown input_format {input_format!r}; expected one of {INPUT_FORMATS} or 'auto'.")
+    announce_reading(path)
+    arrays = readers[fmt]()
+    wave, _, time, _, _ = arrays
+    info(f'  {dict(exotedrf="exoTEDRF", sparta="SPARTA", eureka="Eureka!")[fmt]} spectra with time, wavelength, flux and flux error')
+    info(f'  {len(time)} integrations over {np.ptp(time) * 24:.1f} hours, '
+         f'{len(wave)} wavelength columns from {np.nanmin(wave):.2f} to {np.nanmax(wave):.2f} µm')
+    return fmt, arrays

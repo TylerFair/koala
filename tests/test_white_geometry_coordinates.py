@@ -76,7 +76,7 @@ def test_production_white_caller_recovers_curved_posterior(tmp_path):
     np.testing.assert_allclose(np.mean(samples['_b_0']), .5, atol=.02)
     np.testing.assert_allclose(np.mean(samples['vector'], axis=0), [1.45, 0.], atol=.08)
     import json
-    diagnostics = json.loads((tmp_path/'whitelight_mcmc_diagnostics.json').read_text())
+    diagnostics = json.loads((tmp_path/'state'/'whitelight_mcmc_diagnostics.json').read_text())
     assert diagnostics['laplace_b_quadratic_shear']
     assert diagnostics['whitelight_quality_gate_passed']
     assert diagnostics['num_divergences'] == 0

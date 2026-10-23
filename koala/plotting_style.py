@@ -355,27 +355,31 @@ def add_instrument_stamp(
     y_data: float | None = None,
 ):
     """Add the single allowed free-text stamp to an ordinary pipeline plot."""
-    if y_data is None:
-        y = 0.96
-        transform = ax.transAxes
-    else:
-        y = float(y_data)
-        transform = blended_transform_factory(ax.transAxes, ax.transData)
-    return ax.text(
-        0.02,
-        y,
-        format_instrument_stamp_display(label),
-        transform=transform,
-        ha="left",
-        va="top",
-        fontsize=fontsize,
-        fontweight="bold",
-        zorder=20,
-    )
+    del y_data  # Titles always sit above the data, independent of the flux range.
+    return ax.set_title(format_instrument_stamp_display(label), fontsize=fontsize, pad=12)
 
 
 def save_figure(fig, filename, *, dpi: int = PLOT_DPI, close: bool = True) -> None:
     """Save consistently while retaining Matplotlib's extension semantics."""
-    fig.savefig(filename, dpi=dpi)
+    fig.savefig(filename, dpi=dpi, bbox_inches='tight')
     if close:
         plt.close(fig)
+
+
+def residual_colormap():
+    """A perceptually balanced diverging map, with a Matplotlib fallback."""
+    return cmc.vik if cmc is not None else plt.get_cmap('RdBu_r')
+
+
+def figure_title_text(label, stage):
+    """'WASP-39 | NIRISS/SOSS order 1 | R = 100 | Spectrum' from a koala output prefix."""
+    base, _, grid = str(label or '').partition(' | ')
+    if grid:
+        stage = grid + ' | ' + stage
+    target = base.split('_', 1)[0] if base else ''
+    instrument = format_instrument_stamp(base).replace('JWST ', '').replace('ORDER', 'order ')
+    return ' | '.join(part for part in (target, instrument, stage) if part)
+
+
+def figure_title(ax, label, stage):
+    return ax.set_title(figure_title_text(label, stage), fontsize=16, pad=12)

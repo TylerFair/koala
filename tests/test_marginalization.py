@@ -145,7 +145,7 @@ def test_score_cache_and_products_roundtrip(tmp_path, monkeypatch):
     # Conjugate Normal posterior, with rors retained as a science product.
     stage_dir, fit_dir = tmp_path / "stage", tmp_path / "fit"
     stage_dir.mkdir()
-    (fit_dir / "chunks").mkdir(parents=True)
+    (fit_dir / "state" / "chunks").mkdir(parents=True)
     stage = normal_stage()
     stage_file = stage_dir / "demo_high_resolution_inputs.pkl"
     payload = dict(schema_version=1, model_builder=dict(identity=__name__+".normal_model", callable_is_model=True),
@@ -155,14 +155,14 @@ def test_score_cache_and_products_roundtrip(tmp_path, monkeypatch):
     rng = np.random.default_rng(61)
     samples = dict(location=rng.normal(0, 1/np.sqrt(6), (2000, 3)),
                    rors=rng.normal(.1, .001, (2000, 3, 1)))
-    chunk = fit_dir / "chunks" / "demo_chunk_0_3.pkl"
+    chunk = fit_dir / "state" / "chunks" / "demo_chunk_0_3.pkl"
     chunk.write_bytes(pickle.dumps(samples))
     manifest = tmp_path / "analysis.yaml"
     manifest.write_text(yaml.safe_dump(dict(variants=[dict(name="normal", fit_dir="fit", stage_inputs="stage")])))
     output = tmp_path / "products"
     path = score_grid(manifest, output, n_out=1000)
     assert path.is_file()
-    with np.load(output / "posterior.npz") as result:
+    with np.load(output / "state" / "posterior.npz") as result:
         assert result["mixture"].shape == (1000, 3)
         np.testing.assert_array_equal(result["weights"], np.ones((1, 3)))
     fingerprint = score_fingerprint(stage_file, [chunk], {})

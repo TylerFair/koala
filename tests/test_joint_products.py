@@ -14,19 +14,18 @@ def _member(directory, name, wavelengths):
         'wavelength': wavelengths, 'wavelength_err': np.full(len(wavelengths), .01),
         'planet': 0, 'depth': np.full(len(wavelengths), .02), 'depth_err': np.full(len(wavelengths), 5e-5),
         'dt0_s': np.linspace(-3, 3, len(wavelengths)), 't0_err_s': np.full(len(wavelengths), 4.),
-    }).to_csv(member / f'{name}_Rreference_time_shift.csv', index=False)
+    }).to_csv(member / f'{name}_Rreference_timing.csv', index=False)
 
 
 def test_joint_spectrum_stacks_datasets_and_writes_figure(tmp_path):
     _member(tmp_path, 'soss_order1', [1.2, 0.9, 2.5])
     _member(tmp_path, 'g395h_nrs1', [3.1, 3.4])
-    (tmp_path / 'joint').mkdir()
     table = collect_joint_spectra(tmp_path)
     assert list(table.wavelength) == sorted(table.wavelength)
     assert set(table.dataset) == {'soss_order1', 'g395h_nrs1'}
     figure = plot_joint_spectra(tmp_path)
-    assert figure.exists() and (tmp_path / 'joint' / 'joint_spectrum.pdf').exists()
-    saved = pd.read_csv(tmp_path / 'joint' / 'joint_spectrum.csv')
+    assert figure.exists() and not list(tmp_path.rglob('*.pdf'))
+    saved = pd.read_csv(tmp_path / 'joint_spectrum.csv')
     np.testing.assert_allclose(saved.depth_ppm, 2e4)
     assert len(saved) == 5
 
@@ -34,18 +33,21 @@ def test_joint_spectrum_stacks_datasets_and_writes_figure(tmp_path):
 def test_single_dataset_gets_its_own_figure_but_no_joint_one(tmp_path):
     _member(tmp_path, 'soss_order1', [1.0, 1.5])
     figure = plot_joint_spectra(tmp_path)
-    assert figure == tmp_path / 'joint' / 'datasets' / 'soss_order1.png' and figure.exists()
-    assert (tmp_path / 'soss_order1' / 'soss_order1_Rreference_depth_and_t0.png').exists()
-    assert not (tmp_path / 'joint' / 'joint_spectrum.png').exists()
+    assert figure == tmp_path / 'figures' / 'soss_order1_spectrum.png' and figure.exists()
+    assert not list((tmp_path / 'soss_order1').glob('*depth_and_t0*'))
+    timing = pd.read_csv(tmp_path/'soss_order1'/'soss_order1_Rreference_timing.csv')
+    assert {'depth_ppm', 'depth_err_ppm', 'shown', 'dt0_s'} <= set(timing)
+    assert plot_joint_spectra(tmp_path).exists()  # Merged tables can be reopened.
+    assert not (tmp_path / 'figures' / 'joint_spectrum.png').exists()
 
 
 def test_miri_beyond_ten_microns_is_kept_in_the_table_but_not_drawn(tmp_path):
     _member(tmp_path, 'soss_order1', [1.0, 1.5, 2.0])
     _member(tmp_path, 'miri', [6.0, 9.0, 11.0])
     for path in (tmp_path / 'miri').glob('*.csv'):
-        path.rename(path.with_name('WASP-193_MIRI_LRS_pix6_time_shift.csv'))
+        path.rename(path.with_name('WASP-193_MIRI_LRS_pix6_timing.csv'))
     plot_joint_spectra(tmp_path)
-    table = pd.read_csv(tmp_path / 'joint' / 'joint_spectrum.csv')
+    table = pd.read_csv(tmp_path / 'joint_spectrum.csv')
     assert len(table) == 6
     assert list(table.loc[table.instrument == 'MIRI', 'shown']) == [True, True, False]
 
@@ -58,7 +60,7 @@ def test_display_binning_reaches_target_resolution(tmp_path):
     pd.DataFrame({'wavelength': 0.5 * (edges[1:] + edges[:-1]), 'wavelength_err': 0.5 * np.diff(edges),
                   'wave_lo_um': edges[:-1], 'wave_hi_um': edges[1:], 'planet': 0,
                   'depth': .02, 'depth_err': 1e-4, 'dt0_s': 0., 't0_err_s': 5.}).to_csv(
-        member / 'WASP-107_NIRSPEC_G395H_nrs1_Rreference_time_shift.csv', index=False)
+        member / 'WASP-107_NIRSPEC_G395H_nrs1_Rreference_timing.csv', index=False)
     binned = display_bin(collect_joint_spectra(tmp_path))
     resolution = binned.wavelength / (binned.wave_hi_um - binned.wave_lo_um)
     assert abs(np.median(resolution) - 100) < 15
@@ -68,7 +70,7 @@ def test_display_binning_reaches_target_resolution(tmp_path):
 def test_long_wavelength_range_uses_log_axis_and_marks_clipped_points(tmp_path):
     _member(tmp_path, 'soss_order1', list(np.linspace(.9, 2.8, 60)))
     _member(tmp_path, 'miri', [6., 8., 11.5])
-    path = tmp_path / 'miri' / 'miri_Rreference_time_shift.csv'
+    path = tmp_path / 'miri' / 'miri_Rreference_timing.csv'
     t = pd.read_csv(path); t.loc[2, 'dt0_s'] = -900.; t.to_csv(path, index=False)
     assert plot_joint_spectra(tmp_path).exists()
 
@@ -118,15 +120,15 @@ def test_visit_offset_moves_the_limbs_apart_uniformly():
 def test_limb_figure_is_written_only_with_radius_responses(tmp_path):
     _member(tmp_path, 'soss_order1', [1.0, 1.5])
     plot_joint_spectra(tmp_path)
-    assert not (tmp_path / 'joint' / 'limb_spectra.png').exists()
+    assert not (tmp_path / 'figures' / 'joint_limbs.png').exists()
     member = tmp_path / 'g395h_nrs1'
     member.mkdir()
     _limb_table(np.linspace(-20, 20, 40)).drop(columns=['dataset', 'instrument', 'label']).to_csv(
-        member / 'WASP-107_NIRSPEC_G395H_nrs1_Rreference_time_shift.csv', index=False)
+        member / 'WASP-107_NIRSPEC_G395H_nrs1_Rreference_timing.csv', index=False)
     plot_joint_spectra(tmp_path)
-    for stem in ('limb_spectra', 'limb_spectra_binned'):
-        assert (tmp_path / 'joint' / f'{stem}.png').exists()
-    saved = pd.read_csv(tmp_path / 'joint' / 'limb_spectra.csv')
+    for stem in ('joint_limbs', 'joint_limbs_binned'):
+        assert (tmp_path / 'figures' / f'{stem}.png').exists()
+    saved = pd.read_csv(tmp_path / 'joint_limbs.csv')
     assert saved.depth_evening_ppm.notna().sum() == 40 and saved.depth_morning_ppm.isna().sum() == 2
 
 
@@ -254,20 +256,47 @@ def test_ivw_figures_are_written_only_for_overlapping_visits(tmp_path):
         member = tmp_path / name
         member.mkdir()
         _visit(name, start, stop, epoch).drop(columns=['dataset', 'instrument', 'label']).to_csv(
-            member / f'WASP-39_NIRSPEC_{name}_Rreference_time_shift.csv', index=False)
+            member / f'WASP-39_NIRSPEC_{name}_Rreference_timing.csv', index=False)
     plot_joint_spectra(tmp_path)
-    for stem in ('joint_spectrum_ivw', 'limb_spectra_ivw'):
-        assert (tmp_path / 'joint' / f'{stem}.png').exists()
-    assert len(pd.read_csv(tmp_path / 'joint' / 'ivw_offsets.csv')) == 2
+    for stem in ('joint_spectrum_ivw', 'joint_limbs_ivw'):
+        assert (tmp_path / 'figures' / f'{stem}.png').exists()
+    assert len(pd.read_csv(tmp_path / 'state' / 'ivw_offsets.csv')) == 2
     # Without shared wavelengths there is nothing to combine.
     shutil.rmtree(tmp_path / 'prism_nrs1')
-    shutil.rmtree(tmp_path / 'joint')
+    shutil.rmtree(tmp_path / 'figures')
+    shutil.rmtree(tmp_path / 'state')
+    for path in tmp_path.glob('joint_*.csv'):
+        path.unlink()
     # Two detectors of one visit that touch at their ends do not count as an overlap.
     (tmp_path / 'g235h_nrs1').mkdir()
     _visit('g235h_nrs1', 1.7, 2.31, 2460000.).drop(columns=['dataset', 'instrument', 'label']).to_csv(
-        tmp_path / 'g235h_nrs1' / 'WASP-39_NIRSPEC_g235h_nrs1_Rreference_time_shift.csv', index=False)
+        tmp_path / 'g235h_nrs1' / 'WASP-39_NIRSPEC_g235h_nrs1_Rreference_timing.csv', index=False)
     (tmp_path / 'g395h_nrs1').mkdir()
     _visit('g395h_nrs1', 3.2, 3.7, 2460100.).drop(columns=['dataset', 'instrument', 'label']).to_csv(
-        tmp_path / 'g395h_nrs1' / 'WASP-39_NIRSPEC_g395h_nrs1_Rreference_time_shift.csv', index=False)
+        tmp_path / 'g395h_nrs1' / 'WASP-39_NIRSPEC_g395h_nrs1_Rreference_timing.csv', index=False)
     plot_joint_spectra(tmp_path)
-    assert not (tmp_path / 'joint' / 'joint_spectrum_ivw.png').exists()
+    assert not (tmp_path / 'figures' / 'joint_spectrum_ivw.png').exists()
+
+
+def test_joint_minimal_keeps_one_spectrum_figure_and_all_tables(tmp_path):
+    _member(tmp_path, 'soss_order1', [1., 1.5])
+    _member(tmp_path, 'soss_order2', [.65, .75])
+    result = plot_joint_spectra(tmp_path, plots='minimal')
+    assert result == tmp_path/'figures'/'joint_spectrum.png'
+    assert {p.name for p in (tmp_path/'figures').iterdir()} == {'joint_spectrum.png'}
+    assert (tmp_path/'joint_spectrum.csv').exists()
+    assert (tmp_path/'joint_spectrum_binned.csv').exists()
+    assert (tmp_path/'state'/'soss_order1_spectrum.csv').exists()
+
+
+def test_joint_fixed_times_get_depth_spectra_without_invented_timing(tmp_path):
+    for order, waves in [(1, [1., 1.5]), (2, [.65, .75])]:
+        directory = tmp_path/f'order{order}'; directory.mkdir()
+        pd.DataFrame({'wavelength': waves, 'wavelength_err': .02,
+                      'depth00': [.02, .021], 'depth_err00': .0001}).to_csv(
+            directory/f'test_NIRISS_SOSS_order{order}_R10_spectrum.csv', index=False)
+    result = plot_joint_spectra(tmp_path)
+    assert result.exists()
+    table = pd.read_csv(tmp_path/'joint_spectrum.csv')
+    assert len(table) == 4 and 'dt0_s' not in table
+    np.testing.assert_array_equal(table.depth_ppm, [20000., 21000., 20000., 21000.])

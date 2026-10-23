@@ -1,3 +1,5 @@
+
+from koala.console import debug, info
 import numpy as np
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
@@ -19,6 +21,7 @@ from .plotting_style import (
     related_accent_colors,
     save_figure,
     style_axis,
+    figure_title,
 )
 
 # Use the full catalogue here so plotting can handle any saved results.
@@ -488,28 +491,13 @@ def plot_map_residuals(
 
 
 def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
-    """Plot every planet's spectrum and precision without changing filenames."""
-    depth_chain = np.asarray(rors_posterior, dtype=float) ** 2
-    if depth_chain.ndim == 2:
-        depth_chain = depth_chain[:, :, np.newaxis]
-    if depth_chain.ndim != 3:
-        raise ValueError('rors_posterior must have (draw, wavelength[, planet]) axes.')
+    """One PNG with a depth panel for each fitted planet."""
+    from .diagnostic_figures import spectrum
+    filename = str(filename)
+    if not filename.endswith('.png'):
+        filename += '.png'
+    return spectrum(wavelengths, rors_posterior, filename, label=filename)
 
-    figures = []
-    for index in range(depth_chain.shape[2]):
-        samples = depth_chain[:, :, index]
-        median = np.nanpercentile(samples, 50, axis=0)
-        low = np.nanpercentile(samples, 16, axis=0)
-        high = np.nanpercentile(samples, 84, axis=0)
-        asymmetric = np.vstack((median - low, high - median)) * 1e6
-        precision = 0.5 * np.sum(asymmetric, axis=0)
-        figures.append(
-            plot_spectrum_precision(
-                wavelengths, median * 1000000.0, precision, f'{filename}_0{index}',
-                instrument_label=str(filename), asymmetric_depth_err=asymmetric,
-            )
-        )
-    return figures[0] if len(figures) == 1 else figures
 
 def _summary_channel_trend(
     t, map_params, index, detrend_type, gp_trend=None, spot_trend=None, spot_trend2=None,
@@ -682,6 +670,7 @@ def plot_harmonica_limb_spectra(limb_df, filename, instrument_label=None):
               for stat in ('median', 'err_lo', 'err_hi')),
             color, label=label,
         )
+    figure_title(ax_total, instrument_label or str(filename), "Limb depths")
     ax_total.set_ylabel("Transit Depth [ppm]")
     ax_one.set_ylabel("Transit Depth [ppm]")
     ax_one.set_xlabel("Wavelength [$\\mu$m]")
@@ -725,7 +714,7 @@ def plot_harmonica_transmission_strings(
     theta = np.asarray(theta, dtype=float)
     curves = np.atleast_2d(np.asarray(radius_curves, dtype=float))
     color = accent_color_for_label(instrument_label or str(filename))
-    fig, ax = plt.subplots(figsize=(6.8, 6.2))
+    fig, ax = plt.subplots(figsize=(8.8, 7.6))
     for curve in curves:
         ax.plot(
             curve * np.cos(theta), curve * np.sin(theta), color='0.78', lw=0.9, alpha=0.6,
@@ -744,7 +733,7 @@ def plot_harmonica_transmission_strings(
     ax.set_aspect("equal", adjustable="datalim")
     ax.set_xlabel("x / stellar radii")
     ax.set_ylabel("y / stellar radii")
-    add_instrument_stamp(ax, instrument_label or str(filename), fontsize=14)
+    figure_title(ax, instrument_label or str(filename), "Limb profiles")
     ax.legend(loc="lower left", frameon=False)
     style_axis(ax)
     save_figure(fig, filename)
@@ -761,7 +750,7 @@ def plot_harmonica_transmission_posterior(
     curves = np.atleast_2d(np.asarray(posterior_radius_curves, dtype=float))
     median_curve = np.asarray(median_radius_curve, dtype=float)
     color = accent_color_for_label(instrument_label or str(filename))
-    fig, ax = plt.subplots(figsize=(6.8, 6.2))
+    fig, ax = plt.subplots(figsize=(8.8, 7.6))
     for curve in curves:
         ax.plot(
             curve * np.cos(theta), curve * np.sin(theta), color='0.72', lw=0.8, alpha=0.08,
@@ -779,7 +768,7 @@ def plot_harmonica_transmission_posterior(
     ax.set_aspect("equal", adjustable="datalim")
     ax.set_xlabel("x / stellar radii")
     ax.set_ylabel("y / stellar radii")
-    add_instrument_stamp(ax, instrument_label or str(filename), fontsize=14)
+    figure_title(ax, instrument_label or str(filename), "Limb outline")
     ax.legend(loc="lower left", frameon=False)
     style_axis(ax)
     save_figure(fig, filename)
@@ -818,7 +807,7 @@ _CORNER_LABELS = {
     "GP_log_rho": r"$\ln\rho_\mathrm{GP}$",
 }
 _CORNER_ORDER = (
-    "period", "t0", "rors", "b", "duration", "a_rs", "c1", "c2", "u1", "u2", "c", "v",
+    "t0", "rors", "b", "duration", "a_rs", "period", "c1", "c2", "u1", "u2", "c", "v",
     "v2", "v3", "v4", "A", "tau", "spot_amp", "spot_mu", "spot_sigma",
     "spot_amp2", "spot_mu2", "spot_sigma2", "t_jump", "jump", "width",
     "error", "GP_log_sigma", "GP_log_rho",
@@ -881,9 +870,9 @@ def _corner_columns(samples):
             label = (r"$t_{0,%d}$ [d]" % planet if stem == "t0"
                      else r"$R_{p,%d}/R_\star$" % planet)
         if stem == "t0":
-            ref = float(np.floor(np.nanmedian(arr)))
-            arr = arr - ref
-            label = label.replace("[d]", f"$-$ {ref:.0f} [d]")
+            ref = float(np.nanmedian(arr))
+            arr = (arr - ref) * 86400.0
+            label = label.replace("[d]", "offset [s]")
         out_cols.append(arr)
         labels.append(label)
     return out_cols, labels
@@ -900,7 +889,7 @@ def plot_whitelight_corner(samples, filename, instrument_label=None, max_draws=6
     try:
         import corner
     except ImportError:
-        print("corner is not installed; skipping the white-light corner plot.")
+        debug("corner is not installed; skipping the white-light corner plot.")
         return None
     columns, labels = _corner_columns(samples)
     if len(columns) < 2:
@@ -928,7 +917,8 @@ def plot_whitelight_corner(samples, filename, instrument_label=None, max_draws=6
             except AttributeError:
                 pass
     if instrument_label:
-        fig.suptitle(f"{instrument_label}: white-light posterior", fontsize=11, y=1.005)
+        from .plotting_style import figure_title_text
+        fig.suptitle(figure_title_text(instrument_label, 'White-light posterior'), fontsize=16, y=1.02)
     fig.savefig(filename, dpi=PLOT_DPI, bbox_inches="tight")
     plt.close(fig)
     return filename

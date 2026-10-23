@@ -1,5 +1,7 @@
 """Geometry helpers."""
 
+from koala.console import debug, info
+
 import os
 import json
 import hashlib
@@ -136,7 +138,7 @@ def _continue_mcmc_until_geometry_gate(
             passes = passes and bool(rhat) and all(np.isfinite(value) and value < 1.01 for value in rhat.values())
             passes = passes and bool(tail_ess) and all(np.isfinite(value) and value >= float(min_ess) for value in tail_ess.values())
         passes = passes and divergences <= int(max_divergences)
-        print(
+        debug(
             "White-light quality gate: "
             f"bulk_ESS={ess}, tail_ESS={tail_ess or 'n/a'}, rhat={rhat or 'n/a'}, divergences={divergences}, "
             f"pass={passes}, extra_blocks={extra_count}."
@@ -150,7 +152,7 @@ def _continue_mcmc_until_geometry_gate(
             extra_count == 0 and ess and (min(ess.values()) < float(failfast_ess)),
         )
         if failfast:
-            print(
+            debug(
                 "WHITE-LIGHT QUALITY GATE FAIL-FAST: first-block minimum "
                 f"science ESS is below {float(failfast_ess):g}; skipping "
                 "extension blocks."
@@ -159,7 +161,7 @@ def _continue_mcmc_until_geometry_gate(
         # chain cannot bring the count back under the limit.
         divergence_stop = divergences > int(max_divergences)
         if divergence_stop:
-            print(
+            debug(
                 f"White-light chain has {divergences} divergent transition(s); "
                 "extension blocks cannot remove them, so none are drawn."
             )
@@ -182,8 +184,9 @@ def _continue_mcmc_until_geometry_gate(
                     next(iter(flat.values())).shape[0]
                 ),
             }
+        info('White-light convergence checks need more draws; extending the sampling.')
         extra_count += 1
-        print(
+        debug(
             "WHITE-LIGHT QUALITY GATE NOT MET; continuing the same warmed "
             f"chain with retained block {extra_count}/{max_extra_blocks}."
         )

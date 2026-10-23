@@ -1,5 +1,9 @@
 """Low- and high-resolution spectroscopic fitting."""
 
+from .output_paths import OutputPaths, state_path
+
+from koala.console import debug, info, spectroscopy_verdict, grid_description, joint_display
+
 import os
 from types import SimpleNamespace
 import glob
@@ -9,7 +13,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-from .plotting import plot_transmission_spectrum, plot_wavelength_offset_summary
 from models.sing_ld import (
     SING_TABULATED_OFFSET,
     SING_TABULATED_SCATTER,
@@ -43,7 +46,6 @@ from .config import (
 )
 from .artifacts import _science_artifact_fingerprint, _atomic_save_npy, ArtifactSet
 from .outputs import (
-    plot_noise_binning_robust,
     save_noise_binning_data,
     compute_u_from_c,
     save_results,
@@ -134,14 +136,14 @@ def _prepare_joint_geometry(
             for name in sites
         },
     }
-    print(
+    debug(
         f"Joint geometry ({stage_name}): sampling shared "
         f"{', '.join(sites)} with Gaussian priors of "
         f"{inflation:g}x the white-light posterior std; "
         f"sampler={spectro_sampler}."
     )
     for name in sites:
-        print(
+        debug(
             f"  {name}: centre={np.asarray(prior[name], dtype=float)}, "
             f"prior sigma={np.asarray(prior[f'sigma_{name}'], dtype=float)}"
         )
@@ -263,7 +265,7 @@ def _calibrate_sing_offsets(
         'geometry_handoff': wl_geometry_handoff['artifact_fingerprint_sha256'],
     }
     gray_digest = _science_artifact_fingerprint('sing_gray_offset', gray_fingerprint_inputs)
-    gray_artifact_path = os.path.join(
+    gray_artifact_path = state_path(
         output_dir,
         f"{instrument_full_str}_{lr_bin_str}_sing_gray_offset_{gray_digest[:12]}.json",
     )
@@ -276,11 +278,11 @@ def _calibrate_sing_offsets(
                 json.dumps(gray_fingerprint_inputs, sort_keys=True, default=str).encode()
             ).hexdigest():
                 fitted_offsets = cached_gray
-                print(f"[Sing LD] reusing fitted gray offsets from {gray_artifact_path}", flush=True)
+                debug(f"[Sing LD] reusing fitted gray offsets from {gray_artifact_path}", flush=True)
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             fitted_offsets = None
     if fitted_offsets is None:
-        print("[Sing LD] running broad independent (u_plus, u_minus) coarse calibration pass", flush=True)
+        debug("[Sing LD] running broad independent (u_plus, u_minus) coarse calibration pass", flush=True)
         gray_builder_kwargs = dict(lr_model_builder_kwargs)
         gray_builder_kwargs['ld_mode'] = 'uniform'
         # The gray calibration pass is a fixed-geometry lane fit.
@@ -349,7 +351,7 @@ def _calibrate_sing_offsets(
                 **gray_args,
             )
             gray_diag_paths = sorted(glob.glob(os.path.join(
-                output_dir, 'chunks', f"{gray_prefix}*_chunk_*.diagnostics.json"
+                OutputPaths(output_dir).state_dir, 'chunks', f"{gray_prefix}*_chunk_*.diagnostics.json"
             )))
             gray_ok, gray_diagnostics = _assess_sing_gray_fit(
                 gray_samples, gray_diag_paths, min_ess=100.0,
@@ -357,7 +359,8 @@ def _calibrate_sing_offsets(
             if not gray_ok:
                 raise RuntimeError(f"gray calibration diagnostics failed: {gray_diagnostics}")
             if gray_diagnostics['channels_below_ess_warning']:
-                print(
+                info('Some limb-darkening calibration estimates have low effective sample size; their uncertainties are increased.')
+                debug(
                     "[Sing LD] WARNING: calibration LD bulk ESS below "
                     f"{gray_diagnostics['required_min_bulk_ess']:.0f} in channels "
                     f"{gray_diagnostics['channels_below_ess_warning']}; "
@@ -387,14 +390,15 @@ def _calibrate_sing_offsets(
             fitted_offsets['tabulated_delta_sigma'] = SING_TABULATED_SCATTER['delta']
             write_offset_artifact(gray_artifact_path, fitted_offsets, gray_fingerprint_inputs)
         except Exception as error:
-            print(
+            info('The limb-darkening calibration failed; using the tabulated stagger offsets.')
+            debug(
                 f"[Sing LD] WARNING: free gray calibration unavailable or failed ({error}); "
                 "falling back to tabulated Stagger offsets.",
                 flush=True,
             )
             fitted_offsets = None
     if fitted_offsets is not None:
-        print(
+        debug(
             "[Sing LD] gray offsets fitted vs tabulated: "
             f"delta_l={float(fitted_offsets['l']):+.6f} +/- {float(fitted_offsets['l_sigma']):.6f} "
             f"vs {SING_TABULATED_OFFSET['l']:+.6f}; "
@@ -483,6 +487,15 @@ def _initialize_spectroscopic_start(
             )
 
 def _spectroscopic_ld(model, inputs, wavelengths, widths, bin_str):
+    if joint_display.get() is not None:
+        label = inputs.instrument
+        if inputs.order is not None:
+            label += f' order {inputs.order}'
+        else:
+            label = inputs.instrument_full_str
+        info('')
+        info(f'{label}: spectroscopy {grid_description(bin_str)}, {len(wavelengths)} channels, '
+             'orbit fixed to the joint white-light posterior')
     sweep = getattr(inputs, 'execution_context', None)
     compute = lambda: _spectroscopic_ld_uncached(model, inputs, wavelengths, widths, bin_str)
     if sweep is None:
@@ -562,7 +575,7 @@ def _spectroscopic_model(geometry, model, inputs, time, ld_coefficients,
             np.asarray(geometry.T0_BASE),
             _spectroscopic_window_duration(geometry) + (2 * half_width if free_t0 else 0),
         )
-        print(
+        debug(
             f"Jaxoplanet transit window ({label}): "
             f"{len(transit_window_indices)}/{time.size} active cadences."
         )
@@ -609,7 +622,7 @@ def _spectroscopic_model(geometry, model, inputs, time, ld_coefficients,
                 jnp.atleast_1d(geometry.PERIOD_FIXED), jnp.atleast_1d(geometry.T0_BASE),
                 jnp.atleast_1d(geometry.A_RS_BASE), jnp.atleast_1d(geometry.B_BASE),
                 jnp.atleast_1d(geometry.HARMONICA_ECC), jnp.atleast_1d(geometry.HARMONICA_OMEGA))
-        print(f'Prepared one wavelength-independent Keplerian orbit for {label}.')
+        debug(f'Prepared one wavelength-independent Keplerian orbit for {label}.')
     surface_basis = None
     if ld_mode == 'fixed' and not free_t0:
         surface_basis = _prepare_fixed_surface_basis(
@@ -619,7 +632,7 @@ def _spectroscopic_model(geometry, model, inputs, time, ld_coefficients,
             omega=geometry.HARMONICA_OMEGA, ld_profile=model.ld_profile,
         )
         if surface_basis is not None:
-            print(f'Prepared exact fixed-geometry surface basis for {label} inference.')
+            debug(f'Prepared exact fixed-geometry surface basis for {label} inference.')
     fit_model = _build_spectroscopic_model(model.create_vectorized_model, **builder_kwargs)
     # The post-fit time-shift response reads each channel's model light curve from the
     # 'obs' site, which the exact cadence-reduced likelihood replaces with factors.
@@ -702,6 +715,10 @@ def _sample_spectroscopic_stage(geometry, model, inputs, stage, fit, spectro_sam
         ),
     )
 
+    orbit_description = ('constrained by' if fit.joint_geometry is not None else 'fixed to')
+    if joint_display.get() is None:
+        info(f'Spectroscopy {grid_description(stage.bin_str)}: {len(stage.wavelengths)} channels, '
+             f'orbit {orbit_description} the white-light posterior')
     samples = _run_sampling_stage(
         fit.model,
         stage.key_mcmc,
@@ -779,8 +796,15 @@ def _sample_spectroscopic_stage(geometry, model, inputs, stage, fit, spectro_sam
         **model_kwargs,
     )
     if samples is None:
-        print(f"{stage.resolution.replace('_', '-').capitalize()} chunk job complete.")
+        debug(f"{stage.resolution.replace('_', '-').capitalize()} chunk job complete.")
         return
+    from .sampling import _spectro_failed_lanes
+    failed, _ = _spectro_failed_lanes(samples, None, model.spectro_min_depth_ess,
+        model.spectro_max_divergences, surface_science_sites=getattr(fit.model, 'surface_science_sites', None))
+    failed = getattr(samples, 'console_failed_indices', failed)
+    spectroscopy_verdict(stage.wavelengths, failed,
+        extra_draws=getattr(samples, 'console_extra_draws', 0),
+        refitted=getattr(samples, 'console_refitted', 0))
     sweep = getattr(inputs, 'execution_context', None)
     if sweep is not None:
         sweep.remember(stage.name, samples, law=model.ld_profile)
@@ -906,29 +930,24 @@ def _evaluate_spectroscopic_posterior(geometry, model, fit, coefficients, sample
 
 
 def _save_spectroscopic_products(geometry, model, inputs, stage, fit, samples,
-                                  time, flux, flux_error, params, plot_params, templates):
-    """Write either resolution's products with the established filenames."""
-    summary, spectrum, limbs, strings, posterior = (
-        (22, 24, 26, 27, 28) if stage.name == 'lowres' else (34, 31, 35, 36, 37)
-    )
+                                  time, flux, flux_error, params, plot_params, templates, model_all, initial_ld):
+    """Write either resolution's science tables and diagnostic figures."""
+    from . import diagnostic_figures as figures
+    from .outputs import _trend_from_params_np
+    paths = OutputPaths(inputs.output_dir, inputs.instrument_full_str)
+    grid = stage.bin_str
+    prefix = paths.stem(grid)
     gp_trend, spot_trend, spot_trend2, jump_trend, exp_trend = templates
     total_error = np.nanmedian(samples['total_error'], axis=0)
-    prefix = f'{inputs.output_dir}/{stage.artifact_stem}'
-    plot_prefix = f'{inputs.output_dir}/{{}}_{stage.artifact_stem}'
     orbit = dict(period=geometry.PERIOD_FIXED)
-    if inputs.plots_mode == 'full':
-        plot_wavelength_offset_summary(
-            time, flux, total_error, stage.wavelengths, plot_params,
-            dict(**orbit, transit_engine=model.transit_engine, param_method=geometry.param_method),
-            plot_prefix.format(summary) + '_summary.png', detrend_type=fit.detrend_type,
-            gp_trend=gp_trend, spot_trend=spot_trend, spot_trend2=spot_trend2,
-            jump_trend=jump_trend, exp_trend=exp_trend,
-        )
-    wavelengths = np.array(stage.wavelengths)
+    wavelengths = np.asarray(stage.wavelengths)
+    label = inputs.instrument_full_str + ' | ' + figures.grid_title(grid)
     if model.surface_config['model'] != 'eclipse':
-        plot_transmission_spectrum(wavelengths, samples['rors'], plot_prefix.format(spectrum) + '_spectrum')
-        save_results(wavelengths, stage.wavelength_err, samples, prefix + '.csv')
-    save_surface_results(wavelengths, stage.wavelength_err, samples, prefix + '.csv')
+        figures.spectrum(wavelengths, samples['rors'], paths.figure(grid, 'spectrum'), label=label,
+                         wavelength_err=stage.wavelength_err)
+        save_results(wavelengths, stage.wavelength_err, samples, paths.table(grid, 'spectrum'))
+    save_surface_results(wavelengths, stage.wavelength_err, samples, paths.table(grid, 'spectrum'),
+                         plots=inputs.plots_mode)
     if getattr(fit, 'free_t0', False):
         from .time_shift import save_time_shift_products
         from .time_shift_response import spectroscopic_responses
@@ -939,22 +958,41 @@ def _save_spectroscopic_products(geometry, model, inputs, stage, fit, samples,
             wavelengths, stage.wavelength_err, samples, prefix, geometry,
             responses=responses, response_seconds=response_seconds,
         )
-    save_detailed_fit_results(
+    params_frame, _ = save_detailed_fit_results(
         time, flux, flux_error, stage.wavelengths, stage.wavelength_err, samples,
         params, orbit, fit.detrend_type, prefix, total_error,
         gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend,
         joint_geometry=None if fit.joint_geometry is None else fit.joint_geometry['summary'],
     )
+    if inputs.plots_mode == 'full':
+        trends = np.asarray([_trend_from_params_np(
+            fit.detrend_type, np.asarray(time), plot_params, idx=index,
+            gp_trend=gp_trend, spot_trend=spot_trend, spot_trend2=spot_trend2,
+            jump_trend=jump_trend, exp_trend=exp_trend) for index in range(len(wavelengths))])
+        figures.channel_diagnostics(time, flux, model_all, wavelengths, trends,
+                                    paths.figure(grid, 'lightcurves'), label=label, event=model.surface_config['model'],
+                                    t0=figures.event_epoch(geometry.T0_BASE, geometry.PERIOD_FIXED, model.surface_config["model"]))
+        figures.residual_map(time, wavelengths, np.asarray(flux)-model_all,
+                             paths.figure(grid, 'residual_map'), label=label, event=model.surface_config['model'], wavelength_err=stage.wavelength_err,
+                             t0=figures.event_epoch(geometry.T0_BASE, geometry.PERIOD_FIXED, model.surface_config["model"]))
+        figures.limb_darkening(wavelengths, params_frame, initial_ld,
+                               paths.figure(grid, 'limb_darkening'), label=label, law=model.ld_profile)
+        white_path = paths.table('whitelight', 'lightcurve')
+        white = pd.read_csv(white_path) if os.path.exists(white_path) else None
+        white_residual = (None if white is None else
+                          white.loc[white.is_outlier == 0, 'residual'].to_numpy())
+        figures.noise(np.asarray(flux)-model_all, paths.figure(grid, 'noise'),
+                      label=label, white=white_residual, wavelengths=wavelengths)
     if model.transit_engine == 'harmonica' and _has_harmonica_odd_samples(samples):
         save_harmonica_limb_products(
             wavelengths=wavelengths, wavelength_err=stage.wavelength_err,
             rors_samples=_harmonica_model_radius_samples(samples, model.harmonica_spectro_parameterization),
-            harmonic_samples=_harmonica_sample_payload(samples), csv_path=prefix + '_limb_spectra.csv',
-            limb_spectrum_path=plot_prefix.format(limbs) + '_limb_spectra.png',
-            transmission_strings_path=plot_prefix.format(strings) + '_transmission_strings.png',
-            posterior_strings_path=plot_prefix.format(posterior) + '_transmission_string_posterior.png',
-            posterior_samples_path=prefix + '_limb_posterior_samples.npz',
-            title_prefix=f'{inputs.planet_str} - {stage.bin_str}',
+            harmonic_samples=_harmonica_sample_payload(samples), csv_path=paths.table(grid, 'limbs'),
+            limb_spectrum_path=paths.figure(grid, 'limbs') if inputs.plots_mode == 'full' else None,
+            transmission_strings_path=paths.figure(grid, 'limb_profiles') if inputs.plots_mode == 'full' else None,
+            posterior_strings_path=paths.figure(grid, 'limb_outline') if inputs.plots_mode == 'full' else None,
+            posterior_samples_path=paths.table(grid, 'limb_samples', 'npz'),
+            title_prefix=inputs.instrument_full_str + ' | ' + figures.grid_title(stage.bin_str),
         )
 
 
@@ -973,15 +1011,15 @@ def run_low_resolution_stage(
         )
 
         lr_mask_path = (
-            f"{inputs.output_dir}/{lr_artifact_stem}_spectroscopic_outlier_mask.npy"
+            state_path(inputs.output_dir, f"{lr_artifact_stem}_spectroscopic_outlier_mask.npy")
         )
-        lr_params_path = f"{inputs.output_dir}/{lr_artifact_stem}_bestfit_params.csv"
-        lr_limb_csv_path = f"{inputs.output_dir}/{lr_artifact_stem}_limb_spectra.csv"
+        lr_params_path = OutputPaths(inputs.output_dir, inputs.instrument_full_str).table(lr_bin_str, "params", "csv")
+        lr_limb_csv_path = OutputPaths(inputs.output_dir, inputs.instrument_full_str).table(lr_bin_str, "limbs", "csv")
         lr_limb_samples_path = (
-            f"{inputs.output_dir}/{lr_artifact_stem}_limb_posterior_samples.npz"
+            OutputPaths(inputs.output_dir, inputs.instrument_full_str).table(lr_bin_str, "limb_samples", "npz")
         )
         lr_manifest_path = (
-            f"{inputs.output_dir}/{lr_artifact_stem}_artifacts.manifest.json"
+            state_path(inputs.output_dir, f"{lr_artifact_stem}_artifacts.manifest.json")
         )
         lr_artifact_fingerprint = _science_artifact_fingerprint(
             "low_resolution",
@@ -1025,11 +1063,12 @@ def run_low_resolution_stage(
             extra_condition=required_lr_limb_products_exist
         )
         if lr_cache_valid:
-            print(f'Reusing low-res results from {lr_bin_str}; skipping low-res fit.')
+            info(f'Reusing the previous spectroscopy fit {grid_description(lr_bin_str)}.')
             time_mask = np.load(lr_mask_path)
             valid = ~time_mask
         elif os.path.exists(lr_mask_path) or os.path.exists(lr_params_path):
-            print(
+            info('The previous low-resolution fit does not match this run; refitting it.')
+            debug(
                 "Existing low-resolution products are incomplete, unverified, "
                 "or do not match the current data/LD target; recomputing them."
             )
@@ -1037,8 +1076,8 @@ def run_low_resolution_stage(
     if need_lowres_analysis and valid is None:
         if model.uses_surface_model:
             jax.clear_caches()
-            print("Released white-light JAX executables before surface spectroscopy.")
-        print(f"\n--- Running Low-Resolution Analysis (Binned to {lr_bin_str}) ---")
+            debug("Released white-light JAX executables before surface spectroscopy.")
+        debug(f"\n--- Running Low-Resolution Analysis (Binned to {lr_bin_str}) ---")
         joint_geometry_lr, spectro_sampler, jaxoplanet_lr_nuts_kwargs = (
             _prepare_joint_geometry(
                 inputs.flags, stage_name='lowres', transit_engine=model.transit_engine,
@@ -1054,7 +1093,7 @@ def run_low_resolution_stage(
         num_lcs_lr = int(inputs.dataset.flux_err_lr.shape[0])
 
         if 'gp' in model.detrending_type:
-            gp_df = pd.read_csv(f'{inputs.output_dir}/{inputs.instrument_full_str}_whitelight_GP_database.csv')
+            gp_df = pd.read_csv(state_path(inputs.output_dir, f'{inputs.instrument_full_str}_whitelight_GP_database.csv'))
             gp_trend_raw = gp_df['gp_trend'].values
             if len(gp_trend_raw) == len(inputs.wl_mad_mask):
                 gp_trend_raw = gp_trend_raw[~inputs.wl_mad_mask]
@@ -1065,7 +1104,7 @@ def run_low_resolution_stage(
             model.detrending_type, model.spectro_fixed_timescale_trends
         )
 
-        print(f"Low-res: {num_lcs_lr} light curves.")
+        debug(f"Low-res: {num_lcs_lr} light curves.")
         DEPTHS_BASE_LR = jnp.tile(geometry.DEPTH_BASE, (num_lcs_lr, 1))
 
         init_params_lr = {
@@ -1184,14 +1223,8 @@ def run_low_resolution_stage(
 
         residuals = flux_lr - model_all
         _lr_dt_sec = float(np.nanmedian(np.diff(np.array(time_lr)))) * 86400.0
-        if inputs.plots_mode == 'full':
-            plot_noise_binning_robust(
-                residuals, _lr_dt_sec,
-                f"{inputs.output_dir}/25_{lr_artifact_stem}_noisebin.png",
-                title=f"Low-Res Noise Binning ({lr_bin_str})",
-            )
         save_noise_binning_data(
-            residuals, f'{inputs.output_dir}/25_{lr_artifact_stem}_noisebin.csv',
+            residuals, state_path(inputs.output_dir, f"{lr_artifact_stem}_noise.csv"),
         )
 
         medians = np.nanmedian(residuals, axis=1, keepdims=True)
@@ -1230,6 +1263,7 @@ def run_low_resolution_stage(
             geometry, model, inputs, stage, fit_lr, samples_lr, time_lr, flux_lr,
             flux_err_lr, map_params_lr, plot_params_lr,
             (gp_trend_lr, spot_trend_lr, spot_trend2_lr, jump_trend_lr, exp_trend_lr_save),
+            np.asarray(model_all)[:, valid], U_mu_lr,
         )
         lr_artifact_set.write_manifest()
     return (valid, spot_trend, spot_trend2, jump_trend,)
@@ -1242,8 +1276,8 @@ def run_high_resolution_stage(
 ):
     if model.uses_surface_model:
         jax.clear_caches()
-        print("Released low-resolution JAX executables before high-resolution surface inference.")
-    print(f"\n--- Running High-Resolution Analysis (Binned to {hr_bin_str}) ---")
+        debug("Released low-resolution JAX executables before high-resolution surface inference.")
+    debug(f"\n--- Running High-Resolution Analysis (Binned to {hr_bin_str}) ---")
     joint_geometry_hr, spectro_sampler, jaxoplanet_hr_nuts_kwargs = (
         _prepare_joint_geometry(
             inputs.flags, stage_name='highres', transit_engine=model.transit_engine,
@@ -1258,7 +1292,7 @@ def run_high_resolution_stage(
     flux_err_hr = jnp.array(inputs.dataset.flux_err_hr[:, inputs.spec_good_mask])
 
     if 'gp' in model.detrending_type:
-        gp_df = pd.read_csv(f'{inputs.output_dir}/{inputs.instrument_full_str}_whitelight_GP_database.csv')
+        gp_df = pd.read_csv(state_path(inputs.output_dir, f'{inputs.instrument_full_str}_whitelight_GP_database.csv'))
         gp_trend_raw = gp_df['gp_trend'].values
         if len(gp_trend_raw) == len(inputs.wl_mad_mask):
             gp_trend_raw = gp_trend_raw[~inputs.wl_mad_mask]
@@ -1399,14 +1433,8 @@ def run_high_resolution_stage(
 
     residuals_hr = np.array(flux_hr - model_all_hr)
     _hr_dt_sec = float(np.nanmedian(np.diff(np.array(time_hr)))) * 86400.0
-    if inputs.plots_mode == 'full':
-        plot_noise_binning_robust(
-            residuals_hr, _hr_dt_sec,
-            f"{inputs.output_dir}/33_{hr_artifact_stem}_noisebin.png",
-            title=f"High-Res Noise Binning ({hr_bin_str})",
-        )
     save_noise_binning_data(
-        residuals_hr, f'{inputs.output_dir}/33_{hr_artifact_stem}_noisebin.csv',
+        residuals_hr, state_path(inputs.output_dir, f"{hr_artifact_stem}_noise.csv"),
     )
 
     plot_params_hr = dict(map_params_hr)
@@ -1417,5 +1445,6 @@ def run_high_resolution_stage(
         geometry, model, inputs, stage, fit_hr, samples_hr, time_hr, flux_hr,
         flux_err_hr, map_params_hr, plot_params_hr,
         (gp_trend, spot_trend, spot_trend2, jump_trend, exp_trend_hr),
+        model_all_hr, U_mu_hr_init,
     )
     return True

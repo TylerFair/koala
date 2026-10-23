@@ -1,156 +1,258 @@
 # Your first fit
 
-Fit the bundled WASP-39 b NIRISS/SOSS order 1 observation from the repository root after [installation](install.md).
-koala fits the white-light transit, then holds its orbit fixed while fitting the wavelength channels at $R=100$.
-The input has 537 integrations and groups adjacent detector columns in eights. It has no time averaging.
-The FITS file is [included in the repository](https://github.com/TylerFair/koala/blob/main/examples/data/README.md) and available as a {download}`download <../examples/data/WASP-39_soss_binned8.fits>`.
+In this tutorial we'll fit a transit of the hot Saturn WASP-39 b observed with NIRISS/SOSS.
+We'll start from the extracted spectra and finish with the planet's transmission spectrum.
+The data come with koala, so all you need is a working [installation](install.md).
+Run everything from the top of the `koala` directory you cloned.
 
-## Set the fit
+## A first look at the data
 
-Save this as `config.yaml`. It is also supplied as `examples/niriss_soss_order1.yaml`.
+The observation is in `examples/data/WASP-39_soss_binned8.fits`.
+It's an exoTEDRF extraction of the JWST Early Release Science observation of WASP-39 b (program 1366, observation 21), with 537 integrations spread over 8.2 hours.
+To keep the file small, every eight neighbouring detector columns have been added together, which leaves 256 wavelengths in each SOSS order.
+The integrations themselves are untouched.
+
+It's always worth looking at the data before fitting anything, so let's open order 1:
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from astropy.io import fits
+
+with fits.open("examples/data/WASP-39_soss_binned8.fits") as hdul:
+    time = hdul["TIME"].data          # BMJD_TDB
+    wave = hdul["WAVE O1"].data       # microns
+    flux = hdul["FLUX O1"].data       # shape (integration, wavelength)
+
+hours = (time - time[0]) * 24
+white = flux.sum(axis=1)
+white /= np.median(white[:100])
+image = flux / np.median(flux[:100], axis=0)
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 7), sharex=True)
+ax1.plot(hours, white, ".k", ms=2)
+ax1.set_ylabel("white-light flux")
+ax2.pcolormesh(hours, wave, image.T, vmin=0.97, vmax=1.01, shading="nearest")
+ax2.set_xlabel("hours since the first integration")
+ax2.set_ylabel("wavelength (µm)")
+```
+
+```{figure} _static/first_fit_data.png
+:alt: The white-light curve of the WASP-39 b SOSS observation, and the flux at each wavelength against time
+```
+
+The top panel is the white-light curve, the sum over all wavelengths, and the transit is the 2% dip in the middle.
+The bottom panel shows every wavelength as one row, divided by its flux before the transit.
+The transit shows up at every wavelength, and the data get noisier towards 2.8 µm, where there are fewer photons.
+What we're after is much harder to see by eye: small changes in the transit depth with wavelength, caused by the planet's atmosphere.
+
+## Setting up the fit
+
+koala reads everything it needs from one YAML file.
+Here's the one for this observation, which is also in `examples/niriss_soss_order1.yaml`:
 
 ```yaml
 planet:
   name: WASP-39
   period: {value: 4.05528043, prior: fixed}
-  duration: {value: 0.11693087, prior: log_uniform, low: 0.01, high: 1.0}
   t0: {value: 59787.055, prior: uniform, low: 59787.005, high: 59787.105}
-  b: {value: 0.4498, prior: uniform, low: 0.0, high: 1.5}
-  rprs: {value: 0.1457, prior: uniform, low: 0.01, high: 0.5}
+  duration: {value: 0.117, prior: log_uniform, low: 0.01, high: 1.0}
+  b: {value: 0.45, prior: uniform, low: 0.0, high: 1.5}
+  rprs: {value: 0.146, prior: uniform, low: 0.01, high: 0.5}
 
 stellar:
   teff: 5509
   logg: 4.22
   feh: 0.04
-  ld_model: "stagger"
-  ld_data_path: "exotic_ld_data"
 
-instrument: 'NIRISS/SOSS'
+instrument: NIRISS/SOSS
 order: 1
 
-input_dir: 'examples/data'
-input_file: 'WASP-39_soss_binned8.fits'
-output_dir: 'results/WASP-39_SOSS_ORDER1'
+input_file: examples/data/WASP-39_soss_binned8.fits
+output_dir: results/WASP-39_SOSS_ORDER1
 
 resolution:
   high: 100
-
-flags:
-  detrending_type: 'linear'
-
-host_device: "cpu"
 ```
 
-The period is fixed. Duration, epoch, impact parameter and radius ratio are fitted with the stated priors.
-Times are BMJD_TDB = BJD_TDB − 2400000.5; durations and periods are in days.
-The stellar grid supplies limb-darkening starting values and downloads to `exotic_ld_data` on first use.
-The default quadratic coefficients are fitted with independent uniform priors on $u_1+u_2$ in $(-1,2)$ and $u_1-u_2$ in $(-2,2)$.
-The linear trend and noise term are fitted too. Everything else uses the defaults.
+The `planet` block gives a starting value and a prior for each property of the orbit.
+We hold the period fixed, since one transit can't measure it better than the published ephemeris.
+The others are fitted with broad priors: the mid-transit time `t0` anywhere in a 2.4-hour window, the transit duration, the impact parameter `b`, and the radius ratio `rprs` ($R_p/R_*$).
+Times are in BMJD_TDB (that's BJD_TDB − 2400000.5) and the period and duration are in days.
+Literature values often use a different zero point, so it's worth checking this when you set up your own planet.
 
-## Run it
+The `stellar` block is the star's effective temperature, surface gravity and metallicity.
+koala uses these to look up the limb darkening at each wavelength in a grid of stellar models.
+By default those values are only starting points, and the limb darkening is fitted freely.
 
-In a fresh notebook kernel, run this before importing JAX:
+`instrument` and `order` say which observing mode this is ([other modes](guide/instruments.md) are set the same way), `input_file` is the extracted spectra, and `output_dir` is where the results go.
+Finally, `resolution` sets the wavelength channels: here, bins with a constant resolving power $R = \lambda/\Delta\lambda = 100$.
+
+And that's everything a fit needs.
+Everything else has a default that's a good place to start:
+
+- a linear trend in time for each light curve,
+- quadratic limb darkening with wide uniform priors on its two coefficients,
+- an extra white-noise (jitter) term on top of the reported flux uncertainties,
+- integrations more than 4σ from the model are clipped,
+- four chains of 1000 posterior draws each, which have to agree before koala accepts a fit.
+
+[Configuring a fit](guide/configuration.md) shows how to change these.
+
+## Running koala
+
+Now we can run the fit from a terminal:
+
+```bash
+koala -c examples/niriss_soss_order1.yaml
+```
+
+or from a notebook (start a fresh kernel, so koala can set up JAX before anything else imports it):
 
 ```python
 import koala
-koala.fit("config.yaml")
+
+koala.fit("examples/niriss_soss_order1.yaml")
 ```
 
-This sets up CPU host devices before JAX starts and runs the same pipeline as the command line.
-White-light sampling and channel progress appear in the cell output.
-On a cluster, start the notebook on an allocated compute node.
-The command-line equivalent is:
-
-```bash
-koala -c config.yaml
-```
-
-This fit took 842.80 s (14 min 3 s) on 16 cores of an Intel Xeon Gold 6248R node, with JAX 0.6.2 and the stellar-model files already downloaded.
-That wall time includes an automatic white-light retry after two divergent transitions; the retry passed the convergence checks with zero divergences.
-Here is the real output, abridged:
+This fit took just under 6 minutes on 16 cores of a cluster node (Intel Xeon Gold 6248R).
+Here's what koala printed along the way:
 
 ```text
-Data length: (537,)
-Fitting whitelight for outliers and bestfit parameters
-...
-White-light Laplace chain had 2 divergent transition(s); rerunning it once with target acceptance 0.99 (smaller steps) before any fallback.
-sample: 100%|██████████| 1200/1200 [02:06<00:00,  9.48it/s]
-...
-Running chunked MCMC: 115 channels in blocks of 16 (mode=serial)
-chunk 0:16 sample: 100%|██████████| 1000/1000 [00:42<00:00, 29.77it/s]
-...
-chunk 112:115 sample: 100%|██████████| 1000/1000 [00:42<00:00, 28.31it/s]
-All chunks complete! Final shape: (4000, 115)
+koala 0.1.0 | WASP-39 | NIRISS/SOSS order 1 | CPU, 16 cores
+Reading examples/data/WASP-39_soss_binned8.fits
+  exoTEDRF spectra with time, wavelength, flux and flux error
+  537 integrations over 8.2 hours, 246 wavelength columns from 0.89 to 2.79 µm
+  Binned to 115 channels at R = 100
+Planet parameters:
+  period    fixed at 4.05528043
+  t0        uniform(59787.005, 59787.105), start 59787.055
+  duration  log-uniform(0.01, 1.0), start 0.117
+  b         uniform(0.0, 1.5), start 0.45
+  rprs      uniform(0.01, 0.5), start 0.146
+Limb darkening: quadratic law with uniform priors on u1 + u2 and u1 - u2
+Downloaded stellar limb-darkening data.
+White light: transit with a linear trend, 4 chains of 1000 draws
+sample: 100%|██████████████████████████████████████████████████| 1200/1200 [00:35<00:00, 33.33it/s]
+White-light sampling had divergences; retrying with smaller steps.
+sample: 100%|██████████████████████████████████████████████████| 1200/1200 [01:00<00:00, 19.94it/s]
+  Converged: R-hat <= 1.001, bulk effective sample size >= 1278, no divergences
+  rprs             0.14591 ± 0.00018
+  b                0.4511 ± 0.0047
+  t0               59787.056748 ± 0.000014 BMJD_TDB
+  duration         0.119602 ± 0.000088 d
+  Residual scatter 109 ppm; 1 integration clipped at 4σ
+Limb darkening from stellar models: 100%|██████████████████████| 115/115 [00:00<00:00, 1533.79it/s]
+Spectroscopy at R = 100: 115 channels, orbit fixed to the white-light posterior
+Channels: 100%|██████████████████████████████████████████████████| 115/115 [03:04<00:00,  1.60s/it]
+All 115 channels passed the convergence checks!
+Spectrum: results/WASP-39_SOSS_ORDER1/WASP-39_NIRISS_SOSS_order1_R100_spectrum.csv
+Figures: results/WASP-39_SOSS_ORDER1/figures/
+Full log: results/WASP-39_SOSS_ORDER1/koala.log
+Done in 5 min 51 s.
 ```
 
-## Four views of the fit
+Let's go through that.
+First koala reads the file and tells us what it found, which is a good moment to check that the instrument, the number of integrations and the wavelength range are what you expect.
+It then prints the priors it's going to use.
+The first time you fit a star, it also downloads the stellar models it needs for the limb darkening.
 
-First, look at the white-light curve and its residuals.
-Then compare the wavelength channels and the spectrum.
-The larger points in these figures are time bins for display only.
-koala fits the individual integrations.
-These four figures are from the archived bundled-data fit; clipping and sampler results can differ between runs.
+Next it fits the white-light curve.
+Adding up all the wavelengths gives the most precise light curve we have, so this is where koala measures the orbit: the transit time, duration and impact parameter, along with the white-light radius ratio, limb darkening, trend and jitter.
+Here the first set of chains had divergent transitions, which happens when the sampler's steps are too big for the shape of the posterior, so koala ran them again with smaller steps.
+Once the four chains agreed, it printed the results and how many outlying integrations it clipped.
 
-::::{tab-set}
+Then it looks up the limb darkening at each wavelength and fits each channel with the orbit held fixed at the white-light result.
+Each channel gets its own radius ratio, limb darkening, trend and jitter.
+The progress bar counts channels, and at the end koala checks every channel's chains and tells us whether they all converged.
 
-:::{tab-item} White light
-```{figure} _static/soss_whitelight.png
-:alt: Normalized WASP-39 white-light flux and fitted model
+If you run the same command again, koala notices the finished work in the output directory and reuses it instead of fitting everything again.
 
-We sum the flux over wavelength to measure the transit geometry.
-The black curve is the fitted model.
-```
-:::
+## The white-light fit
 
-:::{tab-item} Residuals
-```{figure} _static/soss_residuals.png
-:alt: WASP-39 white-light residuals in parts per million
-
-The white-light data minus the complete model, in ppm.
-Look for structure that remains after removing the transit and trend.
-```
-:::
-
-:::{tab-item} Wavelength channels
-```{figure} _static/soss_detrended.png
-:alt: Selected WASP-39 wavelength-channel light curves after division by their trends
-
-Selected wavelength channels after division by their fitted linear trends.
-The curves are offset vertically so we can see each transit.
-```
-:::
-
-:::{tab-item} Spectrum
-```{figure} _static/soss_spectrum.png
-:alt: WASP-39 transmission spectrum at resolving power 100
-
-The transit depths at $R=100$, computed from the radius-ratio posteriors.
-Horizontal bars show the wavelength-bin half-widths.
-```
-:::
-::::
-
-The channel fits hold the orbit at the white-light posterior medians.
-The spectrum is therefore conditional on that orbit.
-If you need to include the uncertainty in the shared geometry, see [joint spectroscopic geometry](tutorials/planet_parameters.md#joint-spectroscopic-geometry).
-
-## Open the results
-
-The output directory is `results/WASP-39_SOSS_ORDER1/`.
-Read the spectrum with:
+Before looking at the spectrum, let's check that the white-light fit is good.
+koala makes its own figures in `figures/` in the output directory (this one is `figures/whitelight.png`), but it's easy to make our own from the tables it saves:
 
 ```python
 from pathlib import Path
 import pandas as pd
 
 out = Path("results/WASP-39_SOSS_ORDER1")
-spectrum = pd.read_csv(next(out.glob("*_R100.csv")))
-print(spectrum[["wavelength", "depth00", "depth_err00"]])
+wl = pd.read_csv(next(out.glob("*_whitelight_lightcurve.csv")))
+good = wl["is_outlier"] == 0
+hours = wl["time_from_t0_hr"]
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), sharex=True,
+                               gridspec_kw={"height_ratios": [2, 1]})
+ax1.plot(hours[good], wl["detrended_flux"][good], ".k", ms=2, alpha=0.5)
+ax1.plot(hours, wl["transit_model"], "C1", lw=1.5)
+ax1.set_ylabel("detrended flux")
+ax2.plot(hours[good], wl["residual_ppm"][good], ".k", ms=2, alpha=0.5)
+ax2.axhline(0, color="C1", lw=1.5)
+ax2.set_xlabel("hours from mid-transit")
+ax2.set_ylabel("residual (ppm)")
 ```
 
-`wavelength` and `wavelength_err` are in µm. `depth00` and `depth_err00` are fractional transit depth and uncertainty; `depth_ppm00` and `depth_err_ppm00` give the same quantities in ppm.
-The `00` suffix is the planet index. koala can fit several planets at once, with columns `01`, `02`, and so on.
-The white-light timeseries CSV gives the model and residuals; channel plots and posterior files let you inspect the spectral fit.
-See [outputs](outputs.md) for the remaining files. Repeat the command to resume compatible completed batches.
+```{figure} _static/first_fit_whitelight.png
+:alt: The detrended white-light curve with the fitted transit model, and the residuals in ppm
+```
 
-Good job, you're ready for the [case studies](case_studies/index.md).
+The model goes right through the data, and the residuals scatter by about 110 ppm around zero with no pattern left in them, which is what we'd hope for.
+One integration at the very start of the observation was more than 4σ from the model, so koala clipped it, and it's left out of this plot.
+
+The fitted orbit is in `*_whitelight_params.csv`:
+
+```python
+params = pd.read_csv(next(out.glob("*_whitelight_params.csv")))
+print(params[["t0", "t0_err", "duration", "duration_err", "b", "b_err", "rors", "rors_err"]].iloc[0])
+```
+
+```text
+t0              59787.056748
+t0_err              0.000014
+duration            0.119602
+duration_err        0.000088
+b                   0.451094
+b_err               0.004747
+rors                0.145913
+rors_err            0.000178
+```
+
+The transit time is measured to about a second and the radius ratio to about 0.1%, which is why it pays to fit the orbit once with all the light and then hold it fixed.
+
+## The transmission spectrum
+
+Now for the fun part.
+The spectrum is in a CSV file named after the target, instrument and wavelength grid:
+
+```python
+spec = pd.read_csv(next(out.glob("*_R100_spectrum.csv")))
+
+fig, ax = plt.subplots(figsize=(9, 4))
+ax.errorbar(spec["wavelength"], spec["depth_ppm00"],
+            xerr=spec["wavelength_err"], yerr=spec["depth_err_ppm00"],
+            fmt="o", ms=3, color="k")
+ax.set_xlabel("wavelength (µm)")
+ax.set_ylabel("transit depth (ppm)")
+```
+
+```{figure} _static/first_fit_spectrum.png
+:alt: The transmission spectrum of WASP-39 b from NIRISS/SOSS order 1 at R = 100
+```
+
+That looks pretty good!
+The bumps at 1.15, 1.4, 1.9 and 2.7 µm are water absorbing in the planet's atmosphere, the same features seen in these data by [Feinstein et al. (2023)](https://doi.org/10.1038/s41586-022-05674-1).
+The `00` at the end of the column names refers to the first planet, since koala can fit several planets in the same light curve.
+The depth is $(R_p/R_*)^2$, and its uncertainty doesn't include the uncertainty in the orbit, which is the same for every channel.
+
+## Next steps
+
+To fit your own observation, copy this file and change the planet, the star, the instrument and the input file.
+These pages cover what you're likely to need next:
+
+- [configuring a fit](guide/configuration.md): priors, wavelength grids, masking bad integrations, and the other settings,
+- [instruments and input files](guide/instruments.md): which modes and file formats koala reads,
+- [limb darkening](guide/limb_darkening.md) and [trends](guide/trends.md): the model choices that matter most for a spectrum,
+- [output files](guide/outputs.md): everything in the results directory.
+
+The [WASP-39 b case study](case_studies/transmission_soss.md) carries on from here with SOSS order 2 and the full-resolution spectrum.

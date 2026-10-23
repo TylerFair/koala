@@ -1,11 +1,4 @@
 {
-  "niriss_soss_order1": {
-    "channels": 115,
-    "integrations": 537,
-    "wavelength_min_um": 0.8851346150040627,
-    "wavelength_max_um": 2.789724111557007,
-    "white_residual_rms_ppm": 108.55858465332628
-  },
   "eclipse": {
     "channels": 14,
     "integrations": 181

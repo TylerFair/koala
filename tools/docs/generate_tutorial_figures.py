@@ -37,16 +37,6 @@ def finish(fig, name):
     fig.savefig(OUT / name, dpi=180, facecolor='white')
     plt.close(fig)
 
-def limb_darkening():
-    mu=np.linspace(0,1,500)
-    fig, ax=plt.subplots(figsize=(9,4.4), layout='constrained')
-    ax.plot(mu,1-.34*(1-mu)-.20*(1-mu)**2,color=COLOR,lw=2,label='Quadratic')
-    ax.plot(mu,1-.62*(1-mu**.72),color='0.15',lw=2,ls='--',label='Power-2')
-    ax.set(xlabel=r'$\mu=\cos\theta$  (limb to stellar center)',
-        ylabel=r'$I(\mu)\,/\,I(1)$',xlim=(0,1),ylim=(.3,1.03))
-    ax.legend(frameon=False)
-    finish(fig,'limb_darkening.png')
-
 def trend_gallery():
     x=np.linspace(0,1,600); q=x-.5
     spot=.7*np.exp(-.5*((x-.43)/.05)**2)
@@ -74,27 +64,6 @@ def trend_gallery():
     fig.supxlabel('Time through the visit',fontsize=12)
     fig.supylabel('Trend relative to unity (illustrative amplitudes)',fontsize=12)
     finish(fig,'trend_gallery.png')
-
-def workflow():
-    fig=plt.figure(figsize=(9,3.5),layout='constrained')
-    axes=fig.subplots(1,3)
-    x=np.linspace(-1,1,300)
-    transit=-.02/(1+np.exp((abs(x)-.55)*35))
-    axes[0].plot(x,1+transit,color=COLOR,lw=2)
-    axes[0].set_title('1. Fit white light',fontsize=12)
-    for n,depth in enumerate([.019,.021,.023]):
-        axes[1].plot(x,1+transit*depth/.02-n*.015,color=COLOR,lw=1.8,alpha=1-n*.18)
-    axes[1].set_title('2. Fix the orbital geometry',fontsize=12)
-    axes[1].set_xlabel('Fit each wavelength channel',fontsize=10)
-    axes[2].errorbar([1,1.4,1.8],[.019,.021,.023],yerr=.0008,fmt='o',color=COLOR,mfc='white')
-    axes[2].set_title('3. Read the spectrum',fontsize=12)
-    axes[2].set_xlabel('Wavelength',fontsize=10)
-    for ax in axes:
-        ax.set(xticks=[],yticks=[])
-    axes[0].set_xlabel('Time',fontsize=10)
-    axes[0].set_ylabel('Normalized flux',fontsize=10)
-    axes[2].set_ylabel('Depth',fontsize=10)
-    finish(fig,'workflow.png')
 
 def harmonica_limbs():
     # Schema-v2 physical labels are mapped to neutral angular indices.
@@ -239,5 +208,5 @@ if __name__=='__main__':
     args=parser.parse_args()
     OUT.mkdir(parents=True,exist_ok=True)
     (OUT/'data').mkdir(exist_ok=True)
-    style(); limb_darkening(); trend_gallery(); workflow()
+    style(); trend_gallery()
     harmonica_limbs(); stacking(args.stacked_csv); eclipse_scan(args.eclipse_fits)

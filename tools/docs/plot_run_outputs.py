@@ -2,7 +2,7 @@
 
     python tools/docs/plot_run_outputs.py --runs /path/to/docs_runs_20260927
 
-The directory must contain eclipse/, phase_curve/, niriss_soss_order1/.
+The directory must contain eclipse/ and phase_curve/.
 No model functions, posterior pickles, or fitting routines are imported.
 Compact source tables and a checksum manifest are copied alongside the figures,
 so maintainers can redraw archived documentation without rerunning Koala:
@@ -71,48 +71,9 @@ def white_panel(ax, table, epoch=None, residual=False, ppm=False):
     return x
 
 
-def soss(directory, out):
-    ts=pd.read_csv(one(directory,'*_whitelight_timeseries.csv'))
-    spectrum=pd.read_csv(one(directory,'*_R100.csv'))
-    for name,residual in [('soss_whitelight.png',False),('soss_residuals.png',True)]:
-        fig,ax=plt.subplots(figsize=(9,4.4),layout='constrained')
-        white_panel(ax,ts,residual=residual)
-        ax.set_xlabel('Time from transit center (h)')
-        save(fig,out,name)
-    fig,ax=plt.subplots(figsize=(9,4.4),layout='constrained')
-    ax.errorbar(spectrum.wavelength,spectrum.depth_ppm00,
-        xerr=spectrum.wavelength_err,yerr=spectrum.depth_err_ppm00,
-        fmt='o',ms=3.5,mfc='white',mec=COLOR,ecolor=COLOR,elinewidth=.9)
-    ax.set(xlabel='Wavelength (µm)',ylabel='Transit depth (ppm)')
-    save(fig,out,'soss_spectrum.png')
-    curves=pd.read_csv(one(directory,'*_R100_lightcurves_wide.csv'))
-    params=pd.read_csv(one(directory,'*_R100_bestfit_params.csv'))
-    wl=pd.read_csv(one(directory,'*_whitelight_bestfit_params.csv'))
-    t=curves['time'].to_numpy(); hours=(t-float(wl.t0.iloc[0]))*24
-    x=t-t.min()
-    fig,ax=plt.subplots(figsize=(9,5),layout='constrained')
-    indices=np.unique(np.linspace(0,len(params)-1,5,dtype=int))
-    colors=plt.cm.magma(np.linspace(.18,.72,len(indices)))
-    for j,(i,color) in enumerate(zip(indices,colors)):
-        trend=float(params.c.iloc[i])+float(params.v.iloc[i])*x
-        flux=curves[f'flux_{i:03d}'].to_numpy()/trend
-        offset=-.032*j
-        ax.plot(hours,flux+offset,'.',ms=2,color=color,alpha=.3)
-        bx,by=binned(hours,flux)
-        ax.plot(bx,by+offset,'o',ms=3,color=color)
-        ax.text(hours.max()+.12,1+offset,f'{params.wavelength.iloc[i]:.2f} µm',
-            ha='left',va='center',fontsize=10,color=color)
-    ax.set(xlabel='Time from transit center (h)',ylabel='Detrended flux + offset',
-        xlim=(hours.min()-.1,hours.max()+1.1))
-    save(fig,out,'soss_detrended.png')
-    return {'channels':len(spectrum),'integrations':len(ts),
-        'wavelength_min_um':float(spectrum.wavelength.min()),
-        'wavelength_max_um':float(spectrum.wavelength.max()),
-        'white_residual_rms_ppm':float(ts.loc[~ts.is_outlier.astype(bool),'residual_ppm'].std(ddof=0))}
-
 
 def eclipse(directory,out):
-    ts=pd.read_csv(one(directory,'*_whitelight_timeseries.csv'))
+    ts=pd.read_csv(one(directory,'*_whitelight_lightcurve.csv'))
     emission=pd.read_csv(one(directory,'*_Rnative_emission.csv'))
     fig,axes=plt.subplots(3,1,figsize=(9,8),layout='constrained',
         gridspec_kw={'height_ratios':[1.5,1,1.5]})
@@ -132,7 +93,7 @@ def eclipse(directory,out):
 
 
 def phase(directory,out):
-    ts=pd.read_csv(one(directory,'*_whitelight_timeseries.csv'))
+    ts=pd.read_csv(one(directory,'*_whitelight_lightcurve.csv'))
     emission=pd.read_csv(one(directory,'*_Rnative_emission.csv'))
     fig,axes=plt.subplots(3,1,figsize=(9,8),layout='constrained',
         gridspec_kw={'height_ratios':[1.4,1.3,1]})
@@ -167,12 +128,10 @@ def phase(directory,out):
 def archive_inputs(runs, archive):
     """Copy only tabular products used in figures; never cache a partial run."""
     patterns={
-        'niriss_soss_order1':['*_whitelight_timeseries.csv','*_whitelight_bestfit_params.csv',
-            '*_R100.csv','*_R100_lightcurves_wide.csv','*_R100_bestfit_params.csv'],
-        'eclipse':['*_whitelight_timeseries.csv','*_whitelight_bestfit_params.csv',
-            '*_whitelight_bestfit_params_emission.csv','*_Rnative_emission.csv'],
-        'phase_curve':['*_whitelight_timeseries.csv','*_whitelight_bestfit_params.csv',
-            '*_whitelight_bestfit_params_emission.csv','*_Rnative_emission.csv']}
+        'eclipse':['*_whitelight_lightcurve.csv','*_whitelight_params.csv',
+            '*_whitelight_emission.csv','*_Rnative_emission.csv'],
+        'phase_curve':['*_whitelight_lightcurve.csv','*_whitelight_params.csv',
+            '*_whitelight_emission.csv','*_Rnative_emission.csv']}
     files=[(name,one(runs/name,pattern)) for name,items in patterns.items() for pattern in items]
     manifest=[]
     for name,src in files:
@@ -216,7 +175,7 @@ def main():
     source=archive_inputs(args.runs,args.output/'data'/'runs') if args.runs else args.archive
     style()
     summary={}
-    for name,function in [('niriss_soss_order1',soss),('eclipse',eclipse),('phase_curve',phase)]:
+    for name,function in [('eclipse',eclipse),('phase_curve',phase)]:
         summary[name]=function(source/name,args.output)
     (args.output/'data'/'run_summary.json').parent.mkdir(parents=True,exist_ok=True)
     (args.output/'data'/'run_summary.json').write_text(json.dumps(summary,indent=2)+'\n')

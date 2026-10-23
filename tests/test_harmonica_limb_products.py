@@ -162,7 +162,7 @@ def test_schema_v3_csv_round_trips_with_neutral_indices(tmp_path):
     pd.testing.assert_frame_equal(loaded, limb_df, check_exact=False, rtol=1e-13)
 
 
-def test_schema_v2_reader_uses_documented_index_mapping_once(tmp_path, caplog):
+def test_schema_v2_reader_uses_documented_index_mapping_once(tmp_path, koala_caplog):
     legacy = pd.DataFrame(
         {
             "wavelength": [1.1],
@@ -184,7 +184,7 @@ def test_schema_v2_reader_uses_documented_index_mapping_once(tmp_path, caplog):
     original = path.read_bytes()
     koala_harmonica_products._LEGACY_LIMB_SCHEMA_WARNING_EMITTED = False
 
-    with caplog.at_level("WARNING"):
+    with koala_caplog.at_level("WARNING"):
         loaded_first = load_harmonica_limb_dataframe(path)
         loaded_second = load_harmonica_limb_dataframe(path)
 
@@ -197,5 +197,5 @@ def test_schema_v2_reader_uses_documented_index_mapping_once(tmp_path, caplog):
     assert "rp_one_median" in loaded_first
     assert "rp_two_median" in loaded_second
     assert sum("legacy Harmonica limb-product schema v2" in record.message
-               for record in caplog.records) == 1
+               for record in koala_caplog.records) == 1
     assert path.read_bytes() == original

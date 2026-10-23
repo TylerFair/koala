@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse, csv, io, json, pickle, re, sys, zipfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from koala.output_paths import OutputPaths
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
@@ -58,7 +59,7 @@ def _stage_checkpoint_prefix(stage):
 def _load_chunks(output_dir, stage):
     """Load the one complete checkpoint family matching the selected stage."""
     families = {}
-    for path in (output_dir / "chunks").glob("*chunk_*_*.pkl"):
+    for path in OutputPaths(output_dir).chunks_dir.glob("*chunk_*_*.pkl"):
         match = re.search(r"_chunk_(\d+)_(\d+)\.pkl$", path.name)
         if match:
             prefix = re.sub(r"_chunk_\d+_\d+\.pkl$", "", path.name)
@@ -73,7 +74,7 @@ def _load_chunks(output_dir, stage):
     for prefix, family in families.items():
         if prefix != stage_prefix and not prefix.startswith(stage_prefix + "_"):
             continue
-        manifest_path = output_dir / "chunks" / f"{prefix}.manifest.json"
+        manifest_path = OutputPaths(output_dir).chunks_dir / f"{prefix}.manifest.json"
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text())
             signature_kind = _normalized_stage_kind(

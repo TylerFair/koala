@@ -1,6 +1,7 @@
 """Emission and stellar-surface posterior products in user-facing units."""
 
 from pathlib import Path
+from .output_paths import OutputPaths
 
 import numpy as np
 import pandas as pd
@@ -35,7 +36,7 @@ def _with_derived_phase_quantities(samples):
     return extended
 
 
-def save_surface_results(wavelengths, wavelength_err, samples, csv_filename):
+def save_surface_results(wavelengths, wavelength_err, samples, csv_filename, plots="full"):
     """Write an emission CSV and figure alongside the usual radius spectrum.
 
     Samples have the pipeline's flattened draw, wavelength, planet layout.
@@ -48,7 +49,7 @@ def save_surface_results(wavelengths, wavelength_err, samples, csv_filename):
     wavelengths = np.atleast_1d(np.asarray(wavelengths, dtype=float))
     widths = np.broadcast_to(np.asarray(wavelength_err, dtype=float), wavelengths.shape)
     if "stellar_spot_contrast" in samples:
-        _save_spot_results(wavelengths, widths, samples["stellar_spot_contrast"], csv_filename)
+        _save_spot_results(wavelengths, widths, samples["stellar_spot_contrast"], csv_filename, plots=plots)
     for name, (site, scale, label) in _PRODUCTS.items():
         if name in samples:
             values = np.asarray(samples[name], dtype=float)
@@ -78,13 +79,13 @@ def save_surface_results(wavelengths, wavelength_err, samples, csv_filename):
             if provenance is not None:
                 row["sampler_used"] = provenance[channel]
             rows.append(row)
-    stem = Path(csv_filename).with_suffix("")
-    output = stem.with_name(stem.name + "_emission.csv")
+    paths, stage = OutputPaths.from_spectrum(csv_filename)
+    output = paths.table(stage, "emission")
     frame = pd.DataFrame(rows)
     frame.to_csv(output, index=False)
 
     import matplotlib.pyplot as plt
-    from .plotting_style import apply_publication_style, save_figure, style_axis
+    from .plotting_style import apply_publication_style, save_figure, style_axis, figure_title, accent_color_for_label
 
     apply_publication_style()
     fig, axes = plt.subplots(len(products), 1, squeeze=False, sharex=True,
@@ -95,17 +96,19 @@ def save_surface_results(wavelengths, wavelength_err, samples, csv_filename):
             low, med, high = quantiles[:, :, planet]
             ax.errorbar(wavelengths, med, xerr=widths,
                         yerr=np.stack([med - low, high - med]),
-                        fmt="o", label=f"Planet {planet + 1}")
+                        fmt="o", color=accent_color_for_label(paths.prefix), label=f"Planet {planet + 1}")
         ax.set_ylabel(label)
         style_axis(ax)
         if quantiles.shape[-1] > 1:
             ax.legend()
     axes[-1, 0].set_xlabel("Wavelength [$\\mu$m]")
-    save_figure(fig, stem.with_name(stem.name + "_emission.png"))
+    from .diagnostic_figures import grid_title
+    figure_title(axes[0, 0], paths.prefix, grid_title(stage) + " | Emission")
+    save_figure(fig, paths.figure(stage or paths.prefix, "emission"))
     return frame
 
 
-def _save_spot_results(wavelengths, widths, values, csv_filename):
+def _save_spot_results(wavelengths, widths, values, csv_filename, plots="full"):
     values = np.asarray(values, dtype=float)
     if values.ndim == 2:
         values = values[..., None]
@@ -114,7 +117,7 @@ def _save_spot_results(wavelengths, widths, values, csv_filename):
     quantiles = np.nanpercentile(values, [15.865, 50, 84.135], axis=0)
     rows = []
     import matplotlib.pyplot as plt
-    from .plotting_style import apply_publication_style, save_figure, style_axis
+    from .plotting_style import apply_publication_style, save_figure, style_axis, figure_title, accent_color_for_label
 
     apply_publication_style()
     fig, ax = plt.subplots(figsize=(8.8, 4.5))
@@ -122,7 +125,7 @@ def _save_spot_results(wavelengths, widths, values, csv_filename):
         low, med, high = quantiles[:, :, spot]
         ax.errorbar(wavelengths, med, xerr=widths,
                     yerr=np.stack([med - low, high - med]), fmt="o",
-                    label=f"Spot {spot + 1}")
+                    color=accent_color_for_label(str(csv_filename)), label=f"Spot {spot + 1}")
         for channel, wavelength in enumerate(wavelengths):
             rows.append({"wavelength": wavelength, "wavelength_err": widths[channel],
                          "spot_index": spot, "contrast": med[channel],
@@ -132,6 +135,11 @@ def _save_spot_results(wavelengths, widths, values, csv_filename):
     ax.set_ylabel("Spot contrast")
     ax.legend()
     style_axis(ax)
-    stem = Path(csv_filename).with_suffix("")
-    pd.DataFrame(rows).to_csv(stem.with_name(stem.name + "_stellar_spots.csv"), index=False)
-    save_figure(fig, stem.with_name(stem.name + "_stellar_spots.png"))
+    paths, stage = OutputPaths.from_spectrum(csv_filename)
+    pd.DataFrame(rows).to_csv(paths.table(stage, "stellar_spots"), index=False)
+    from .diagnostic_figures import grid_title
+    figure_title(ax, paths.prefix, grid_title(stage) + " | Stellar spots")
+    if plots == "full":
+        save_figure(fig, paths.figure(stage or paths.prefix, "stellar_spots"))
+    else:
+        plt.close(fig)

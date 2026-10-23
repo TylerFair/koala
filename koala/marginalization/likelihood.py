@@ -1,5 +1,6 @@
 """Bounded-memory, fixed-shape JIT replay of the fitted pointwise likelihood."""
 from __future__ import annotations
+from koala.output_paths import OutputPaths
 
 from dataclasses import dataclass
 from importlib import import_module
@@ -78,13 +79,13 @@ def checkpoint_files(fit_dir, stage):
         raise ValueError("Stage label and kind do not match.")
     wanted = label[:-len(suffix)]
     families = {}
-    for path in (Path(fit_dir) / "chunks").glob("*chunk_*_*.*"):
+    for path in OutputPaths(fit_dir).chunks_dir.glob("*chunk_*_*.*"):
         match = re.fullmatch(r"(.+)_chunk_(\d+)_(\d+)\.(?:pkl|npz)", path.name)
         if match and (match[1] == wanted or match[1].startswith(wanted + "_")):
             families.setdefault(match[1], []).append((int(match[2]), int(match[3]), path))
     complete = []
     for prefix, entries in families.items():
-        manifest = Path(fit_dir) / "chunks" / (prefix + ".manifest.json")
+        manifest = OutputPaths(fit_dir).chunks_dir / (prefix + ".manifest.json")
         if manifest.exists():
             signature_kind = json.loads(manifest.read_text()).get("checkpoint_signature", {}).get("stage", "")
             signature_kind = signature_kind.replace("highres", "high_resolution").replace("lowres", "low_resolution")

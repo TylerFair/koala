@@ -1,20 +1,20 @@
 """White-light fitting, diagnostics, and geometry handoff."""
 
+from .output_paths import OutputPaths, state_path
+from .diagnostic_figures import white_light, white_light_start, event_epoch
+
+from koala.console import debug, info, white_light_verdict, parameter_summary
+
 import os
+import json
 import time
 import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro
 import numpyro_ext.optim as optimx
-import matplotlib.pyplot as plt
 import pandas as pd
-from .plotting import (
-    plot_whitelight_corner,
-    plot_whitelight_curve,
-    plot_whitelight_residuals,
-    plot_whitelight_summary,
-)
+from .plotting import plot_whitelight_corner
 from jaxoplanet.experimental import calc_poly_coeffs
 from models.common import get_I_power2, compute_transit_model_auto
 from models.harmonica.core import (
@@ -131,7 +131,8 @@ def _repair_gp_support_edges(soln, *, margin_fraction=0.01, edge_tolerance=1.0e-
             reset = upper - margin_fraction * width
         else:
             continue
-        print(
+        info('A white-light trend start reached its prior boundary; moving the start inside it.')
+        debug(
             f"WARNING: white-light optimizer placed {site} on or outside its "
             f"support edge ({value:.6g}); resetting it to {reset:.6g} before "
             "Laplace preparation."
@@ -213,11 +214,12 @@ def _start_at_scanned_eclipse(init, surface_config, specs, data, detrending_type
     if found is None:
         return
     t0, depth, delta_chi2 = found
-    print(f"Eclipse-time scan: best eclipse at {t0 + 0.5 * geometry['period']:.5f} "
+    debug(f"Eclipse-time scan: best eclipse at {t0 + 0.5 * geometry['period']:.5f} "
           f"({(t0 - t0_spec.value) * 1440:+.1f} min from the configured start), "
           f"depth {depth * 1e6:.0f} ppm, delta chi2 {delta_chi2:.1f} over no eclipse.")
     if delta_chi2 < 25.0:
-        print("WARNING: the white-light eclipse is detected at less than 5 sigma. "
+        info('The white-light eclipse is detected at less than 5 sigma; its timing is poorly constrained.')
+        debug("WARNING: the white-light eclipse is detected at less than 5 sigma. "
               "Its timing is poorly constrained; for a circular orbit consider "
               "fixing planet.eclipse_time at the ephemeris prediction.")
     if delta_chi2 < 9.0:
@@ -539,7 +541,8 @@ def _repair_white_jitter_start(solution, initial_values, jitter_spec=None):
         reset = .5*(low+high)
     repaired = dict(solution)
     repaired['log_jitter'] = jnp.asarray(reset)
-    print('White-light optimizer log_jitter reached its prior support edge; '
+    debug('The white-light jitter start reached its prior boundary; moving the start inside it.')
+    debug('White-light optimizer log_jitter reached its prior support edge; '
           'resetting the initial value inside the unchanged prior.', flush=True)
     return repaired
 
@@ -638,7 +641,8 @@ def _optimize_white_light_start(
                 reset_log_width = 0.5 * (
                     log_width_lo + log_width_hi
                 )
-                print(
+                info('The white-light trend width reached its prior boundary; moving the start inside it.')
+                debug(
                     "WARNING: white-light optimizer placed log_width "
                     "on or outside its support edge; resetting it to "
                     "the interior prior midpoint before Laplace "
@@ -659,7 +663,8 @@ def _optimize_white_light_start(
             )
         )
         if not optimized_start_valid:
-            print(
+            info('The optimized white-light start was not physical; using the prior start.')
+            debug(
                 "WARNING: discarding nonphysical white-light optimizer "
                 "solution and falling back to the prior physical start: "
                 + "; ".join(optimized_start_reasons),
@@ -690,26 +695,16 @@ def _optimize_white_light_start(
 
         flux_init = _evaluate_initial_model(params_complete, context.data.wl_time, context.detrending_type)
         flux_opt  = _evaluate_initial_model(params_opt, context.data.wl_time, context.detrending_type)
-        plt.figure(figsize=(10, 6))
-        plt.scatter(context.data.wl_time, context.data.wl_flux, c='k', s=10, alpha=0.3, label='Data')
-
-        plt.plot(context.data.wl_time, flux_init, color='red', linestyle='--', lw=2, alpha=0.7,
-                 label='Init Guess')
-        plt.plot(context.data.wl_time, flux_opt, color='blue', lw=2.5,
-                 label='Optimized (Gradient)')
-
-        plt.title(f'Sanity Check: {context.detrending_type} (GP Pre-fit: {"gp" in context.detrending_type})')
-        plt.xlabel('Time (BJD)')
-        plt.ylabel('Flux')
-        plt.legend()
-        plt.tight_layout()
-
-        sanity_plot_path = f'{context.output_dir}/00_{context.instrument_full_str}_init_vs_opt_check.png'
-        plt.savefig(sanity_plot_path)
-        plt.close()
+        if getattr(context, 'plots_mode', context.cfg.get('flags', {}).get('plots', 'full')) != 'minimal':
+            white_light_start(context.data.wl_time, context.data.wl_flux, context.data.wl_flux_err,
+                              flux_init, flux_opt,
+                              OutputPaths(context.output_dir).figure('whitelight', 'start'),
+                              label=context.instrument_full_str, event=context.surface_config.get("model", "transit"),
+                              t0=event_epoch(context.PRIOR_T0, context.PERIOD_FIXED, context.surface_config.get("model", "transit")))
 
     except Exception as e:
-        print(f"Could not create sanity plot: {e}")
+        info('The white-light sanity figure could not be written; see koala.log.')
+        debug(f"Could not create sanity plot: {e}")
     return _repair_white_jitter_start(soln, init_params_wl,
         (getattr(context, 'trend_priors', None) or {}).get('jitter'))
 
@@ -723,27 +718,13 @@ def _plot_white_light_start(*, context, U_mu_wl, hyper_params_wl, init_params_wl
         )
         flux_preopt = _evaluate_initial_model(params_preopt, context.data.wl_time, context.detrending_type)
 
-        fig, axes = plt.subplots(
-            2, 1, figsize=(10, 7), sharex=True, gridspec_kw={'height_ratios': [3, 1]},
-        )
-        axes[0].scatter(context.data.wl_time, context.data.wl_flux, c='k', s=10, alpha=0.3, label='Data')
-        axes[0].plot(context.data.wl_time, flux_preopt, color='tab:red', lw=2.0, label='Init Model')
-        axes[0].set_ylabel('Flux')
-        axes[0].legend()
-        axes[0].set_title(f'Pre-Optimization Check: {context.detrending_type}')
+        # Retain the evaluated start for diagnostics; the optimized comparison
+        # writes the single start figure after optimization.
+        context._plot_initial_model = flux_preopt
 
-        preopt_resid = context.data.wl_flux - flux_preopt
-        axes[1].axhline(0.0, color='0.5', lw=1.0, ls='--')
-        axes[1].scatter(context.data.wl_time, preopt_resid, c='tab:blue', s=8, alpha=0.4)
-        axes[1].set_xlabel('Time (BJD)')
-        axes[1].set_ylabel('Resid.')
-
-        plt.tight_layout()
-        preopt_plot_path = f'{context.output_dir}/00_{context.instrument_full_str}_preopt_init_check.png'
-        plt.savefig(preopt_plot_path)
-        plt.close(fig)
     except Exception as e:
-        print(f"Could not create pre-optimization sanity plot: {e}")
+        info('The initial white-light figure could not be written; see koala.log.')
+        debug(f"Could not create pre-optimization sanity plot: {e}")
 
 
 def _initialize_white_light(*, context, U_mu_wl, U_sigma_wl, _engine_wl_kw, geometry_sites):
@@ -885,7 +866,7 @@ def _initialize_white_light(*, context, U_mu_wl, U_sigma_wl, _engine_wl_kw, geom
         )
         if spot_basis_wl is not None:
             _engine_wl_kw['surface_basis'] = spot_basis_wl
-            print('Prepared exact fixed-geometry surface basis for white-light inference.')
+            debug('Prepared exact fixed-geometry surface basis for white-light inference.')
     whitelight_model_for_run = context.create_whitelight_model(
         detrend_type=context.detrending_type, n_planets=context.n_planets, ld_mode=wl_ld_mode,
         step_width_mode=context.step_width_mode, **_engine_wl_kw,
@@ -952,7 +933,7 @@ def _summarize_white_light(*, context, U_mu_wl, wl_samples):
         period_draws = period_draws.T
         _set_parameter_stats('period', period_draws, axis=0, bestfit_params_wl=bestfit_params_wl)
         bestfit_params_wl['period_err'] = jnp.std(period_draws, axis=0)
-        print(
+        debug(
             "White-light period posterior (median, -err, +err): "
             f"{np.asarray(bestfit_params_wl['period']).tolist()}, "
             f"{np.asarray(bestfit_params_wl['period_err_low']).tolist()}, "
@@ -1014,6 +995,26 @@ def _summarize_white_light(*, context, U_mu_wl, wl_samples):
                 names.append('log_width')
     for name in names:
         _set_parameter_stats(name, wl_samples[name], bestfit_params_wl=bestfit_params_wl)
+    for index in range(context.n_planets):
+        if getattr(context, 'joint_member_products', False):
+            break
+        if context.n_planets > 1:
+            info(f'  Planet {index + 1}')
+        for label, stem, unit in (('rprs', 'rors', ''), ('b', 'b', ''),
+                                  ('t0', 't0', 'BMJD_TDB'), ('duration', 'duration', 'd'),
+                                  ('period', 'period', 'd'), ('a_rs', 'a_rs', '')):
+            specs = context.planet_parameter_specs.get(label)
+            if specs is None or not specs[index].free:
+                continue
+            value = float(bestfit_params_wl[stem][index])
+            sd = float(bestfit_params_wl[stem + '_err'][index])
+            info(parameter_summary(label, value, sd, unit))
+        for label in ('eclipse_depth', 'phase_c1', 'phase_d1', 'stellar_spot_contrast'):
+            if label in wl_samples:
+                values = np.asarray(wl_samples[label])
+                scale, unit = (1e6, 'ppm') if label == 'eclipse_depth' else (1., '')
+                info(parameter_summary(label.replace('_', ' '),
+                    float(np.median(values)) * scale, float(np.std(values)) * scale, unit))
     return bestfit_params_wl
 
 
@@ -1205,12 +1206,13 @@ def _sample_white_light(
         with np.load(os.path.expanduser(str(reuse_path))) as saved:
             grouped = {name: jnp.asarray(saved[name]) for name in saved.files}
         chains, draws = next(iter(grouped.values())).shape[:2]
-        print(
+        info('Reusing a supplied white-light posterior without rechecking convergence.')
+        debug(
             "WARNING: flags.whitelight_reuse_samples is set; using the saved "
             f"white-light posterior {reuse_path} ({chains} chains x {draws} draws) "
             "without resampling or re-checking its quality gate."
         )
-        np.savez_compressed(os.path.join(context.output_dir, 'whitelight_samples_by_chain.npz'),
+        np.savez_compressed(state_path(context.output_dir, 'whitelight_samples_by_chain.npz'),
                             **{name: np.asarray(value) for name, value in grouped.items()})
         return PosteriorSamples(pool_chains(grouped), num_chains=chains)
     soln = _repair_gaussian_ld_start(
@@ -1319,7 +1321,7 @@ def _sample_white_light(
         start_diagnostics = {name: np.asarray(value).tolist()
                              for name, value in start_diagnostics.items()}
         laplace_diagnostics.update(start_diagnostics)
-        print(f'White-light independent starts: {start_diagnostics}', flush=True)
+        debug(f'White-light independent starts: {start_diagnostics}', flush=True)
     mcmc = numpyro.infer.MCMC(
         wl_nuts_type(wl_sampler_model, **wl_nuts_kwargs), progress_bar=True,
         jit_model_args=True, **wl_postprocess_kwargs, **whitelight_mcmc_kwargs,
@@ -1332,6 +1334,9 @@ def _sample_white_light(
         "init_params": wl_run_init_params,
         "extra_fields": ('diverging', 'accept_prob', 'potential_energy', 'num_steps'),
     }
+    heading = getattr(context, 'console_sampling_heading', None)
+    info(heading or f'White light: {getattr(context, "surface_config", {}).get("model", "transit")} with a {getattr(context, "detrending_type", "linear")} trend, '
+         f'{whitelight_mcmc_kwargs.get("num_chains", 1)} chains of {whitelight_mcmc_kwargs.get("num_samples", 1000)} draws')
     mcmc.run(context.key_master, *wl_run_args, **wl_run_kwargs)
     jax.block_until_ready(next(iter(mcmc.get_samples().values())))
     laplace_diagnostics["initial_block_sampling_wall_seconds"] = (
@@ -1354,11 +1359,12 @@ def _sample_white_light(
         wl_quality_diagnostics, laplace_diagnostics["mass_matrix"],
         wl_nuts_kwargs.get("target_accept_prob", 0.8),
     ):
-        print(
+        debug(
             f"White-light Laplace chain had {wl_quality_diagnostics['whitelight_divergences']} "
             "divergent transition(s); rerunning it once with target acceptance "
             f"{WHITELIGHT_RETRY_TARGET_ACCEPT} (smaller steps) before any fallback."
         )
+        info('White-light sampling had divergences; retrying with smaller steps.')
         retry_key = jax.random.fold_in(context.key_master, 90211)
         retry_nuts_kwargs = {**wl_nuts_kwargs, "target_accept_prob": WHITELIGHT_RETRY_TARGET_ACCEPT}
         mcmc = numpyro.infer.MCMC(
@@ -1377,10 +1383,11 @@ def _sample_white_light(
         not wl_quality_diagnostics["whitelight_quality_gate_passed"]
         and laplace_diagnostics["mass_matrix"] == "laplace"
     ):
-        print(
+        debug(
             "WARNING: LAPLACE WHITE-LIGHT CHAIN FAILED THE QUALITY "
             "GATE; AUTOMATICALLY FALLING BACK TO ADAPTIVE NUTS."
         )
+        info('White-light convergence checks failed; retrying with adaptive NUTS.')
         _, adaptive_key = jax.random.split(context.key_master)
         # Retain the validated MAP and initial covariance, then let each
         # chain learn its own dense metric. Restarting from an identity
@@ -1409,7 +1416,7 @@ def _sample_white_light(
         laplace_diagnostics["mass_matrix"] = "adaptive_fallback"
         laplace_diagnostics["whitelight_laplace_fell_back"] = True
     if not wl_quality_diagnostics["whitelight_quality_gate_passed"]:
-        print(
+        debug(
             "WARNING: WHITE-LIGHT MCMC FAILED ITS ESS/DIVERGENCE GATE "
             "AFTER ALL EXTENSION BLOCKS."
         )
@@ -1417,14 +1424,15 @@ def _sample_white_light(
     laplace_diagnostics['sampling_wall_seconds'] = time.perf_counter() - sampling_start
     laplace_diagnostics['sampling_wall_scope'] = 'initial_warmup_draws_extensions_and_fallbacks'
     if chains > 1:
-        np.savez_compressed(os.path.join(context.output_dir, 'whitelight_samples_by_chain.npz'),
+        np.savez_compressed(state_path(context.output_dir, 'whitelight_samples_by_chain.npz'),
                             **{name:np.asarray(value) for name,value in wl_samples_grouped.items()})
     _save_mcmc_diagnostics(
         mcmc, max_tree_depth=wl_nuts_kwargs.get('max_tree_depth', 10),
-        output_path=os.path.join(context.output_dir, 'whitelight_mcmc_diagnostics.json'),
+        output_path=state_path(context.output_dir, 'whitelight_mcmc_diagnostics.json'),
         extra_diagnostics=laplace_diagnostics, samples_override=wl_samples,
         extra_fields_override=wl_extra_fields,
     )
+    white_light_verdict(wl_quality_diagnostics)
     if chains > 1 and not wl_quality_diagnostics['whitelight_quality_gate_passed']:
         raise RuntimeError(
             'White-light chains failed the bulk/tail ESS, R-hat, or divergence '
@@ -1477,32 +1485,23 @@ def _save_white_light_diagnostics(
         try:
             wl_transit_model = resolve_detrend_kernel(context.detrending_type)(model_eval_params_wl, context.data.wl_time)
         except KeyError:
-            print('Error with model, not defined!')
+            info('The configured white-light model is not defined.')
             exit()
 
     wl_residual = context.data.wl_flux - wl_transit_model
     wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
     wl_mad_mask = jnp.abs(wl_residual - jnp.nanmedian(wl_residual)) > context.whitelight_sigma * wl_sigma
-    plot_whitelight_curve(
-        context.data.wl_time, context.data.wl_flux, context.data.wl_flux_err, wl_transit_model,
-        f'{context.output_dir}/11_{context.instrument_full_str}_whitelightmodel.png',
-        instrument_label=context.instrument_full_str, t0_reference=bestfit_params_wl['t0'][0],
-        outlier_mask=wl_mad_mask,
-    )
-    plot_whitelight_residuals(
-        context.data.wl_time, wl_residual, context.data.wl_flux_err,
-        f'{context.output_dir}/12_{context.instrument_full_str}_whitelightresidual.png',
-        instrument_label=context.instrument_full_str, t0_reference=bestfit_params_wl['t0'][0],
-        outlier_mask=wl_mad_mask,
-    )
-    try:
-        plot_whitelight_corner(
-            wl_samples,
-            f"{context.output_dir}/13_{context.instrument_full_str}_whitelight_corner.png",
-            instrument_label=context.instrument_full_str,
-        )
-    except Exception as error:  # A diagnostic must never abort the fit.
-        print(f"White-light corner plot skipped: {error}")
+    from .console import residual_summary
+    residual_summary(float(jnp.std(wl_residual[~wl_mad_mask])) * 1e6,
+                     int(jnp.sum(wl_mad_mask)), context.whitelight_sigma,
+                     f'order {context.order}' if context.order is not None else context.instrument_full_str)
+    if getattr(context, 'plots_mode', context.cfg.get('flags', {}).get('plots', 'full')) != 'minimal':
+        try:
+            plot_whitelight_corner(wl_samples, OutputPaths(context.output_dir).figure('whitelight', 'corner'),
+                                  instrument_label=context.instrument_full_str)
+        except Exception as error:
+            info('The white-light corner figure could not be written; see koala.log.')
+            debug(f'White-light corner plot skipped: {error}')
 
     t_masked = context.data.wl_time[~wl_mad_mask]
     f_masked = context.data.wl_flux[~wl_mad_mask]
@@ -1534,14 +1533,6 @@ def _save_white_light_diagnostics(
         np.asarray(context.data.wl_flux_err, dtype=float),
         np.asarray(context.data.wl_time).shape,
     )
-    plot_whitelight_curve(
-        t_masked, detrended_flux, wl_flux_err_full[~np.asarray(wl_mad_mask)],
-        transit_only_model,
-        f'{context.output_dir}/14_{context.instrument_full_str}_whitelightdetrended.png',
-        instrument_label=context.instrument_full_str, t0_reference=bestfit_params_wl['t0'][0],
-        flux_label='Detrended Flux',
-    )
-
     dt = np.median(np.diff(context.data.wl_time)) * 86400
     residuals_arr = np.array(wl_residual[~wl_mad_mask])
     beta, _, _, _ = calculate_beta_metrics(residuals_arr, dt)
@@ -1551,16 +1542,10 @@ def _save_white_light_diagnostics(
     std_sim = float(np.std(mc_betas))
     z_score = (beta - mu_sim) / std_sim
 
-    print(
+    debug(
         "White-light beta summary: "
         f"measured={beta:.3f}, MC={mu_sim:.3f}+/-{std_sim:.3f}, "
         f"significance={z_score:.2f} sigma"
-    )
-
-    plot_whitelight_summary(
-        bestfit_params_wl,
-        f'{context.output_dir}/15_{context.instrument_full_str}_whitelight_summary.png',
-        instrument_label=context.instrument_full_str,
     )
 
     transit_only_full = np.asarray(
@@ -1570,6 +1555,13 @@ def _save_white_light_diagnostics(
     bestfit_model_full = np.asarray(wl_transit_model, dtype=float)
     # Systematics factor: full model divided by the transit-only model.
     trend_model_full = bestfit_model_full / transit_only_full
+    white_light(context.data.wl_time, context.data.wl_flux, context.data.wl_flux_err,
+                bestfit_model_full, transit_only_full,
+                OutputPaths(context.output_dir).figure('whitelight'),
+                label=context.instrument_full_str, event=context.surface_config.get("model", "transit"),
+                t0=event_epoch(np.asarray(bestfit_params_wl['t0']).ravel()[0], context.PERIOD_FIXED,
+                               context.surface_config.get("model", "transit")), outlier=wl_mad_mask)
+
     gp_flux_full = np.asarray(mu, dtype=float) if 'gp' in context.detrending_type else None
     gp_err_full = np.asarray(jnp.sqrt(var), dtype=float) if 'gp' in context.detrending_type else None
     gp_trend_full = np.asarray(gp_stochastic_component, dtype=float) if 'gp' in context.detrending_type else None
@@ -1578,7 +1570,7 @@ def _save_white_light_diagnostics(
         flux=context.data.wl_flux,
         flux_err=context.data.wl_flux_err,
         bestfit_model=bestfit_model_full,
-        output_csv=f'{context.output_dir}/{context.instrument_full_str}_whitelight_timeseries.csv',
+        output_csv=OutputPaths(context.output_dir, context.instrument_full_str).table("whitelight", "lightcurve", "csv"),
         t0_reference=float(np.asarray(bestfit_params_wl['t0']).ravel()[0]) if np.size(bestfit_params_wl['t0']) else None,
         transit_model=transit_only_full,
         trend_model=trend_model_full,
@@ -1627,7 +1619,7 @@ def run_white_light_stage(context, *, posterior=None):
     if is_gp_detrending:
         validate_gp_times(context.data.wl_time)
         gp_solver = resolve_gp_solver(context.cfg.get('gp_solver'))
-        print(f"White-light GP solver: {gp_solver}")
+        debug(f"White-light GP solver: {gp_solver}")
     # Latent white-light geometry sites and their starting values, resolved
     # from the parameter specifications.
     geometry_sites = _whitelight_geometry_sites(
@@ -1645,14 +1637,14 @@ def run_white_light_stage(context, *, posterior=None):
 
     U_mu_wl, U_sigma_wl = prepare_white_light_ld(context)
 
-    wl_mask_path = f'{context.output_dir}/{context.instrument_full_str}_whitelight_outlier_mask.npy'
-    wl_params_path = f'{context.output_dir}/{context.instrument_full_str}_whitelight_bestfit_params.csv'
-    wl_gp_path = f'{context.output_dir}/{context.instrument_full_str}_whitelight_GP_database.csv'
-    wl_limb_csv_path = f"{context.output_dir}/{context.instrument_full_str}_whitelight_limb_spectra.csv"
-    wl_limb_samples_path = f"{context.output_dir}/{context.instrument_full_str}_whitelight_limb_posterior_samples.npz"
-    wl_manifest_path = f'{context.output_dir}/{context.instrument_full_str}_whitelight_artifacts.manifest.json'
+    wl_mask_path = state_path(context.output_dir, f"{context.instrument_full_str}_whitelight_outlier_mask.npy")
+    wl_params_path = OutputPaths(context.output_dir, context.instrument_full_str).table("whitelight", "params", "csv")
+    wl_gp_path = state_path(context.output_dir, f"{context.instrument_full_str}_whitelight_GP_database.csv")
+    wl_limb_csv_path = OutputPaths(context.output_dir, context.instrument_full_str).table("whitelight", "limbs", "csv")
+    wl_limb_samples_path = OutputPaths(context.output_dir, context.instrument_full_str).table("whitelight", "limb_samples", "npz")
+    wl_manifest_path = state_path(context.output_dir, f"{context.instrument_full_str}_whitelight_artifacts.manifest.json")
     wl_geometry_handoff_path = (
-        f'{context.output_dir}/{context.instrument_full_str}_whitelight_geometry_handoff.json'
+        state_path(context.output_dir, f"{context.instrument_full_str}_whitelight_geometry_handoff.json")
     )
     wl_artifact_fingerprint = _science_artifact_fingerprint(
         "whitelight",
@@ -1714,7 +1706,8 @@ def run_white_light_stage(context, *, posterior=None):
     if not stringcheck and (
         os.path.exists(wl_mask_path) or os.path.exists(wl_params_path)
     ):
-        print(
+        info('The previous white-light fit does not match this run; refitting it.')
+        debug(
             "Existing white-light products or geometry handoff are unverified "
             "or do not match the current data/configuration; recomputing them."
         )
@@ -1723,11 +1716,8 @@ def run_white_light_stage(context, *, posterior=None):
         stringcheck = False
 
     if not stringcheck:
-        plt.scatter(context.data.wl_time, context.data.wl_flux, c='k', s=6, alpha=0.5)
-        plt.savefig(f'{context.output_dir}/stuff.png')
-        plt.close()
         if posterior is None:
-            print('Fitting whitelight for outliers and bestfit parameters')
+            debug('Fitting whitelight for outliers and bestfit parameters')
             hyper_params_wl, init_params_wl, wl_ld_mode, whitelight_model_for_run = _initialize_white_light(
                 context=context, U_mu_wl=U_mu_wl, U_sigma_wl=U_sigma_wl,
                 _engine_wl_kw=_engine_wl_kw, geometry_sites=geometry_sites,
@@ -1739,7 +1729,7 @@ def run_white_light_stage(context, *, posterior=None):
             )
 
             if 'gp' in context.detrending_type:
-                print("--- Running Pre-Fit with Linear Detrending to stabilize GP ---")
+                debug("--- Running Pre-Fit with Linear Detrending to stabilize GP ---")
                 whitelight_model_prefit = context.create_whitelight_model(
                     detrend_type='linear', n_planets=context.n_planets, ld_mode=wl_ld_mode,
                     step_width_mode=context.step_width_mode, **_engine_wl_kw,
@@ -1771,15 +1761,15 @@ def run_white_light_stage(context, *, posterior=None):
                 whitelight_model_for_run=whitelight_model_for_run,
             )
         else:
-            print("Writing white-light products from the joint posterior.")
+            debug("Writing white-light products from the joint posterior.")
             wl_samples = posterior["samples"]
             np.savez_compressed(
-                os.path.join(context.output_dir, "whitelight_samples_by_chain.npz"),
+                state_path(context.output_dir, "whitelight_samples_by_chain.npz"),
                 **posterior["grouped"],
             )
             import shutil
-            shutil.copyfile(posterior["diagnostics_path"], os.path.join(
-                context.output_dir, "whitelight_mcmc_diagnostics.json"))
+            shutil.copyfile(posterior["diagnostics_path"],
+                            state_path(context.output_dir, "whitelight_mcmc_diagnostics.json"))
 
         sweep = getattr(context, 'execution_context', None)
         if sweep is not None:
@@ -1829,7 +1819,8 @@ def run_white_light_stage(context, *, posterior=None):
             save_surface_results(
                 np.asarray([np.nanmean(band)]),
                 np.asarray([0.5 * (np.nanmax(band) - np.nanmin(band))]), white_surface_samples,
-                wl_params_path,
+                OutputPaths(context.output_dir, context.instrument_full_str).table("whitelight", "spectrum"),
+                plots=getattr(context, "plots_mode", context.cfg.get("flags", {}).get("plots", "full")),
             )
         bestfit_params_wl_df = pd.read_csv(wl_params_path)
         if context.transit_engine == 'harmonica' and _has_harmonica_odd_samples(wl_samples):
@@ -1849,10 +1840,12 @@ def run_white_light_stage(context, *, posterior=None):
                 rors_samples=wl_samples['rors_0'],
                 harmonic_samples=_harmonica_sample_payload(wl_samples),
                 csv_path=wl_limb_csv_path,
-                limb_spectrum_path=f"{context.output_dir}/16_{context.instrument_full_str}_whitelight_limb_spectra.png",
-                transmission_strings_path=f"{context.output_dir}/17_{context.instrument_full_str}_whitelight_transmission_string.png",
+                limb_spectrum_path=(OutputPaths(context.output_dir).figure("whitelight", "limbs")
+                                    if getattr(context, "plots_mode", context.cfg.get("flags", {}).get("plots", "full")) == "full" else None),
+                transmission_strings_path=(OutputPaths(context.output_dir).figure("whitelight", "limb_outline")
+                                           if getattr(context, "plots_mode", context.cfg.get("flags", {}).get("plots", "full")) == "full" else None),
                 posterior_samples_path=wl_limb_samples_path,
-                title_prefix=f"{context.planet_str} - Whitelight",
+                title_prefix=context.instrument_full_str + ' | White light',
                 bandpass_min=bandpass_min,
                 bandpass_max=bandpass_max,
             )
@@ -1860,14 +1853,22 @@ def run_white_light_stage(context, *, posterior=None):
         wl_geometry_handoff = _write_whitelight_geometry_handoff(
             wl_geometry_handoff_path, wl_handoff_payload
         )
-        print(f'Saved white-light fixed-geometry handoff to {wl_geometry_handoff_path}.')
+        debug(f'Saved white-light fixed-geometry handoff to {wl_geometry_handoff_path}.')
         wl_artifact_set.write_manifest()
     else:
-        print('Loading verified white-light parameters and outlier mask.')
+        info('Reusing the white-light fit from a previous run')
+        diagnostic_path = state_path(context.output_dir, 'whitelight_mcmc_diagnostics.json')
+        try:
+            with open(diagnostic_path) as stream:
+                saved_diagnostics = json.load(stream)
+            if 'whitelight_quality_gate_passed' in saved_diagnostics:
+                white_light_verdict(saved_diagnostics)
+        except (OSError, ValueError, TypeError):
+            debug('White-light convergence summary is unavailable in the saved diagnostics.')
         wl_mad_mask = np.load(wl_mask_path)
         bestfit_params_wl_df = pd.read_csv(wl_params_path)
         sweep = getattr(context, 'execution_context', None)
-        posterior_path = os.path.join(context.output_dir, 'whitelight_samples_by_chain.npz')
+        posterior_path = state_path(context.output_dir, 'whitelight_samples_by_chain.npz')
         if sweep is not None and os.path.exists(posterior_path):
             with np.load(posterior_path, allow_pickle=False) as grouped:
                 restored = {name: value.reshape((-1,) + value.shape[2:])

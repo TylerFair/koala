@@ -1,5 +1,8 @@
 """Joint white light with ordinary per-dataset products and spectroscopy."""
 
+from koala.console import debug, info
+from .output_paths import OutputPaths
+
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,7 +17,7 @@ from .config import load_config, parse_planet_parameter_specs, parse_parameter_s
 from .artifacts import _science_artifact_fingerprint
 from .white_light import (
     prepare_white_light_ld, _initialize_white_light, _whitelight_geometry_sites,
-    _sample_white_light,
+    _sample_white_light, run_white_light_stage,
 )
 
 
@@ -76,7 +79,7 @@ def load_joint_members(cfg, config_path):
             raise ValueError(f'{name}: joint white light currently requires jaxoplanet transits.')
         if flags.get('whitelight_reuse_samples'):
             raise ValueError(f'{name}: whitelight_reuse_samples cannot define a joint posterior.')
-        member['host_device'] = cfg.get('host_device', 'gpu')
+        member['host_device'] = cfg.get('host_device', 'auto')
         member['output_dir'] = str(output / name)
         result.append((name, member, path))
     first = result[0][1]['planet']
@@ -214,102 +217,169 @@ def compose_joint_model(contexts, pieces, visits, shared_specs):
     return model
 
 
-def run_joint(cfg, config_path=None):
+def run_joint(cfg, config_path=None, verbose=False):
     """Fit all white lights, write their posterior products, then spectroscopy."""
     from .pipeline import run
+    from .console import (configure, parent_log, finish_run, parameter_summary,
+                          joint_presentation, clipping_description)
+    from .config import describe_planet_parameter_specs
     from models.mcmc_diagnostics import PosteriorSamples
     started = time.perf_counter()
     members, apply_to, shared_specs, output = load_joint_members(cfg, config_path)
-    if cfg['joint'].get('visits', 'auto') != 'auto':
-        group_visits([name for name, _, _ in members], [], cfg['joint']['visits'])
-    contexts = [run(deepcopy(member), config_path=path, prepare_only=True) for _, member, path in members]
-    visits = group_visits([name for name, _, _ in members],
-                          [(float(c.data.wl_time.min()), float(c.data.wl_time.max())) for c in contexts],
-                          cfg['joint'].get('visits', 'auto'))
-    pieces = []
-    for context in contexts:
-        center, width = prepare_white_light_ld(context)
-        kw = dict(context._engine_wl_kw, parameter_priors=context.planet_parameter_specs,
-                  gp_solver=context.cfg.get('gp_solver'), gp_assume_sorted=True)
-        pieces.append(_initialize_white_light(
-            context=context, U_mu_wl=center, U_sigma_wl=width, _engine_wl_kw=kw,
-            geometry_sites=_whitelight_geometry_sites(context.planet_parameter_specs, 1, 'a_rs')))
-    model = compose_joint_model(contexts, pieces, visits, shared_specs)
-    times = tuple(c.data.wl_time for c in contexts)
-    errors = tuple(c.data.wl_flux_err for c in contexts)
-    fluxes = tuple(c.data.wl_flux for c in contexts)
-    # Trace once at the configured starts to identify exactly the free sites.
-    starts = {}
-    for key, spec in shared_specs.items():
-        init = latent_init_site(spec, f'{key}_0')
-        if init:
-            starts[init[0]] = init[1]
-    for v, group in enumerate(visits):
-        init = latent_init_site(contexts[group[0]].planet_parameter_specs['t0'][0], 't0_0')
-        if init:
-            starts[f'visit{v}/{init[0]}'] = init[1]
-        for suffix in ('', '2'):
-            owner = next((i for i in group if ('2spot' if suffix else 'spot') in contexts[i].detrending_type), None)
-            if owner is not None:
-                c = contexts[owner]
-                if c.whitelight_trend_parameterization == 'cadence':
-                    cadence = jnp.median(jnp.diff(jnp.sort(c.data.wl_time)))
-                    starts[f'visit{v}/spot_mu{suffix}_offset_cadences'] = 0.
-                    starts[f'visit{v}/spot_sigma{suffix}_cadences'] = jnp.clip(getattr(c, f'spot_sigma{suffix}'), 1.01e-4, .0999) / cadence
-                else:
-                    starts[f'visit{v}/spot_mu{suffix}'] = getattr(c, f'spot_mu{suffix}')
-                    starts[f'visit{v}/spot_sigma{suffix}'] = jnp.clip(getattr(c, f'spot_sigma{suffix}'), 1.01e-4, .0999)
-    for i, piece in enumerate(pieces):
-        starts.update({f'member{i}/{k}': (jnp.clip(value, 1e-5, .09999)
-                           if k in {'spot_amp', 'spot_amp2'} else value)
-                       for k, value in piece[1].items()})
-    with numpyro.handlers.substitute(data=starts):
-        sites = trace(seed(model, contexts[0].key_master)).get_trace(times, errors, y=fluxes)
-    starts = {name: site['value'] for name, site in sites.items()
-              if site['type'] == 'sample' and not site['is_observed']}
-    joint_dir = output / 'joint'
-    joint_dir.mkdir(parents=True, exist_ok=True)
-    context = SimpleNamespace(**vars(contexts[0]))
-    context.output_dir = str(joint_dir)
-    context.cfg = {'flags': {}}
-    context.data = SimpleNamespace(wl_time=times, wl_flux_err=errors, wl_flux=fluxes)
-    context.ld_profile = 'joint'
-    context.uses_surface_model = any(c.uses_surface_model or (
-        c.ld_profile == 'power2' and c.data.wl_time.size > 5000) for c in contexts)
-    context.whitelight_laplace_options = dict(context.whitelight_laplace_options, mass_matrix='laplace')
-    # The power-2 stellar-prior jitter metric correction, per member.
-    context.jitter_metric_sites = joint_jitter_metric_sites(contexts)
-    samples = _sample_white_light(
-        context=context, hyper_params_wl={}, science_sites={name: name for name in starts},
-        soln=starts, whitelight_mcmc_kwargs=dict(context.whitelight_mcmc_kwargs, num_chains=4),
-        whitelight_model_for_run=model)
-    with np.load(joint_dir / 'whitelight_samples_by_chain.npz') as saved:
-        grouped = dict(saved)
-    fingerprint = _science_artifact_fingerprint('joint_white_light', {
-        'config': cfg, 'members': [c.cfg for c in contexts],
-        'time': times, 'flux': fluxes, 'error': errors, 'pieces': [p[0] for p in pieces],
-    })
-    _write_joint_products(joint_dir, samples, members, visits)
-    for i, (_, member, path) in enumerate(members):
-        prefix = f'member{i}/'
-        flat = PosteriorSamples({name[len(prefix):]: value for name, value in samples.items()
-                                 if name.startswith(prefix)}, num_chains=4)
-        member_grouped = {name[len(prefix):]: value for name, value in grouped.items()
-                          if name.startswith(prefix)}
-        run(member, config_path=path, white_light_posterior={
-            'samples': flat, 'grouped': member_grouped, 'fingerprint': fingerprint,
-            'diagnostics_path': str(joint_dir / 'whitelight_mcmc_diagnostics.json')})
-    for _, member, path in apply_to:
-        for key in shared_specs:
-            member['planet'][key] = {'value': float(np.median(samples[f'{key}_0'])), 'prior': 'fixed'}
-        run(member, config_path=path)
-    try:
-        from .joint_products import plot_joint_spectra
-        plot_joint_spectra(output)
-    except Exception as error:  # the member spectra are already written; this figure is a summary
-        print(f'WARNING: the joint spectrum figure was not written: {error}')
-    with open(joint_dir / 'summary.txt', 'a') as stream:
-        stream.write(f'Total run time: {time.perf_counter()-started:.1f} s\n')
+    configure(verbose, output, config_path)
+    with parent_log():
+        plots = str(cfg.get('flags', {}).get('plots', 'full')).strip().lower()
+        presentation = {'count': len(members), 'reading': True, 'plots': cfg.get('flags', {}).get('plots')}
+        if cfg['joint'].get('visits', 'auto') != 'auto':
+            group_visits([name for name, _, _ in members], [], cfg['joint']['visits'])
+        with joint_presentation(presentation):
+            contexts = [run(deepcopy(member), config_path=path, prepare_only=True, verbose=verbose) for _, member, path in members]
+        for line in describe_planet_parameter_specs({
+                key: entries for key, entries in contexts[0].planet_parameter_specs.items()
+                if key in members[0][1]['planet']}):
+            info(line)
+        first = contexts[0]
+        ld_description = first.ld_prior_mode + ' priors'
+        if first.ld_profile == 'quadratic' and first.ld_prior_mode == 'uniform' and first.ld_uniform_basis == 'uplus_uminus':
+            ld_description = 'uniform priors on u1 + u2 and u1 - u2'
+        info(f'Limb darkening: {first.ld_profile} law with {ld_description}')
+        info('')
+        presentation['reading'] = False
+        visits = group_visits([name for name, _, _ in members],
+                              [(float(c.data.wl_time.min()), float(c.data.wl_time.max())) for c in contexts],
+                              cfg['joint'].get('visits', 'auto'))
+        pieces = []
+        for context in contexts:
+            center, width = prepare_white_light_ld(context)
+            kw = dict(context._engine_wl_kw, parameter_priors=context.planet_parameter_specs,
+                      gp_solver=context.cfg.get('gp_solver'), gp_assume_sorted=True)
+            pieces.append(_initialize_white_light(
+                context=context, U_mu_wl=center, U_sigma_wl=width, _engine_wl_kw=kw,
+                geometry_sites=_whitelight_geometry_sites(context.planet_parameter_specs, 1, 'a_rs')))
+        model = compose_joint_model(contexts, pieces, visits, shared_specs)
+        times = tuple(c.data.wl_time for c in contexts)
+        errors = tuple(c.data.wl_flux_err for c in contexts)
+        fluxes = tuple(c.data.wl_flux for c in contexts)
+        # Trace once at the configured starts to identify exactly the free sites.
+        starts = {}
+        for key, spec in shared_specs.items():
+            init = latent_init_site(spec, f'{key}_0')
+            if init:
+                starts[init[0]] = init[1]
+        for v, group in enumerate(visits):
+            init = latent_init_site(contexts[group[0]].planet_parameter_specs['t0'][0], 't0_0')
+            if init:
+                starts[f'visit{v}/{init[0]}'] = init[1]
+            for suffix in ('', '2'):
+                owner = next((i for i in group if ('2spot' if suffix else 'spot') in contexts[i].detrending_type), None)
+                if owner is not None:
+                    c = contexts[owner]
+                    if c.whitelight_trend_parameterization == 'cadence':
+                        cadence = jnp.median(jnp.diff(jnp.sort(c.data.wl_time)))
+                        starts[f'visit{v}/spot_mu{suffix}_offset_cadences'] = 0.
+                        starts[f'visit{v}/spot_sigma{suffix}_cadences'] = jnp.clip(getattr(c, f'spot_sigma{suffix}'), 1.01e-4, .0999) / cadence
+                    else:
+                        starts[f'visit{v}/spot_mu{suffix}'] = getattr(c, f'spot_mu{suffix}')
+                        starts[f'visit{v}/spot_sigma{suffix}'] = jnp.clip(getattr(c, f'spot_sigma{suffix}'), 1.01e-4, .0999)
+        for i, piece in enumerate(pieces):
+            starts.update({f'member{i}/{k}': (jnp.clip(value, 1e-5, .09999)
+                               if k in {'spot_amp', 'spot_amp2'} else value)
+                           for k, value in piece[1].items()})
+        with numpyro.handlers.substitute(data=starts):
+            sites = trace(seed(model, contexts[0].key_master)).get_trace(times, errors, y=fluxes)
+        starts = {name: site['value'] for name, site in sites.items()
+                  if site['type'] == 'sample' and not site['is_observed']}
+        joint_dir = Path(OutputPaths(output).state_dir)
+        joint_dir.mkdir(parents=True, exist_ok=True)
+        context = SimpleNamespace(**vars(contexts[0]))
+        context.output_dir = str(output)
+        context.cfg = {'flags': {}}
+        context.data = SimpleNamespace(wl_time=times, wl_flux_err=errors, wl_flux=fluxes)
+        context.ld_profile = 'joint'
+        context.uses_surface_model = any(c.uses_surface_model or (
+            c.ld_profile == 'power2' and c.data.wl_time.size > 5000) for c in contexts)
+        context.whitelight_laplace_options = dict(context.whitelight_laplace_options, mass_matrix='laplace')
+        # The power-2 stellar-prior jitter metric correction, per member.
+        context.jitter_metric_sites = joint_jitter_metric_sites(contexts)
+        context.console_sampling_heading = (
+            f'Joint white light: {len(members)} observations sharing a_rs and b, '
+            f'4 chains of {context.whitelight_mcmc_kwargs.get("num_samples", 1000)} draws')
+        samples = _sample_white_light(
+            context=context, hyper_params_wl={}, science_sites={name: name for name in starts},
+            soln=starts, whitelight_mcmc_kwargs=dict(context.whitelight_mcmc_kwargs, num_chains=4),
+            whitelight_model_for_run=model)
+        for key, spec in shared_specs.items():
+            name = f'{key}_0'
+            if spec.free and name in samples:
+                values = np.asarray(samples[name])
+                info(parameter_summary(key, float(np.median(values)), float(np.std(values))))
+        for visit_index, group in enumerate(visits):
+            name = f'visit{visit_index}/t0_0'
+            if contexts[group[0]].planet_parameter_specs['t0'][0].free and name in samples:
+                values = np.asarray(samples[name])
+                label = 't0' if len(visits) == 1 else f't0 visit {visit_index + 1}'
+                info(parameter_summary(label, float(np.median(values)), float(np.std(values)), 'BMJD_TDB'))
+        for member_index, member_context in enumerate(contexts):
+            name = f'member{member_index}/rors_0'
+            if member_context.planet_parameter_specs['rprs'][0].free and name in samples:
+                values = np.asarray(samples[name])
+                order = getattr(member_context, 'order', None)
+                label = f'rprs order {order}' if order is not None else f'rprs observation {member_index + 1}'
+                info(parameter_summary(label, float(np.median(values)), float(np.std(values))))
+        with np.load(joint_dir / 'whitelight_samples_by_chain.npz') as saved:
+            grouped = dict(saved)
+        fingerprint = _science_artifact_fingerprint('joint_white_light', {
+            'config': cfg, 'members': [c.cfg for c in contexts],
+            'time': times, 'flux': fluxes, 'error': errors, 'pieces': [p[0] for p in pieces],
+        })
+        _write_joint_products(output, samples, members, visits, plots=plots)
+        products = []
+        presentation['collect_residuals'] = True
+        for i, (_, member, path) in enumerate(members):
+            prefix = f'member{i}/'
+            flat = PosteriorSamples({name[len(prefix):]: value for name, value in samples.items()
+                                     if name.startswith(prefix)}, num_chains=4)
+            member_grouped = {name[len(prefix):]: value for name, value in grouped.items()
+                              if name.startswith(prefix)}
+            posterior = {'samples': flat, 'grouped': member_grouped, 'fingerprint': fingerprint,
+                         'diagnostics_path': str(joint_dir / 'whitelight_mcmc_diagnostics.json')}
+            # Write each member's ordinary white-light products once. Presentation
+            # collects their existing residual statistics before spectroscopy starts.
+            member_context = contexts[i]
+            member_context.joint_member_products = True
+            with joint_presentation(presentation):
+                configure(verbose, member_context.output_dir, path)
+                prepared = run_white_light_stage(member_context, posterior=posterior)
+            products.append((member, path, posterior, prepared))
+        residuals = presentation.get('residuals', [])
+        if residuals:
+            scatter = ', '.join(f'{value:.0f} ppm ({label})' for value, _, _, label in residuals)
+            # Keep differing clipping thresholds explicit rather than hiding them.
+            thresholds = {sigma for _, _, sigma, _ in residuals}
+            if len(thresholds) == 1:
+                clipped = clipping_description(sum(n for _, n, _, _ in residuals), residuals[0][2])
+            else:
+                clipped = '; '.join(f'{clipping_description(n, sigma)} ({label})'
+                                    for _, n, sigma, label in residuals)
+            info(f'  Residual scatter {scatter}; {clipped}')
+        presentation['collect_residuals'] = False
+        for member, path, posterior, prepared in products:
+            with joint_presentation(presentation):
+                run(member, config_path=path, verbose=verbose, white_light_posterior=posterior,
+                    prepared_white_light=prepared)
+        for _, member, path in apply_to:
+            presentation['reading'] = True
+            for key in shared_specs:
+                member['planet'][key] = {'value': float(np.median(samples[f'{key}_0'])), 'prior': 'fixed'}
+            with joint_presentation(presentation):
+                run(member, config_path=path, verbose=verbose)
+        try:
+            from .joint_products import plot_joint_spectra
+            plot_joint_spectra(output, plots=plots)
+        except Exception as error:  # the member spectra are already written; this figure is a summary
+            info('The joint spectrum figure could not be written; see koala.log.')
+            debug(f'WARNING: the joint spectrum figure was not written: {error}')
+        finish_run(output, started)
 
 
 def joint_jitter_metric_sites(contexts):
@@ -319,7 +389,7 @@ def joint_jitter_metric_sites(contexts):
             and not (getattr(c, 'trend_priors', None) or {}).get('jitter')]
 
 
-def _write_joint_products(directory, samples, members, visits):
+def _write_joint_products(directory, samples, members, visits, *, plots='full'):
     import pandas as pd
     rows = []
     for name, values in samples.items():
@@ -333,9 +403,13 @@ def _write_joint_products(directory, samples, members, visits):
         for label, column in columns:
             low, median, high = np.quantile(column, [.16, .5, .84])
             rows.append(dict(parameter=label, median=median, lower_68=low, upper_68=high))
-    pd.DataFrame(rows).to_csv(directory / 'parameters.csv', index=False)
+    pd.DataFrame(rows).to_csv(OutputPaths(directory).joint_table('params'), index=False)
+    if plots == 'minimal':
+        return
     import corner
     import matplotlib.pyplot as plt
+    from .plotting_style import apply_publication_style, accent_color_for_label
+    apply_publication_style()
     columns, labels = [], []
     selected = [('a_rs_0', 'a/R*'), ('b_0', 'b')]
     selected += [(f'visit{v}/t0_0', f'Visit {v} t0 [d]') for v in range(len(visits))]
@@ -343,23 +417,21 @@ def _write_joint_products(directory, samples, members, visits):
         values = np.asarray(samples[name])
         if np.ptp(values) > 0:
             if '/t0_' in name:
-                origin = np.floor(np.median(values))
-                values = values - origin
-                label = label.replace('[d]', f'- {origin:.0f} [d]')
+                values = (values - np.median(values)) * 86400
+                label = label.replace('[d]', 'offset [s]')
             columns.append(values)
             labels.append(label)
     if columns:
         fig = corner.corner(np.column_stack(columns), labels=labels,
-                            quantiles=[.16, .5, .84], show_titles=True)
-        fig.savefig(directory / 'corner.png', dpi=150, bbox_inches='tight')
+                            quantiles=[.16, .5, .84], show_titles=True,
+                            color=accent_color_for_label('joint'), max_n_ticks=4,
+                            label_kwargs={'fontsize': 10}, title_kwargs={'fontsize': 10})
+        target = members[0][1].get('planet', {}).get('name', '')
+        fig.suptitle(f'{target} | Joint white-light posterior', fontsize=16, y=1.02)
+        fig.savefig(OutputPaths(directory).figure('joint', 'corner'), dpi=250, bbox_inches='tight')
         plt.close(fig)
-    with open(directory / 'summary.txt', 'w') as stream:
-        stream.write('Joint white light. Shared a_rs and b. Fixed circular period.\n')
-        for i, (name, _, _) in enumerate(members):
-            stream.write(f'member{i}: {name}\n')
-        for name, label in selected:
-            low, median, high = np.quantile(samples[name], [.16, .5, .84])
-            stream.write(f'{label}: {median:.10g} ({low:.10g}, {high:.10g}; central 68%)\n')
-        for v, group in enumerate(visits):
-            stream.write(f'Visit {v}: {", ".join(members[i][0] for i in group)}\n')
-        stream.write('Member products are slices of this posterior. Spectroscopy fixes its orbital medians.\n')
+    debug('Joint white light shares a_rs and b with a fixed circular period.')
+    for i, (name, _, _) in enumerate(members):
+        debug(f'Observation {i + 1}: {name}')
+    for v, group in enumerate(visits):
+        debug(f'Visit {v}: {", ".join(members[i][0] for i in group)}')

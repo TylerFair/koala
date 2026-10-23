@@ -353,7 +353,7 @@ def test_chunk_keys_are_global_indexed_and_resume_independent(monkeypatch, tmp_p
 
     # Remove only the last checkpoint.  A resume must give that chunk the
     # same stream it had when all previous chunks were computed.
-    last_checkpoint = next((tmp_path / "chunks").glob("rng_cfg*_chunk_4_6.pkl"))
+    last_checkpoint = next((tmp_path / "state" / "chunks").glob("rng_cfg*_chunk_4_6.pkl"))
     last_checkpoint.unlink()
     observed_keys.clear()
     koala_sampling.get_samples_chunked(**common)
@@ -363,7 +363,7 @@ def test_chunk_keys_are_global_indexed_and_resume_independent(monkeypatch, tmp_p
     # A preempted/direct partial pickle is detected and recomputed; it is not
     # trusted merely because the filename exists.
     corrupt_checkpoint = next(
-        (tmp_path / "chunks").glob("rng_cfg*_chunk_2_4.pkl")
+        (tmp_path / "state" / "chunks").glob("rng_cfg*_chunk_2_4.pkl")
     )
     corrupt_checkpoint.write_bytes(b"partial pickle")
     observed_keys.clear()

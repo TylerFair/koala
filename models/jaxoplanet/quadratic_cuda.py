@@ -5,6 +5,8 @@ unsupported architecture or failed build leaves the JAX implementation in
 place. Nothing is compiled during package installation. Higher derivatives
 are evaluated by JAX from the same closed-form expressions.
 """
+
+from koala.console import debug, info
 import ctypes
 from functools import lru_cache
 import hashlib
@@ -119,11 +121,11 @@ def _load_accelerator():
                     jax.ffi.register_ffi_target(name, jax.ffi.pycapsule(getattr(library, symbol)),
                                                 platform='CUDA')
                     targets[operation] = name
-                print('Quadratic transit: CUDA accelerator; JAX for higher derivatives.', flush=True)
+                debug('Quadratic transit: CUDA accelerator; JAX for higher derivatives.', flush=True)
                 return library, targets  # Keep the library alive while executables use it.
     except (OSError, ValueError, AttributeError, subprocess.SubprocessError) as error:
         reason = 'CUDA build/load unavailable ('+str(error).splitlines()[0]+')'
-    print('Quadratic transit: JAX closed form ('+reason+').', flush=True)
+    debug('Quadratic transit: JAX closed form ('+reason+').', flush=True)
     return None
 
 

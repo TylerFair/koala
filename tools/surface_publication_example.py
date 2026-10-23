@@ -35,6 +35,7 @@ from models.jaxoplanet.surface_basis import (
     prepare_emission_light_curve_basis, prepare_spot_light_curve_basis,
 )
 from koala.plotting_style import apply_publication_style
+from koala.output_paths import OutputPaths
 from koala.surface_outputs import save_surface_results
 from koala.config import parse_planet_parameter_specs
 from tools.example_phase_curves import _scenario, _write_nirspec, GEOMETRY, NOISE_PPM
@@ -52,8 +53,7 @@ def scale(site):
 
 
 def save(fig, directory, name):
-    for suffix in ("png", "pdf"):
-        fig.savefig(directory / f"{name}.{suffix}", dpi=180, bbox_inches="tight")
+    fig.savefig(OutputPaths(directory).figure(name), dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -124,8 +124,8 @@ def fit(name, output, draws=1000, warmup=500, seed=20260904):
     chains = {key: np.asarray(value) for key, value in sampler.get_samples(group_by_chain=True).items()}
     samples = {key: value.reshape((-1,) + value.shape[2:]) for key, value in chains.items()}
     extra = {key: np.asarray(value) for key, value in sampler.get_extra_fields(group_by_chain=True).items()}
-    np.savez_compressed(directory / "posterior.npz", **chains)
-    np.savez_compressed(directory / "sampler.npz", **extra)
+    np.savez_compressed(OutputPaths(directory).state("posterior.npz"), **chains)
+    np.savez_compressed(OutputPaths(directory).state("sampler.npz"), **extra)
     diag = summary({key: chains[key] for key in SITES[name] + ["c", "v"]})
     records = []
     for key, values in diag.items():
@@ -133,7 +133,7 @@ def fit(name, output, draws=1000, warmup=500, seed=20260904):
             records.append(dict(parameter=key, wavelength_um=wavelength,
                                 ess=float(np.ravel(values["n_eff"])[channel]),
                                 r_hat=float(np.ravel(values["r_hat"])[channel])))
-    pd.DataFrame(records).to_csv(directory / "diagnostics.csv", index=False)
+    pd.DataFrame(records).to_csv(OutputPaths(directory).state("diagnostics.csv"), index=False)
     report = dict(scenario=name, seed=seed, draws_per_chain=draws, warmup_per_chain=warmup, chains=2,
                   jax=jax.__version__, numpyro=numpyro.__version__, backend=jax.default_backend(),
                   divergences=int(extra["diverging"].sum()), min_ess=min(r["ess"] for r in records),
@@ -141,12 +141,12 @@ def fit(name, output, draws=1000, warmup=500, seed=20260904):
     report["passed"] = bool(report["divergences"] == 0 and all(
         np.isfinite(r["ess"]) and r["ess"] >= 400 and np.isfinite(r["r_hat"]) and r["r_hat"] < 1.01
         for r in records))
-    (directory / "run.json").write_text(json.dumps(report, indent=2) + "\n")
+    Path(OutputPaths(directory).state("run.json")).write_text(json.dumps(report, indent=2) + "\n")
     save_surface_results(wave, np.diff(wave)[0] / 2, samples, directory / "spectrum.csv")
     # Exact basis evaluation of the fitted likelihood, including nuisance trends.
     prediction = posterior_lightcurves(name, samples, basis, t)
     quantiles = np.percentile(prediction, [15.865, 50, 84.135], axis=0)
-    np.savez_compressed(directory / "lightcurves.npz", time_bmjd_tdb=time, wavelength_um=wave,
+    np.savez_compressed(OutputPaths(directory).state("lightcurves.npz"), time_bmjd_tdb=time, wavelength_um=wave,
                         observed=observed, uncertainty=error, truth=signal,
                         model_quantiles=quantiles)
     plot_products(name, directory, wave, time, observed, error, truth, samples, quantiles)
@@ -224,13 +224,13 @@ def main():
     for name in SITES if args.scenario == "all" else [args.scenario]:
         if args.plot_only:
             directory = args.output_dir / name
-            with np.load(directory / "posterior.npz") as archive:
+            with np.load(OutputPaths(directory).state("posterior.npz")) as archive:
                 samples = {key: value.reshape((-1,) + value.shape[2:]) for key, value in archive.items()}
-            with np.load(directory / "lightcurves.npz") as data:
+            with np.load(OutputPaths(directory).state("lightcurves.npz")) as data:
                 plot_products(name, directory, data["wavelength_um"], data["time_bmjd_tdb"],
                               data["observed"], data["uncertainty"],
                               json.loads((directory / "truth.json").read_text()), samples, data["model_quantiles"])
-            reports.append(json.loads((directory / "run.json").read_text()))
+            reports.append(json.loads(Path(OutputPaths(directory).state("run.json")).read_text()))
         else:
             reports.append(fit(name, args.output_dir, args.draws, args.warmup, args.seed))
         jax.clear_caches()
