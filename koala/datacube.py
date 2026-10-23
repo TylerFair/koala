@@ -242,7 +242,9 @@ def _filter_invalid_spectroscopic_integrations(time, flux, flux_err):
         )
         if not np.any(keep):
             raise ValueError(message + " No valid integrations remain.")
-        info(message + " Removing them globally from every wavelength channel.")
+        info(f"Leaving out {n_bad} integration{'s' if n_bad != 1 else ''} with a missing time, "
+             "flux or uncertainty, or an uncertainty of zero.")
+        debug(message + " Removing them globally from every wavelength channel.")
 
     return time[keep], flux[keep, :], flux_err[keep, :], keep
 

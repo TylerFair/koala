@@ -677,15 +677,16 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     device_label = (f'CPU, {len(jax.devices("cpu"))} cores' if host_device == 'cpu'
                     else str(jax.devices()[0].device_kind))
     detector_description = detector_label(instrument, nrs=nrs, order=order).replace('order', 'order ')
+    mode_label = ' '.join(part for part in (instrument, detector_description) if part)
     if presentation is None:
-        info(f'koala {koala_version()} | {planet_str} | {instrument} {detector_description} | {device_label}')
+        info(f'koala {koala_version()} | {planet_str} | {mode_label} | {device_label}')
         info('')
     elif presentation.get('reading'):
         if not presentation.get('header_printed'):
             info(f'koala {koala_version()} | {planet_str} | joint fit of {presentation["count"]} observations | {device_label}')
             presentation['header_printed'] = True
             info('')
-        info(f'{instrument} {detector_description} ({os.path.basename(config_path)})')
+        info(f'{mode_label} ({os.path.basename(config_path)})')
     master_seed = int(flags.get("random_seed", 555))
     key_master = jax.random.PRNGKey(master_seed)
     debug(f"Master random seed: {master_seed}")
