@@ -948,7 +948,7 @@ def print_corner(data, labels, color, title=None):
         data, fig=fig, labels=labels, color=color, bins=35, smooth=1.0, smooth1d=1.0,
         quantiles=(0.16, 0.5, 0.84), show_titles=False, label_kwargs={'fontsize': LABEL_SIZE},
         levels=(0.393, 0.865), plot_datapoints=False, plot_density=False, fill_contours=True,
-        hist_kwargs={'linewidth': 1.2}, max_n_ticks=3, labelpad=0.45,
+        hist_kwargs={'linewidth': 1.2}, max_n_ticks=3,
     )
     size = int(round(np.sqrt(len(fig.axes))))
     for index, ax in enumerate(fig.axes):
@@ -966,10 +966,17 @@ def print_corner(data, labels, color, title=None):
                 axis.get_major_formatter().set_useOffset(False)
             except AttributeError:
                 pass
-    # corner's margins assume two inches per panel; leave room for the rotated tick labels instead.
+    # corner's margins and label offsets scale with the panels; fix them in inches instead,
+    # leaving room for the rotated tick labels whatever the number of parameters.
     side = fig.get_figwidth()
     fig.subplots_adjust(left=1.35 / side, bottom=1.35 / side, right=1 - 0.1 / side,
                         top=1 - (0.4 if title else 0.1) / side, wspace=0.06, hspace=0.06)
+    for ax in fig.axes:
+        box = ax.get_position()
+        if ax.get_xlabel():
+            ax.xaxis.set_label_coords(0.5, -0.95 / (box.height * side))
+        if ax.get_ylabel():
+            ax.yaxis.set_label_coords(-0.95 / (box.width * side), 0.5)
     if title:
         fig.suptitle(title, fontsize=TITLE_SIZE, y=1 - 0.08 / side, va='top')
     return fig
