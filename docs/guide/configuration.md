@@ -110,12 +110,14 @@ This drops the first 10 minutes, integrations 400 to 405, and the last five inte
 Ranges include both ends, integrations count from zero, negative numbers count from the end, and `null` leaves that end open.
 Times are in BMJD_TDB days, and `t` in an expression is the array of integration times.
 
-Separately, koala clips single outlying integrations, at 4σ from the fitted model by default.
-You can change the threshold for the white-light and spectroscopic fits:
+Separately, koala clips integrations that are more than 5σ from the white-light model, and leaves them out of the channel fits too.
+The channels themselves aren't clipped unless you ask.
+With a `resolution.low` stage, `spectroscopic_sigma` also drops any integration that's that far from the model in one of the coarse channels before the fine ones are fitted.
+A threshold of 0 turns a clip off:
 
 ```yaml
 outlier_clip:
-  whitelight_sigma: 5
+  whitelight_sigma: 4
   spectroscopic_sigma: 5
 ```
 

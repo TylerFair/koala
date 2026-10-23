@@ -301,10 +301,10 @@ def test_refactor_notice_is_file_only_before_configuration(tmp_path, capsys):
 
 def test_residual_wording_and_joint_collection(capsys):
     console.configure()
-    console.residual_summary(109., 1, 4)
+    console.residual_summary(109., 1, 5)
     console.residual_summary(189., 0, 4)
     output = capsys.readouterr().out
-    assert 'Residual scatter 109 ppm; 1 integration clipped at 4σ' in output
+    assert 'Residual scatter 109 ppm; 1 integration clipped at 5σ' in output
     assert 'Residual scatter 189 ppm; no integrations clipped' in output
     state = {'collect_residuals': True}
     with console.joint_presentation(state):

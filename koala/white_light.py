@@ -1491,6 +1491,8 @@ def _save_white_light_diagnostics(
     wl_residual = context.data.wl_flux - wl_transit_model
     wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
     wl_mad_mask = jnp.abs(wl_residual - jnp.nanmedian(wl_residual)) > context.whitelight_sigma * wl_sigma
+    if not context.whitelight_sigma:  # 0 turns the clip off
+        wl_mad_mask = jnp.zeros_like(wl_mad_mask)
     from .console import residual_summary
     residual_summary(float(jnp.std(wl_residual[~wl_mad_mask])) * 1e6,
                      int(jnp.sum(wl_mad_mask)), context.whitelight_sigma,

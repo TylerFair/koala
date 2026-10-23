@@ -690,8 +690,8 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     key_master = jax.random.PRNGKey(master_seed)
     debug(f"Master random seed: {master_seed}")
 
-    whitelight_sigma = outlier_clip.get('whitelight_sigma', 4)
-    spectroscopic_sigma = outlier_clip.get('spectroscopic_sigma', 4)
+    whitelight_sigma = outlier_clip.get('whitelight_sigma', 5)
+    spectroscopic_sigma = outlier_clip.get('spectroscopic_sigma', 0)
 
     # Representative (fixed value / prior centre) orbital inputs.  The
     # white-light model samples whichever of these the specification frees.

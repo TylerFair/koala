@@ -94,7 +94,7 @@ Everything else has a default that's a good place to start:
 - a linear trend in time for each light curve,
 - quadratic limb darkening with wide uniform priors on its two coefficients,
 - an extra white-noise (jitter) term on top of the reported flux uncertainties,
-- integrations more than 4σ from the model are clipped,
+- integrations more than 5σ from the white-light model are clipped, and left out of the channel fits too,
 - four chains of 1000 posterior draws each, which have to agree before koala accepts a fit.
 
 [Configuring a fit](guide/configuration.md) shows how to change these.
@@ -141,7 +141,7 @@ sample: 100%|██████████████████████�
   b                0.4511 ± 0.0047
   t0               59787.056748 ± 0.000014 BMJD_TDB
   duration         0.119602 ± 0.000088 d
-  Residual scatter 109 ppm; 1 integration clipped at 4σ
+  Residual scatter 109 ppm; 1 integration clipped at 5σ
 Limb darkening from stellar models: 100%|██████████████████████| 115/115 [00:00<00:00, 1533.79it/s]
 Spectroscopy at R = 100: 115 channels, orbit fixed to the white-light posterior
 Channels: 100%|██████████████████████████████████████████████████| 115/115 [03:04<00:00,  1.60s/it]
@@ -198,7 +198,7 @@ ax2.set_ylabel("residual (ppm)")
 ```
 
 The model goes right through the data, and the residuals scatter by about 110 ppm around zero with no pattern left in them, which is what we'd hope for.
-One integration at the very start of the observation was more than 4σ from the model, so koala clipped it, and it's left out of this plot.
+One integration at the very start of the observation was more than 5σ from the model, so koala clipped it, and it's left out of this plot.
 
 The fitted orbit is in `*_whitelight_params.csv`:
 

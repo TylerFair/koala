@@ -1229,7 +1229,9 @@ def run_low_resolution_stage(
 
         medians = np.nanmedian(residuals, axis=1, keepdims=True)
         sigmas    = 1.4826 * np.nanmedian(np.abs(residuals - medians), axis=1, keepdims=True)
-        point_mask = np.abs(residuals - medians) > spectroscopic_sigma * sigmas
+        # A threshold of 0 (the default) clips nothing.
+        point_mask = (np.abs(residuals - medians) > spectroscopic_sigma * sigmas if spectroscopic_sigma
+                      else np.zeros(residuals.shape, dtype=bool))
         time_mask = np.any(point_mask, axis=0)
         valid = ~time_mask
         _atomic_save_npy(lr_mask_path, time_mask)

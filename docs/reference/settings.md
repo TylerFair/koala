@@ -73,8 +73,8 @@ For several planets, give a list with one entry per planet.
 | `resolution.high` | | a resolving power, `native`, or `reference` |
 | `resolution.low` | | an optional coarser stage, with the same choices |
 | `resolution.reference_grid`, `resolution.reference_grid_lr` | | CSV files of bin edges for `reference` |
-| `outlier_clip.whitelight_sigma` | 4 | clipping threshold for the white-light fit |
-| `outlier_clip.spectroscopic_sigma` | 4 | clipping threshold for the channel fits |
+| `outlier_clip.whitelight_sigma` | 5 | clipping threshold for the white-light fit; 0 turns it off |
+| `outlier_clip.spectroscopic_sigma` | 0 | clipping threshold applied to the `resolution.low` channels before the fine stage; 0 turns it off |
 | `outlier_clip.mask_integrations_start`, `outlier_clip.mask_integrations_end` | | number of integrations to leave out at the start and end |
 
 ## Trend priors
