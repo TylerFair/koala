@@ -165,6 +165,13 @@ def stellar_output(model, teff, logg, feh):
 _stellar_notices = set()
 
 
+def notice_once(key, message):
+    """Print ``message`` only the first time in a run (or in a joint fit)."""
+    if key not in _stellar_notices:
+        _stellar_notices.add(key)
+        info(message)
+
+
 @contextlib.contextmanager
 def quiet_sampling():
     token = _spectroscopy.set(True)

@@ -53,11 +53,11 @@ For several planets, give a list with one entry per planet.
 |---|---|---|
 | `teff`, `logg`, `feh` | | effective temperature (K), surface gravity ($\log_{10}$ cgs) and metallicity (dex) |
 | `teff_sigma`, `logg_sigma`, `feh_sigma` | | their uncertainties, used by `ld_prior: stellarprior` |
-| `ld_model` | `mps1` | ExoTiC-LD stellar-model grid (`mps1`, `mps2`, `stagger`, `kurucz`, `phoenix`) |
+| `ld_model` | `stagger`, or `mps1` for stars outside Stagger | ExoTiC-LD stellar-model grid (`stagger`, `mps1`, `mps2`, `kurucz`, `phoenix`); Stagger uses its solar-metallicity models for metal-rich stars |
 | `ld_data_path` | `~/.cache/koala/exotic_ld_data` | where the stellar-model files are kept |
 | `ld_interpolate_type` | `trilinear` | how ExoTiC-LD interpolates the grid |
 | `ld_coefficients` | | your own fixed coefficients (for `ld_prior: fixed` or `fixed_u1`) |
-| `ld_prior_model` | `ld_model`, or `stagger` if that isn't set | stellar-model grid for `stellarprior` |
+| `ld_prior_model` | `ld_model` | stellar-model grid for `stellarprior`, if it should differ from `ld_model` |
 | `ld_prior_n_grid` | 9 | grid points per stellar parameter for `stellarprior` |
 | `ld_prior_nsigma` | 5 | half-width of that grid, in standard deviations |
 | `ld_prior_min_sigma` | 1e-4 | smallest allowed prior width |

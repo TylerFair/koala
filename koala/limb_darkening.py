@@ -251,6 +251,35 @@ def _validate_whitelight_optimized_start(
     return not reasons, reasons
 
 
+# ExoTiC-LD's Stagger models stop at solar metallicity; more metal-rich stars use those.
+STAGGER_MAX_FEH = 0.0
+
+
+def is_stagger(ld_model):
+    return str(ld_model).lower() in ('stagger', '3d')
+
+
+def ld_model_metallicity(feh, ld_model):
+    """The [Fe/H] handed to ExoTiC-LD: capped at solar for Stagger."""
+    return min(float(feh), STAGGER_MAX_FEH) if is_stagger(ld_model) else float(feh)
+
+
+def stagger_covers(teff, logg, feh):
+    """True when Stagger brackets the star (at solar [Fe/H] if it's metal-rich), so it can be interpolated."""
+    from exotic_ld.ld_grids import StellarGrids
+    grid = StellarGrids(ld_model_metallicity(feh, 'stagger'), float(teff), float(logg), 'stagger',
+                        DEFAULT_LD_DATA_PATH, '', '', 'trilinear', 0)
+    return grid._get_surrounding_grid_cuboid() is not None
+
+
+def resolve_ld_model(stellar_cfg):
+    """``stellar.ld_model`` if given, otherwise Stagger, or MPS-ATLAS for stars outside Stagger."""
+    if stellar_cfg.get('ld_model') is not None:
+        return stellar_cfg['ld_model']
+    covered = stagger_covers(stellar_cfg['teff'], stellar_cfg['logg'], stellar_cfg['feh'])
+    return 'stagger' if covered else 'mps1'
+
+
 def _get_ld_mode_bounds(instrument, order=None):
     """ExoTiC-LD mode and wavelength bounds (angstroms) for a Koala instrument."""
     return ld_mode_and_bounds(instrument, order)
@@ -498,7 +527,7 @@ def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, ins
         raise ValueError('Stellar LD grid requires quadratic or power2.')
     coefficient_names = ('u1', 'u2') if ld_profile == 'quadratic' else ('c1', 'c2')
     ld_mu_min = stellar_cfg.get('ld_mu_min') if ld_profile == 'quadratic' else None
-    ld_prior_model = stellar_cfg.get('ld_prior_model', stellar_cfg.get('ld_model', 'stagger'))
+    ld_prior_model = stellar_cfg.get('ld_prior_model') or resolve_ld_model(stellar_cfg)
     ld_data_path = stellar_cfg.get('ld_data_path', DEFAULT_LD_DATA_PATH)
     ld_interpolate_type = stellar_cfg.get('ld_interpolate_type', 'trilinear')
     teff = float(stellar_cfg['teff'])
@@ -563,6 +592,8 @@ def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, ins
             "cache_label": cache_label,
         },
     )
+    if is_stagger(ld_prior_model):
+        _update_checkpoint_hash(digest, {'stagger_max_feh': STAGGER_MAX_FEH})
     if ld_profile == 'quadratic':
         _update_checkpoint_hash(digest, {'law': 'quadratic', 'mu_min': ld_mu_min,
             'prior_convention': 'independent-coefficient-truncated-normals-v1'})
@@ -616,6 +647,8 @@ def _get_or_build_stellar_ld_prior(stellar_cfg, wavelengths, wavelength_err, ins
             return jnp.array(mu), jnp.array(sigma)
 
     combos = _stellar_grid_combos(teff, teff_sigma, logg, logg_sigma, feh, feh_sigma, n_grid, nsigma)
+    combos = [(ld_model_metallicity(mh_i, ld_prior_model), teff_i, logg_i, weight)
+              for mh_i, teff_i, logg_i, weight in combos]
 
     debug(
         f"[LD prior] Building {ld_profile} grid for {instrument} ({cache_label}) with {len(combos)} stellar combinations using model={ld_prior_model}",

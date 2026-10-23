@@ -1,5 +1,5 @@
 from .output_paths import OutputPaths, state_path
-from koala.console import debug, info, configure, koala_version, finish_run, grid_description, reading, joint_display
+from koala.console import debug, info, configure, koala_version, finish_run, grid_description, reading, joint_display, notice_once
 from .paths import DEFAULT_LD_DATA_PATH
 
 from types import SimpleNamespace
@@ -83,7 +83,7 @@ from .instruments import (
 from .limb_darkening import (
     _quadratic_uniform_initial_sites, get_or_build_power2_ld_prior, _power2_ld_initial_sites,
     _power2_ld_optimization_sites, _validate_whitelight_optimized_start, _build_axis,
-    _posterior_quadratic_ld_median,
+    _posterior_quadratic_ld_median, resolve_ld_model, is_stagger, ld_model_metallicity, STAGGER_MAX_FEH,
 )
 from .harmonica_products import (
     _LEGACY_LIMB_SCHEMA_WARNING_EMITTED, _validate_harmonica_spectro_parameterization,
@@ -916,13 +916,18 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
         stellar_feh = stellar_cfg['feh']
         stellar_teff = stellar_cfg['teff']
         stellar_logg = stellar_cfg['logg']
-        ld_model = stellar_cfg.get('ld_model', 'mps1')
+        ld_model = resolve_ld_model(stellar_cfg)
+        if stellar_cfg.get('ld_model') is None and not is_stagger(ld_model):
+            notice_once('mps1', f'The star is outside the Stagger grid, so limb darkening uses MPS-ATLAS ({ld_model}).')
+        elif is_stagger(ld_model) and float(stellar_feh) > STAGGER_MAX_FEH:
+            notice_once('stagger-solar', 'Stagger has no models above solar metallicity, '
+                                         'so limb darkening uses its [Fe/H] = 0 models.')
         ld_data_path = stellar_cfg.get('ld_data_path', DEFAULT_LD_DATA_PATH)
         ld_interpolate_type = stellar_cfg.get('ld_interpolate_type', 'trilinear')
         stellar_factory = (StellarLimbDarkening if execution_context is None else
                            lambda **kw: execution_context.stellar(StellarLimbDarkening, **kw))
         sld = stellar_factory(
-            M_H=stellar_feh, Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
+            M_H=ld_model_metallicity(stellar_feh, ld_model), Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
             ld_data_path=ld_data_path, interpolate_type=ld_interpolate_type,
         )
 

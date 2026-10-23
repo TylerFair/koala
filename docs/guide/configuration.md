@@ -64,7 +64,9 @@ stellar:
 
 These are the star's effective temperature (K), surface gravity ($\log_{10}$ cgs) and metallicity (dex).
 koala uses [ExoTiC-LD](https://exotic-ld.readthedocs.io) to work out the limb darkening at each wavelength from a grid of stellar models.
-The default grid is MPS-ATLAS (`ld_model: mps1`), and `ld_model` can also be `mps2`, `stagger`, `kurucz` or `phoenix`.
+By default it uses the 3D Stagger models, and the MPS-ATLAS models (`mps1`) for stars outside the Stagger grid, such as M dwarfs and stars hotter than 7000 K.
+Stagger only goes up to solar metallicity, so for a metal-rich star koala uses its [Fe/H] = 0 models and says so.
+You can pick a grid yourself with `ld_model`: `stagger`, `mps1`, `mps2`, `kurucz` or `phoenix`.
 If you want the limb-darkening priors to follow the uncertainty on the stellar parameters, add `teff_sigma`, `logg_sigma` and `feh_sigma` as well (see [limb darkening](limb_darkening.md)).
 
 The stellar-model files are downloaded the first time they're needed, into `~/.cache/koala/exotic_ld_data` unless you set `ld_data_path`.
