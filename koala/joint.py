@@ -407,13 +407,11 @@ def _write_joint_products(directory, samples, members, visits, *, plots='full'):
     pd.DataFrame(rows).to_csv(OutputPaths(directory).joint_table('params'), index=False)
     if plots == 'minimal':
         return
-    import corner
-    import matplotlib.pyplot as plt
     from .plotting_style import apply_publication_style, accent_color_for_label
     apply_publication_style()
     columns, labels = [], []
-    selected = [('a_rs_0', 'a/R*'), ('b_0', 'b')]
-    selected += [(f'visit{v}/t0_0', f'Visit {v} t0 [d]') for v in range(len(visits))]
+    selected = [('a_rs_0', r'$a/R_\star$'), ('b_0', r'$b$')]
+    selected += [(f'visit{v}/t0_0', f'Visit {v + 1} $t_0$ [d]') for v in range(len(visits))]
     for name, label in selected:
         values = np.asarray(samples[name])
         if np.ptp(values) > 0:
@@ -423,14 +421,12 @@ def _write_joint_products(directory, samples, members, visits, *, plots='full'):
             columns.append(values)
             labels.append(label)
     if columns:
-        fig = corner.corner(np.column_stack(columns), labels=labels,
-                            quantiles=[.16, .5, .84], show_titles=True,
-                            color=accent_color_for_label('joint'), max_n_ticks=4,
-                            label_kwargs={'fontsize': 10}, title_kwargs={'fontsize': 10})
+        from .plotting import print_corner
+        from .plotting_style import save_figure
         target = members[0][1].get('planet', {}).get('name', '')
-        fig.suptitle(f'{target} | Joint white-light posterior', fontsize=16, y=1.02)
-        fig.savefig(OutputPaths(directory).figure('joint', 'corner'), dpi=250, bbox_inches='tight')
-        plt.close(fig)
+        fig = print_corner(np.column_stack(columns), labels, accent_color_for_label('joint'),
+                           f'{target} | Joint white-light posterior')
+        save_figure(fig, OutputPaths(directory).figure('joint', 'corner'))
     debug('Joint white light shares a_rs and b with a fixed circular period.')
     for i, (name, _, _) in enumerate(members):
         debug(f'Observation {i + 1}: {name}')

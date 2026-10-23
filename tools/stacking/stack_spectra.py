@@ -11,12 +11,15 @@ import numpy as np
 import yaml
 from koala.plotting_style import (
     DATA_MARKER_STYLE,
+    FONT_SIZE,
+    TITLE_SIZE,
     ZERO_LINE_COLOR,
     _infer_half_widths,
     accent_color_for_label,
     apply_publication_style,
     model_palette_colors,
     save_figure,
+    scaled_figsize,
     style_axis,
 )
 
@@ -246,7 +249,7 @@ def _add_panel_tag(ax, tag):
         ha="left",
         va="top",
         fontweight="bold",
-        fontsize=15,
+        fontsize=TITLE_SIZE,
         zorder=20,
     )
 
@@ -280,7 +283,7 @@ def plot_stacking_publication(path, wavelength, names, model_medians,
     fig, axes = plt.subplots(
         n_panels,
         1,
-        figsize=(8.8, 9.0 if n_panels == 3 else 6.2),
+        figsize=scaled_figsize(8.8, 9.0 if n_panels == 3 else 6.2),
         sharex=True,
         constrained_layout=True,
         gridspec_kw={"height_ratios": [3, 1.7, 1.4] if n_panels == 3 else [3, 1]},
@@ -328,7 +331,7 @@ def plot_stacking_publication(path, wavelength, names, model_medians,
         loc="upper right",
         ncol=2 if len(names) >= 3 else 1,
         frameon=False,
-        fontsize=10,
+        fontsize=FONT_SIZE,
     )
 
     if model_errors is not None:
@@ -426,7 +429,7 @@ def plot_stacking_diagnostics(path, wavelength, aligned_summary,
     fig, axes = plt.subplots(
         3,
         1,
-        figsize=(8.8, 8.0),
+        figsize=scaled_figsize(8.8, 8.0),
         sharex=True,
         constrained_layout=True,
         gridspec_kw={"height_ratios": [2, 1, 1]},

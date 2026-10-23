@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from generate_tutorial_figures import style, COLOR
+from generate_tutorial_figures import style, COLOR, SAVE_PAD
 
 ROOT=Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT=ROOT/'docs'/'_static'
@@ -37,7 +37,7 @@ def one(directory, pattern):
 
 
 def save(fig, out, name):
-    fig.savefig(out/name,dpi=180,facecolor='white')
+    fig.savefig(out/name,dpi=180,facecolor='white',bbox_inches='tight',pad_inches=SAVE_PAD)
     plt.close(fig)
 
 
@@ -109,7 +109,7 @@ def phase(directory,out):
     high=float(np.nanpercentile(flux[above],99))+150
     axes[0].set(xlabel='Orbital phase from transit',ylabel='Relative flux (ppm)',ylim=(low,high))
     axes[0].text(.5,.05,'Transit extends below the plotted range',transform=axes[0].transAxes,
-        ha='center',fontsize=9,color='.3')
+        ha='center',color='.3')
     for key,label,color in [('eclipse_depth_ppm','At eclipse (dayside)',COLOR),('nightside_flux_ppm','Nightside','#397b88')]:
         axes[1].errorbar(emission.wavelength,emission[key],
             yerr=np.array([emission[key+'_err_low'],emission[key+'_err_high']]),

@@ -113,20 +113,20 @@ def save_time_shift_products(wavelengths, wavelength_err, samples, prefix, geome
         for column in columns:
             spectrum[column + suffix] = part[column].to_numpy()
     _atomic_dataframe_csv(spectrum, paths.table(stage, 'spectrum'), index=False)
-    from .plotting_style import apply_publication_style, style_axis, save_figure, figure_title, accent_color_for_label
+    from .plotting_style import (DATA_MARKER_STYLE, apply_publication_style, style_axis, save_figure, figure_title,
+                                 accent_color_for_label, figsize)
     apply_publication_style()
-    fig, axes = plt.subplots(2, 1, figsize=(9, 6.5), sharex=True, constrained_layout=True)
+    fig, axes = plt.subplots(2, 1, figsize=figsize(5.2), sharex=True, constrained_layout=True)
     for planet, part in table.groupby('planet', sort=True):
         color = accent_color_for_label(paths.prefix)
         axes[0].errorbar(part.wavelength, part.depth*1e6, yerr=part.depth_err*1e6,
-                         fmt='o', ms=4, color=color, mfc='white', label=f'Planet {planet + 1}')
-        axes[1].errorbar(part.wavelength, part.dt0_s, yerr=part.t0_err_s,
-                         fmt='o', ms=4, color=color, mfc='white')
+                         label=f'Planet {planet + 1}', **{**DATA_MARKER_STYLE, 'color': color})
+        axes[1].errorbar(part.wavelength, part.dt0_s, yerr=part.t0_err_s, **{**DATA_MARKER_STYLE, 'color': color})
     axes[0].set_ylabel('Depth [ppm]')
     axes[1].axhline(0, color='.5', lw=.8)
     axes[1].set(xlabel='Wavelength [µm]', ylabel=r'$t_0 - t_{0,white}$ [s]')
     if table.planet.nunique() > 1:
-        axes[0].legend(fontsize=10)
+        axes[0].legend()
     for ax in axes:
         style_axis(ax)
     from .diagnostic_figures import grid_title

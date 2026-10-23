@@ -20,21 +20,18 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from koala.plotting_style import apply_publication_style, LIGHTCURVE_COLOR
+from koala.plotting_style import apply_publication_style, LIGHTCURVE_COLOR, SAVE_PAD
 
 OUT = ROOT / 'docs' / '_static'
 COLOR = LIGHTCURVE_COLOR
 
 def style():
+    """koala's own figure style, drawn at the size it would be printed."""
     apply_publication_style()
-    plt.rcParams.update({'text.usetex': False, 'font.size': 12,
-        'axes.labelsize': 12, 'xtick.labelsize': 10, 'ytick.labelsize': 10,
-        'legend.fontsize': 10, 'axes.spines.top': False,
-        'axes.spines.right': False, 'figure.dpi': 180,
-        'savefig.dpi': 180, 'savefig.bbox': None})
+    plt.rcParams.update({'text.usetex': False, 'figure.dpi': 180})
 
 def finish(fig, name):
-    fig.savefig(OUT / name, dpi=180, facecolor='white')
+    fig.savefig(OUT / name, dpi=180, facecolor='white', bbox_inches='tight', pad_inches=SAVE_PAD)
     plt.close(fig)
 
 def trend_gallery():
@@ -55,21 +52,23 @@ def trend_gallery():
     curves['gp']=gp
     for base in ['linear','quadratic','cubic','quartic','explinear']:
         curves[base+'+gp']=curves[base]+gp
-    fig,axes=plt.subplots(5,4,figsize=(9,8),layout='constrained')
+    fig,axes=plt.subplots(7,3,figsize=(6.9,9.2),layout='constrained')
     for ax,(name,y) in zip(axes.flat,curves.items()):
         ax.axhline(0,color='.8',lw=.7)
-        ax.plot(x,y,color=COLOR,lw=1.9)
-        ax.set_title(name,fontsize=9,loc='left')
+        ax.plot(x,y,color=COLOR,lw=1.6)
+        ax.set_title(name.replace('+linear_', '+\nlinear_') if len(name) > 20 else name,loc='left')
         ax.set(xticks=[],yticks=[],xlim=(0,1),ylim=(-.5,1.4))
-    fig.supxlabel('Time through the visit',fontsize=12)
-    fig.supylabel('Trend relative to unity (illustrative amplitudes)',fontsize=12)
+    for ax in axes.flat[len(curves):]:
+        ax.set_visible(False)
+    fig.supxlabel('Time through the visit')
+    fig.supylabel('Trend relative to unity (illustrative amplitudes)')
     finish(fig,'trend_gallery.png')
 
 def harmonica_limbs():
     # Schema-v2 physical labels are mapped to neutral angular indices.
     # The original CSV convention is retained verbatim in the archive.
     data=np.genfromtxt(OUT/'data'/'wasp94_limbs.csv',delimiter=',',names=True,dtype=None,encoding='utf-8')
-    fig=plt.figure(figsize=(9,6.5),layout='constrained')
+    fig=plt.figure(figsize=(6.9,5.2),layout='constrained')
     grid=fig.add_gridspec(2,2)
     total=fig.add_subplot(grid[0,:])
     one=fig.add_subplot(grid[1,0])
@@ -80,7 +79,7 @@ def harmonica_limbs():
         ax.errorbar(data['wavelength'],data[key+'_median'],
             yerr=np.array([data[key+'_err_lo'],data[key+'_err_hi']]),
             fmt='o',ms=3,mfc='white',color=color,elinewidth=.8)
-        ax.set_title(label,fontsize=12,loc='left')
+        ax.set_title(label,loc='left')
         ax.set_xlabel('Wavelength (µm)')
     total.set_ylabel('Transit depth (ppm)')
     one.set_ylabel('Limb depth (ppm)')
@@ -94,7 +93,7 @@ def stacking(path=None):
         import shutil
         shutil.copyfile(path,archive)
     data=np.genfromtxt(archive,delimiter=',',names=True)
-    fig,axes=plt.subplots(2,1,figsize=(9,6),sharex=True,
+    fig,axes=plt.subplots(2,1,figsize=(6.9,4.8),sharex=True,
         gridspec_kw={'height_ratios':[2,1]},layout='constrained')
     axes[0].errorbar(data['wavelength'],data['depth']*1e6,
         yerr=np.array([data['depth_err_lo'],data['depth_err_hi']])*1e6,
@@ -173,7 +172,7 @@ def eclipse_scan(fits_path=None):
     template=-occulted_fraction(t,best_epoch)
     model_X=np.column_stack([X,template])
     coef=np.linalg.lstsq(model_X/err[:,None],yw,rcond=None)[0]
-    fig,axes=plt.subplots(2,1,figsize=(9,7),layout='constrained')
+    fig,axes=plt.subplots(2,1,figsize=(6.9,5.6),layout='constrained')
     hours=(t-true)*24
     axes[0].plot(hours,(y-1)*1e6,'.',ms=2,color=COLOR,alpha=.24,rasterized=True)
     groups=np.array_split(np.arange(len(t)),80)

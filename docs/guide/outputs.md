@@ -75,6 +75,9 @@ With `flags.plots: minimal`, koala only makes `whitelight.png` and the spectrum 
 The binned points in the figures are only there to make them easier to read.
 The fits always use every integration, and for numbers you should read the tables.
 
+The figures are drawn at the width of a journal page, 7 inches, so they can go straight into a paper: with `\includegraphics[width=\textwidth]{...}` every label prints at 11 pt or larger in an AASTeX, MNRAS or A&A article.
+To draw your own figures the same way, call `koala.plotting_style.apply_publication_style()` first.
+
 ## Joint fits
 
 A [joint fit](../case_studies/transmission_soss.md) writes the shared orbit at the top and gives every observation its own directory with the usual files:

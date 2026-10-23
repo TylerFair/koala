@@ -85,18 +85,19 @@ def save_surface_results(wavelengths, wavelength_err, samples, csv_filename, plo
     frame.to_csv(output, index=False)
 
     import matplotlib.pyplot as plt
-    from .plotting_style import apply_publication_style, save_figure, style_axis, figure_title, accent_color_for_label
+    from .plotting_style import (DATA_MARKER_STYLE, apply_publication_style, save_figure, style_axis, figure_title,
+                                 accent_color_for_label, figsize)
 
     apply_publication_style()
     fig, axes = plt.subplots(len(products), 1, squeeze=False, sharex=True,
-                             figsize=(8.8, max(4.5, 3.7 * len(products))),
+                             figsize=figsize(max(3.6, 3.0 * len(products))),
                              constrained_layout=True)
     for ax, (name, (quantiles, label)) in zip(axes[:, 0], products.items()):
         for planet in range(quantiles.shape[-1]):
             low, med, high = quantiles[:, :, planet]
             ax.errorbar(wavelengths, med, xerr=widths,
                         yerr=np.stack([med - low, high - med]),
-                        fmt="o", color=accent_color_for_label(paths.prefix), label=f"Planet {planet + 1}")
+                        label=f"Planet {planet + 1}", **{**DATA_MARKER_STYLE, 'color': accent_color_for_label(paths.prefix)})
         ax.set_ylabel(label)
         style_axis(ax)
         if quantiles.shape[-1] > 1:
@@ -117,15 +118,16 @@ def _save_spot_results(wavelengths, widths, values, csv_filename, plots="full"):
     quantiles = np.nanpercentile(values, [15.865, 50, 84.135], axis=0)
     rows = []
     import matplotlib.pyplot as plt
-    from .plotting_style import apply_publication_style, save_figure, style_axis, figure_title, accent_color_for_label
+    from .plotting_style import (DATA_MARKER_STYLE, apply_publication_style, save_figure, style_axis, figure_title,
+                                 accent_color_for_label, figsize)
 
     apply_publication_style()
-    fig, ax = plt.subplots(figsize=(8.8, 4.5))
+    fig, ax = plt.subplots(figsize=figsize(3.6))
     for spot in range(values.shape[-1]):
         low, med, high = quantiles[:, :, spot]
         ax.errorbar(wavelengths, med, xerr=widths,
-                    yerr=np.stack([med - low, high - med]), fmt="o",
-                    color=accent_color_for_label(str(csv_filename)), label=f"Spot {spot + 1}")
+                    yerr=np.stack([med - low, high - med]), label=f"Spot {spot + 1}",
+                    **{**DATA_MARKER_STYLE, 'color': accent_color_for_label(str(csv_filename))})
         for channel, wavelength in enumerate(wavelengths):
             rows.append({"wavelength": wavelength, "wavelength_err": widths[channel],
                          "spot_index": spot, "contrast": med[channel],

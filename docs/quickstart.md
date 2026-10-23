@@ -29,7 +29,7 @@ white = flux.sum(axis=1)
 white /= np.median(white[:100])
 image = flux / np.median(flux[:100], axis=0)
 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 7), sharex=True)
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.9, 5.4), sharex=True)
 ax1.plot(hours, white, ".k", ms=2)
 ax1.set_ylabel("white-light flux")
 ax2.pcolormesh(hours, wave, image.T, vmin=0.97, vmax=1.01, shading="nearest")
@@ -182,7 +182,7 @@ wl = pd.read_csv(next(out.glob("*_whitelight_lightcurve.csv")))
 good = wl["is_outlier"] == 0
 hours = wl["time_from_t0_hr"]
 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), sharex=True,
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.9, 4.6), sharex=True,
                                gridspec_kw={"height_ratios": [2, 1]})
 ax1.plot(hours[good], wl["detrended_flux"][good], ".k", ms=2, alpha=0.5)
 ax1.plot(hours, wl["transit_model"], "C1", lw=1.5)
@@ -228,7 +228,7 @@ The spectrum is in a CSV file named after the target, instrument and wavelength 
 ```python
 spec = pd.read_csv(next(out.glob("*_R100_spectrum.csv")))
 
-fig, ax = plt.subplots(figsize=(9, 4))
+fig, ax = plt.subplots(figsize=(6.9, 3.2))
 ax.errorbar(spec["wavelength"], spec["depth_ppm00"],
             xerr=spec["wavelength_err"], yerr=spec["depth_err_ppm00"],
             fmt="o", ms=3, color="k")

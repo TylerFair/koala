@@ -1,12 +1,19 @@
 
 from koala.console import debug, info
 import numpy as np
+from pathlib import Path
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import jax.numpy as jnp
 from models.common import apply_systematics, compute_transit_model_auto
 from models.harmonica.core import _ALL_ODD_COEFF_SPECS
 from .plotting_style import (
     DATA_MARKER_STYLE,
+    FIGURE_WIDTH,
+    FONT_SIZE,
+    LABEL_SIZE,
+    TITLE_SIZE,
+    scaled_figsize,
     ERRORBAR_COLOR,
     LIGHTCURVE_COLOR,
     MODEL_COLOR,
@@ -213,7 +220,7 @@ def plot_whitelight_curve(
     accent = accent_color_for_label(instrument_label or str(filename))
 
     fig, axes = plt.subplots(
-        2, 1, figsize=(8.8, 6.2), sharex=True, gridspec_kw={'height_ratios': [3, 1]},
+        2, 1, figsize=scaled_figsize(8.8, 6.2), sharex=True, gridspec_kw={'height_ratios': [3, 1]},
     )
     if np.any(outlier):
         axes[0].plot(x[outlier], flux[outlier], zorder=1, **OUTLIER_MARKER_STYLE)
@@ -230,7 +237,7 @@ def plot_whitelight_curve(
     main_ticks = axes[0].get_yticks()
     stamp_y = main_ticks[1] if len(main_ticks) >= 2 else np.nanmin(flux[good])
     add_instrument_stamp(
-        axes[0], instrument_label or str(filename), fontsize=17, y_data=stamp_y,
+        axes[0], instrument_label or str(filename), fontsize=TITLE_SIZE, y_data=stamp_y,
     )
 
     ticks = _white_light_residual_panel(axes[1], x, residual_ppm, error_ppm, outlier, accent)
@@ -259,7 +266,7 @@ def plot_whitelight_residuals(
     )
     good = ~outlier
     accent = accent_color_for_label(instrument_label or str(filename))
-    fig, ax = plt.subplots(figsize=(8.8, 4.0))
+    fig, ax = plt.subplots(figsize=scaled_figsize(8.8, 4.0))
     ticks = _white_light_residual_panel(ax, x, residual_ppm, error_ppm, outlier, accent)
     add_instrument_stamp(ax, instrument_label or str(filename))
     style_axis(ax)
@@ -295,10 +302,10 @@ def plot_whitelight_summary(params, filename, instrument_label=None):
             lines.append("")
 
     fig_height = max(3.4, 2.8 * rors.size)
-    fig, ax = plt.subplots(figsize=(7.2, fig_height))
+    fig, ax = plt.subplots(figsize=scaled_figsize(7.2, fig_height))
     ax.axis("off")
     ax.text(
-        0.02, 0.96, '\n'.join(lines), ha='left', va='top', transform=ax.transAxes, fontsize=15,
+        0.02, 0.96, '\n'.join(lines), ha='left', va='top', transform=ax.transAxes, fontsize=TITLE_SIZE,
         linespacing=1.45,
     )
     save_figure(fig, filename)
@@ -322,14 +329,14 @@ def plot_spectrum_precision(
     accent = accent_color_for_label(instrument_label or str(filename))
 
     fig, axes = plt.subplots(
-        2, 1, figsize=(8.8, 6.2), sharex=True, gridspec_kw={'height_ratios': [3, 1]},
+        2, 1, figsize=scaled_figsize(8.8, 6.2), sharex=True, gridspec_kw={'height_ratios': [3, 1]},
     )
     axes[0].errorbar(
         wavelengths, depth_ppm, xerr=wavelength_err, yerr=yerr, color=accent, ecolor=accent,
         zorder=2, **DATA_MARKER_STYLE,
     )
     axes[0].set_ylabel("Transit Depth [ppm]")
-    add_instrument_stamp(axes[0], instrument_label or str(filename), fontsize=17)
+    add_instrument_stamp(axes[0], instrument_label or str(filename), fontsize=TITLE_SIZE)
     axes[1].plot(wavelengths, precision, color=accent, lw=1.9)
     axes[1].set_xlabel("Wavelength [$\\mu$m]")
     axes[1].set_ylabel("Precision [ppm]")
@@ -353,7 +360,7 @@ def plot_noise_binning_from_csv(noise_df, filename, instrument_label=None):
     expected = np.asarray(noise_df["expected_white_rms"], dtype=float)
     accent = accent_color_for_label(instrument_label or str(filename))
 
-    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+    fig, ax = plt.subplots(figsize=scaled_figsize(6.8, 4.8))
     ax.loglog(bins, expected, color=ZERO_LINE_COLOR, lw=1.7, ls="--")
     ax.fill_between(bins, p16, p84, color=accent, alpha=0.18)
     ax.loglog(
@@ -362,7 +369,7 @@ def plot_noise_binning_from_csv(noise_df, filename, instrument_label=None):
     )
     ax.set_xlabel("Bin Size [points]")
     ax.set_ylabel("RMS [ppm]")
-    add_instrument_stamp(ax, instrument_label or str(filename), fontsize=14)
+    add_instrument_stamp(ax, instrument_label or str(filename), fontsize=TITLE_SIZE)
     style_axis(ax, x_locator=False, y_locator=False)
     save_figure(fig, filename)
     return fig
@@ -425,7 +432,7 @@ def plot_map_fits(
     models = _map_full_models(t, map_params, transit_params, count, detrend_type)
     accent = accent_color_for_label(str(filename))
     fig, axes = plt.subplots(
-        nrows, ncols, figsize=(8.8, max(3.0, 2.55 * nrows)), sharex=True, sharey=True,
+        nrows, ncols, figsize=scaled_figsize(8.8, max(3.0, 2.55 * nrows)), sharex=True, sharey=True,
         squeeze=False,
     )
     flat_axes = axes.ravel()
@@ -440,7 +447,7 @@ def plot_map_fits(
         ax.label_outer()
     for ax in flat_axes[count:]:
         ax.set_visible(False)
-    add_instrument_stamp(flat_axes[0], str(filename), fontsize=13)
+    add_instrument_stamp(flat_axes[0], str(filename), fontsize=TITLE_SIZE)
     fig.supxlabel("Time from Mid-Transit [hr]")
     fig.supylabel("Normalized Flux")
     save_figure(fig, filename)
@@ -465,7 +472,7 @@ def plot_map_residuals(
     limit, ticks = choose_symmetric_residual_ticks(residuals, errors)
     accent = accent_color_for_label(str(filename))
     fig, axes = plt.subplots(
-        nrows, ncols, figsize=(8.8, max(3.0, 2.35 * nrows)), sharex=True, sharey=True,
+        nrows, ncols, figsize=scaled_figsize(8.8, max(3.0, 2.35 * nrows)), sharex=True, sharey=True,
         squeeze=False,
     )
     flat_axes = axes.ravel()
@@ -483,7 +490,7 @@ def plot_map_residuals(
         ax.label_outer()
     for ax in flat_axes[count:]:
         ax.set_visible(False)
-    add_instrument_stamp(flat_axes[0], str(filename), fontsize=13)
+    add_instrument_stamp(flat_axes[0], str(filename), fontsize=TITLE_SIZE)
     fig.supxlabel("Time from Mid-Transit [hr]")
     fig.supylabel("Residuals [ppm]")
     save_figure(fig, filename)
@@ -496,7 +503,7 @@ def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
     filename = str(filename)
     if not filename.endswith('.png'):
         filename += '.png'
-    return spectrum(wavelengths, rors_posterior, filename, label=filename)
+    return spectrum(wavelengths, rors_posterior, filename, label=Path(filename).stem)
 
 
 def _summary_channel_trend(
@@ -592,7 +599,7 @@ def plot_wavelength_offset_summary(
     colors = related_accent_colors(str(filename), selected)
 
     fig, (ax_data, ax_residual) = plt.subplots(
-        1, 2, figsize=(10.8, max(5.2, 0.58 * selected + 1.0)),
+        1, 2, figsize=scaled_figsize(10.8, max(5.2, 0.58 * selected + 1.0)),
         gridspec_kw={'width_ratios': [2, 1], 'wspace': 0.08}, sharey=True,
     )
     marker_style = {
@@ -631,7 +638,7 @@ def plot_wavelength_offset_summary(
         style_axis(ax)
     ax_data.set_ylabel("Normalized Flux + Offset")
     ax_residual.tick_params(labelleft=False)
-    add_instrument_stamp(ax_data, str(filename), fontsize=14)
+    add_instrument_stamp(ax_data, str(filename), fontsize=TITLE_SIZE)
     fig.align_ylabels((ax_data, ax_residual))
     save_figure(fig, filename)
     return fig
@@ -653,7 +660,7 @@ def plot_harmonica_limb_spectra(limb_df, filename, instrument_label=None):
         limb_df.get("wavelength_err", _infer_half_widths(wavelength)), dtype=float
     )
     color = accent_color_for_label(instrument_label or str(filename))
-    fig = plt.figure(figsize=(8.8, 7.6))
+    fig = plt.figure(figsize=scaled_figsize(8.8, 7.6))
     grid = fig.add_gridspec(2, 2, height_ratios=[1.35, 1.0], hspace=0.23, wspace=0.10)
     ax_total = fig.add_subplot(grid[0, :])
     ax_one = fig.add_subplot(grid[1, 0])
@@ -675,12 +682,12 @@ def plot_harmonica_limb_spectra(limb_df, filename, instrument_label=None):
     ax_one.set_ylabel("Transit Depth [ppm]")
     ax_one.set_xlabel("Wavelength [$\\mu$m]")
     ax_two.set_xlabel("Wavelength [$\\mu$m]")
-    ax_one.set_title("Terminator One", fontsize=15, pad=9)
-    ax_two.set_title("Terminator Two", fontsize=15, pad=9)
+    ax_one.set_title("Terminator One", fontsize=TITLE_SIZE, pad=9)
+    ax_two.set_title("Terminator Two", fontsize=TITLE_SIZE, pad=9)
     for ax, tag in zip((ax_total, ax_one, ax_two), ("a", "b", "c")):
         ax.text(
             0.025, 0.95, tag, transform=ax.transAxes, ha='left', va='top', fontweight='bold',
-            fontsize=15,
+            fontsize=TITLE_SIZE,
         )
         style_axis(ax)
     one_low = np.asarray(limb_df["depth_one_median"], dtype=float) - np.asarray(
@@ -714,7 +721,7 @@ def plot_harmonica_transmission_strings(
     theta = np.asarray(theta, dtype=float)
     curves = np.atleast_2d(np.asarray(radius_curves, dtype=float))
     color = accent_color_for_label(instrument_label or str(filename))
-    fig, ax = plt.subplots(figsize=(8.8, 7.6))
+    fig, ax = plt.subplots(figsize=scaled_figsize(8.8, 7.6))
     for curve in curves:
         ax.plot(
             curve * np.cos(theta), curve * np.sin(theta), color='0.78', lw=0.9, alpha=0.6,
@@ -750,7 +757,7 @@ def plot_harmonica_transmission_posterior(
     curves = np.atleast_2d(np.asarray(posterior_radius_curves, dtype=float))
     median_curve = np.asarray(median_radius_curve, dtype=float)
     color = accent_color_for_label(instrument_label or str(filename))
-    fig, ax = plt.subplots(figsize=(8.8, 7.6))
+    fig, ax = plt.subplots(figsize=scaled_figsize(8.8, 7.6))
     for curve in curves:
         ax.plot(
             curve * np.cos(theta), curve * np.sin(theta), color='0.72', lw=0.8, alpha=0.08,
@@ -820,8 +827,15 @@ _CORNER_SURFACE = (
 # Only physical, directly interpretable sites are plotted. Latent
 # reparameterisations (cos i, delta, log-jitter, u+/u- coordinates, log tau)
 # and deterministic duplicates (depths, inclination, width in minutes) are
-# left out; a_rs is shown only when duration is not.
-_CORNER_KEEP = set(_CORNER_ORDER) | set(_CORNER_SURFACE)
+# left out; a_rs is shown only when duration is not. The trend, jitter and GP
+# sites are left out too, so the figure stays legible at print size; their
+# values are in the white-light parameter table.
+_CORNER_NUISANCE = {
+    "c", "v", "v2", "v3", "v4", "A", "tau", "spot_amp", "spot_mu", "spot_sigma",
+    "spot_amp2", "spot_mu2", "spot_sigma2", "t_jump", "jump", "width",
+    "error", "GP_log_sigma", "GP_log_rho",
+}
+_CORNER_KEEP = (set(_CORNER_ORDER) | set(_CORNER_SURFACE)) - _CORNER_NUISANCE
 
 
 def _corner_columns(samples):
@@ -873,6 +887,9 @@ def _corner_columns(samples):
             ref = float(np.nanmedian(arr))
             arr = (arr - ref) * 86400.0
             label = label.replace("[d]", "offset [s]")
+        elif stem == "duration":
+            arr = arr * 24.0
+            label = label.replace("[d]", "[h]")
         out_cols.append(arr)
         labels.append(label)
     return out_cols, labels
@@ -901,24 +918,58 @@ def plot_whitelight_corner(samples, filename, instrument_label=None, max_draws=6
 
     apply_publication_style()
     color = accent_color_for_label(instrument_label) if instrument_label else LIGHTCURVE_COLOR
+    title = None
+    if instrument_label:
+        from .plotting_style import figure_title_text
+        title = figure_title_text(instrument_label, 'White-light posterior')
+    fig = print_corner(data, labels, color, title)
+    save_figure(fig, filename)
+    return filename
+
+
+class _InnerTicks(MaxNLocator):
+    """Two ticks, neither near the ends of the panel, so rotated labels don't run into each other."""
+
+    def __init__(self):
+        super().__init__(nbins=3, steps=[1, 2, 2.5, 5, 10])
+
+    def __call__(self):
+        low, high = sorted(self.axis.get_view_interval())
+        margin = 0.15 * (high - low)
+        ticks = [tick for tick in super().__call__() if low + margin <= tick <= high - margin]
+        return ticks if len(ticks) <= 2 else [ticks[0], ticks[-1]]
+
+
+def print_corner(data, labels, color, title=None):
+    """A corner plot at full text width, with the house ticks and print-size text."""
+    import corner
+    fig = plt.figure(figsize=(FIGURE_WIDTH, FIGURE_WIDTH), constrained_layout=False)
     fig = corner.corner(
-        data, labels=labels, color=color, bins=35, smooth=1.0, smooth1d=1.0,
-        quantiles=(0.16, 0.5, 0.84), show_titles=True, title_fmt='.4g',
-        title_kwargs={'fontsize': 9}, label_kwargs={'fontsize': 10}, levels=(0.393, 0.865),
-        plot_datapoints=False, plot_density=False, fill_contours=True,
-        hist_kwargs={'linewidth': 1.4}, max_n_ticks=4,
+        data, fig=fig, labels=labels, color=color, bins=35, smooth=1.0, smooth1d=1.0,
+        quantiles=(0.16, 0.5, 0.84), show_titles=False, label_kwargs={'fontsize': LABEL_SIZE},
+        levels=(0.393, 0.865), plot_datapoints=False, plot_density=False, fill_contours=True,
+        hist_kwargs={'linewidth': 1.2}, max_n_ticks=3, labelpad=0.45,
     )
-    for ax in fig.axes:
-        ax.tick_params(labelsize=7)
+    size = int(round(np.sqrt(len(fig.axes))))
+    for index, ax in enumerate(fig.axes):
+        if not ax.get_frame_on():
+            continue
+        ax.xaxis.set_major_locator(_InnerTicks())
+        if index % size != index // size:
+            ax.yaxis.set_major_locator(_InnerTicks())
+        ax.tick_params(labelsize=FONT_SIZE, direction='in', top=True, right=True, length=4, width=1.0)
+        for spine in ax.spines.values():
+            spine.set_visible(True)
         # Absolute tick values, never a "+1" offset legend.
         for axis in (ax.xaxis, ax.yaxis):
             try:
                 axis.get_major_formatter().set_useOffset(False)
             except AttributeError:
                 pass
-    if instrument_label:
-        from .plotting_style import figure_title_text
-        fig.suptitle(figure_title_text(instrument_label, 'White-light posterior'), fontsize=16, y=1.02)
-    fig.savefig(filename, dpi=PLOT_DPI, bbox_inches="tight")
-    plt.close(fig)
-    return filename
+    # corner's margins assume two inches per panel; leave room for the rotated tick labels instead.
+    side = fig.get_figwidth()
+    fig.subplots_adjust(left=1.35 / side, bottom=1.35 / side, right=1 - 0.1 / side,
+                        top=1 - (0.4 if title else 0.1) / side, wspace=0.06, hspace=0.06)
+    if title:
+        fig.suptitle(title, fontsize=TITLE_SIZE, y=1 - 0.08 / side, va='top')
+    return fig

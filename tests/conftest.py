@@ -54,3 +54,19 @@ def koala_caplog(caplog):
         yield caplog
     finally:
         logger.removeHandler(caplog.handler)
+
+
+@pytest.fixture(autouse=True)
+def print_ready_figures(monkeypatch):
+    """Every figure a test saves must print with text of at least 11 pt at full text
+    width, four spines and inward ticks on every side (koala.plotting_style.print_problems)."""
+    import matplotlib.figure
+    original = matplotlib.figure.Figure.savefig
+
+    def checked(fig, *args, **kwargs):
+        from koala.plotting_style import print_problems
+        problems = print_problems(fig)
+        assert not problems, problems
+        return original(fig, *args, **kwargs)
+
+    monkeypatch.setattr(matplotlib.figure.Figure, 'savefig', checked)
