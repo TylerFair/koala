@@ -5,33 +5,45 @@
 # koala
 
 [![Tests](https://github.com/TylerFair/koala/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/TylerFair/koala/actions/workflows/tests.yml)
+[![Docs](https://readthedocs.org/projects/koala-jwst/badge/?version=latest)](https://koala-jwst.readthedocs.io)
 
-koala fits JWST transit and eclipse time series with JAX and NumPyro.
-It fits the white-light curve first, then each wavelength channel, and writes a transmission or emission spectrum with the fitted light curves.
-You can run it on a CPU or GPU, and every integration contributes to the fit.
+koala fits JWST transit, eclipse and phase-curve light curves.
+It fits the white-light curve to measure the orbit, then fits every wavelength channel, and gives you back a spectrum along with the fitted light curves and posteriors.
+It's built on JAX and NumPyro, so the same fit runs on a laptop or a GPU, and every integration goes into the fit.
 
-![WASP-39 b transmission spectrum from the bundled NIRISS/SOSS example](docs/_static/soss_spectrum.png)
+![WASP-39 b transmission spectrum from the NIRISS/SOSS example](docs/_static/soss_spectrum.png)
 
 ## Installation
 
-Clone the repository to get koala and the example data:
+koala needs Python 3.10 or newer, Git and a C++ compiler:
 
 ```bash
+conda create -n koala python=3.11
+conda activate koala
 git clone https://github.com/TylerFair/koala.git
 cd koala
 python -m pip install .
 ```
 
-Start here: [Installation](https://koala-jwst.readthedocs.io/en/latest/install.html) → [Your first fit](https://koala-jwst.readthedocs.io/en/latest/quickstart.html) → [Case studies](https://koala-jwst.readthedocs.io/en/latest/case_studies/index.html) → [Reference](https://koala-jwst.readthedocs.io/en/latest/reference/index.html).
+For GPUs, see the [installation page](https://koala-jwst.readthedocs.io/en/latest/install.html).
 
-The first fit uses the bundled WASP-39 b NIRISS/SOSS observation and runs from a notebook or the command line.
+## Usage
+
+The repository comes with a WASP-39 b NIRISS/SOSS observation to try it on:
+
+```bash
+koala -c examples/niriss_soss_order1.yaml
+```
+
+[Your first fit](https://koala-jwst.readthedocs.io/en/latest/quickstart.html) walks through that example, and the [documentation](https://koala-jwst.readthedocs.io) covers the rest.
 
 ## Citing
 
-Please cite the repository and record the commit used for your analysis.
-See [citing koala](https://koala-jwst.readthedocs.io/en/latest/citing.html) for the methods and dependencies to cite.
+If koala helps your research, please cite this repository and the commit you used.
+[Citing koala](https://koala-jwst.readthedocs.io/en/latest/reference/citing.html) lists the software koala builds on, which deserves credit too.
 
 ## Contributing
 
-Bug reports and contributions are welcome on [GitHub](https://github.com/TylerFair/koala).
-The [development guide](docs/testing.md) explains how to run the tests, and the license terms are in [LICENSE](LICENSE) and [licenses/](licenses/).
+Bug reports and pull requests are very welcome on [GitHub](https://github.com/TylerFair/koala/issues).
+See [contributing and testing](https://koala-jwst.readthedocs.io/en/latest/reference/development.html) to get started.
+koala is released under the BSD 3-Clause license (see [LICENSE](LICENSE), and [licenses/](licenses/) for the code it includes from other projects).

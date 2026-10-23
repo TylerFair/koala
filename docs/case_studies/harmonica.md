@@ -1,48 +1,48 @@
-# Harmonica limb spectra
+# Morning and evening limbs with Harmonica
 
-So far we've described the planet with one circular radius at each wavelength.
-Harmonica instead fits a planetary boundary whose two halves can differ.
-Ingress and egress then constrain the two terminator halves.
-Let's try this with the bundled WASP-39 b observation.
+So far we've treated the planet as a circle, with one radius at each wavelength.
+The atmosphere at the planet's morning terminator can be quite different from the evening one, though, and the two limbs then block different amounts of starlight.
+Ingress is mostly shaped by one limb and egress by the other, so a transit can tell them apart.
 
-## Fit the boundary
+[Harmonica](https://github.com/DavoGrant/harmonica) (Grant & Wakeford 2023) models the planet's outline as a radius that varies around the edge of the disk.
+With koala, you can fit that outline in every wavelength channel and get a spectrum for each limb.
+(If you'd rather measure the effect through the transit time, see [timing spectra](timing_spectra.md).)
 
-First, copy the {download}`SOSS starter <../../examples/niriss_soss_order1.yaml>`:
+## Setting up the fit
+
+Start from a copy of the first-fit configuration:
 
 ```bash
 cp examples/niriss_soss_order1.yaml my_harmonica.yaml
 ```
 
-Set the output directory and merge these flags into the copy:
+and add these settings to it:
 
 ```yaml
 output_dir: results/WASP-39_HARMONICA
 flags:
   transit_engine: harmonica
   harmonica_max_order: 1
-  harmonica_spectro_parameterization: delta_r
-  harmonica_spectro_odd_frac_sigma: 0.1
   ld_profile: power2
   ld_prior: gaussian
 ```
 
-Then run the fit:
+`transit_engine: harmonica` swaps the circular planet for a Harmonica outline.
+With `harmonica_max_order: 1`, the outline has a mean radius and one pair of terms that make one side bigger than the other, which is the simplest shape that can separate the two limbs.
+Harmonica fits one planet at a time, and works with power-2 limb darkening and with the quadratic law with fixed, uniform or fixed-$u_1$ priors.
+Here we've chosen power-2 with Gaussian priors.
+
+Then run it as usual:
 
 ```bash
 koala -c my_harmonica.yaml
 ```
 
-This uses the bundled observation's planet and stellar parameters.
-Harmonica accepts either `duration` or `a_rs` for the shared Keplerian orbit.
-It supports one planet with power-2 limb darkening or supported quadratic treatments, including fixed, uniform, and fixed-$u_1$ priors.
-The settings above choose Gaussian power-2 priors explicitly.
+## Reading the two limbs
 
-## Read the two limbs
-
-The ordinary spectrum CSV reports the total area-equivalent transit depth.
-The file `*_limb_spectra.csv` adds the two indexed halves and boundary summaries.
-The matching `*_limb_posterior_samples.npz` keeps their paired posterior draws.
-Use the output directory you selected above:
+The ordinary spectrum file gives the depth of the whole outline.
+`*_R100_limbs.csv` adds the two halves (`depth_one` and `depth_two`, in ppm, each with `_median`, `_err_lo` and `_err_hi`), along with the coefficients of the outline.
+`*_R100_limb_samples.npz` keeps the posterior draws of both halves together:
 
 ```python
 from pathlib import Path
@@ -50,33 +50,35 @@ import numpy as np
 import pandas as pd
 
 out = Path("results/WASP-39_HARMONICA")
-limbs = pd.read_csv(next(out.glob("*_R100_limb_spectra.csv")))
-print(limbs.columns.tolist())
-with np.load(next(out.glob("*_R100_limb_posterior_samples.npz"))) as posterior:
-    print(posterior.files)
+limbs = pd.read_csv(next(out.glob("*_R100_limbs.csv")))
+with np.load(next(out.glob("*_R100_limb_samples.npz"))) as draws:
+    difference = draws["depth_two"] - draws["depth_one"]
 ```
 
-The halves follow the boundary convention stored in the product.
-Assigning morning and evening requires the orbital orientation.
-Use paired draws when computing a limb difference, since the two depths are correlated.
-Subtracting independent error bars loses that information.
-The [output reference](../outputs.md#harmonica) lists the area and endpoint quantities separately.
+Use the draws to work out a difference between the limbs, as above.
+The depths of the two halves are correlated, so subtracting their error bars as if they were independent gives the wrong uncertainty on the difference.
+The halves are labelled by their position around the outline rather than as morning and evening, and which is which depends on the direction of the orbit on the sky.
+The convention is stored in each file (`limb_product_convention`), so read it before assigning them.
+The depths in the NPZ file are fractional, while those in the CSV are in ppm.
 
-## An example spectrum
+## An example
 
-This archived WASP-94 b fit illustrates the same outputs:
+Here's the same kind of fit for WASP-94 A b with SOSS order 1 at $R = 50$, using Gaussian priors on power-2 limb darkening (that extraction isn't included with koala):
 
 ```{figure} ../_static/harmonica_limbs.png
-:alt: Archived WASP-94 b total-area transmission spectrum and spectra of its two terminator halves
+:alt: The WASP-94 b transmission spectrum of the whole planet, and of each of its two halves
 
-WASP-94 b with SOSS order 1 at $R=50$, using Gaussian priors on power-2 limb darkening.
-The lower panels show the two indexed halves.
-Their marginal error bars alone do not establish a limb difference.
+The depth of the whole outline (top) and of each half (below).
+Because the two halves are correlated, their error bars alone can't tell you whether the limbs differ.
 ```
 
-The WASP-94 extraction is not bundled.
-To reproduce this figure, you'll need that target's extraction, planet and stellar parameters, atmosphere-cache path, and an $R=50$ final grid.
+## Other settings
 
-The [trend reference](../tutorials/systematics.md) describes polynomial, ramp, Gaussian-process and spot-crossing alternatives.
-The [limb-darkening reference](../tutorials/limb_darkening.md) lists quadratic and power-2 laws and their fixed, Gaussian, uniform and atmosphere-based priors, with engine restrictions.
-For boundary parameters and their priors, see the [Harmonica reference](../tutorials/harmonica.md).
+| `flags` key | |
+|---|---|
+| `harmonica_max_order` | the highest order of the outline (default 1) |
+| `harmonica_spectro_parameterization` | how the outline is sampled in each channel: `delta_r` (default), `fractional` or `half_area` |
+| `harmonica_spectro_odd_frac_sigma` | width of the prior on the terms that make the two sides differ (default 0.1) |
+| `harmonica_spectro_fit_jitter` | fit a jitter term in each channel (default `true`) |
+
+A ramp trend with Harmonica needs `spectro_fixed_timescale_trends: false`, so that each channel fits its own ramp timescale.
