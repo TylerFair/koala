@@ -53,6 +53,7 @@ guide/troubleshooting
 :caption: Case studies
 
 case_studies/transmission_soss
+case_studies/three_instruments
 case_studies/timing_spectra
 case_studies/rocky_eclipse
 case_studies/phase_curve

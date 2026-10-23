@@ -86,6 +86,16 @@ A number gives bins with that resolving power $R = \lambda/\Delta\lambda$.
 If you also give a `low` entry, koala first fits a coarser grid at that resolution before the final one.
 That's optional, and most fits don't need it.
 
+You can also make every channel a fixed number of detector columns instead, by giving a `pixels` block in place of `resolution`:
+
+```yaml
+pixels:
+  high: 6
+```
+
+This is often the better choice for MIRI/LRS, whose own resolving power climbs from about 40 at 5 µm to about 160 at 10 µm, so channels of one constant $R$ don't suit the whole band.
+Fitting in columns also makes it easier to trace a problem back to the detector.
+
 To use only part of the wavelength range, or to leave out a band such as a detector artifact, use:
 
 ```yaml

@@ -97,7 +97,7 @@ For a real analysis you'd start from an extraction at the detector's full resolu
 
 ## More orders, detectors and visits
 
-The same set-up works for any combination of observations of the same planet: SOSS orders, the two NIRSpec detectors, different instruments, or several visits.
+The same set-up works for any combination of observations of the same planet: SOSS orders, the two NIRSpec detectors, different instruments, or several visits ([WASP-39 b with NIRISS, NIRSpec and MIRI](three_instruments.md) puts three instruments together).
 List one configuration per dataset under `members`.
 Datasets whose observing times overlap are grouped into one visit and share a transit time, and separate visits each get their own.
 To group them yourself, give `visits` as lists of member file names without the `.yaml`, for example `visits: [[soss_order1, soss_order2], [nrs1]]`.

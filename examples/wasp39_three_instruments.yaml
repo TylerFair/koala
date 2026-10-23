@@ -1,0 +1,11 @@
+# One orbit for WASP-39 b from three JWST instruments on three visits (NIRISS/SOSS, NIRSpec/G395H on
+# both detectors, and MIRI/LRS), then the spectrum of each from 0.85 to 12 µm.
+# Run from the top of the repository with: koala -c examples/wasp39_three_instruments.yaml
+# The member paths and output_dir are relative to this file.
+
+joint:
+  members: [wasp39_soss_order1.yaml, wasp39_g395h_nrs1.yaml, wasp39_g395h_nrs2.yaml, wasp39_miri_lrs.yaml]
+planet:
+  a_rs: {value: 11.4, prior: uniform, low: 5.0, high: 25.0}
+  b: {value: 0.45, prior: uniform, low: 0.0, high: 1.0}
+output_dir: ../results/WASP-39_three_instruments
