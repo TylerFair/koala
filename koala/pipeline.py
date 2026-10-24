@@ -260,6 +260,10 @@ def run(cfg, config_path=None, execution_context=None, *, prepare_only=False,
     flags = resolve_spectral_trend_defaults(cfg.get('flags', {}))
     cfg['flags'] = flags
     _validate_flag_keys(flags)
+    if str(flags.get('transit_engine', 'jaxoplanet')).strip().lower() == 'harmonica':
+        from models.harmonica.core import HARMONICA_AVAILABLE, HARMONICA_MISSING
+        if not HARMONICA_AVAILABLE:
+            raise ImportError(HARMONICA_MISSING)
     instrument = normalize_instrument(cfg['instrument'])
     cfg['instrument'] = instrument
     nrs, order = resolve_detector(instrument, cfg)

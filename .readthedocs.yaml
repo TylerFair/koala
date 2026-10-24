@@ -1,7 +1,6 @@
 # Read the Docs configuration for Koala.
 # The docs are static Markdown (no autodoc), so the build only needs Sphinx
-# and its extensions; Koala itself and its compiled Harmonica extension are
-# not installed on the docs builder.
+# and its extensions; Koala itself is not installed on the docs builder.
 version: 2
 
 build:

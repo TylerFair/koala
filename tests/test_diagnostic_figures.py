@@ -1,5 +1,6 @@
 """Presentation preserves the native arrays and puts useful labels outside the data."""
 import numpy as np
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from koala import diagnostic_figures as figures
 
 
@@ -57,7 +58,9 @@ def test_emission_waterfall_separates_curves_and_keeps_wavelength_labels_outside
     assert all(text.get_position()[0] > 1 for text in fig.axes[0].texts)
     assert fig.axes[0].get_ylim()[1] > flux.max()
     assert 'eclipse' in fig.axes[0].get_xlabel()
-    fig.canvas.draw()
+    # The figure has been saved and closed, which detaches its canvas in Matplotlib 3.11.
+    canvas = FigureCanvasAgg(fig)
+    canvas.draw()
     for ax in fig.axes:
-        bounds = ax.xaxis.label.get_window_extent(fig.canvas.get_renderer())
+        bounds = ax.xaxis.label.get_window_extent(canvas.get_renderer())
         assert 0 <= bounds.x0 < bounds.x1 <= fig.bbox.x1

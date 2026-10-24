@@ -2,21 +2,27 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+HARMONICA_MISSING = (
+    "transit_engine: harmonica needs Harmonica, which isn't installed with koala by default. "
+    "It needs a C++ compiler; from the koala folder, install it with\n"
+    "    python -m pip install \".[harmonica]\"\n"
+    "(see https://koala-jwst.readthedocs.io/en/latest/install.html)."
+)
+
 try:
     from harmonica.jax import (
         harmonica_transit_power2_ld,
         harmonica_transit_quad_ld,
     )
+    HARMONICA_AVAILABLE = True
 except ImportError:
+    HARMONICA_AVAILABLE = False
+
     def harmonica_transit_power2_ld(*args, **kwargs):
-        raise ImportError(
-            "harmonica is required to evaluate the harmonica transit model."
-        )
+        raise ImportError(HARMONICA_MISSING)
 
     def harmonica_transit_quad_ld(*args, **kwargs):
-        raise ImportError(
-            "harmonica is required to evaluate the harmonica transit model."
-        )
+        raise ImportError(HARMONICA_MISSING)
 
 _ALL_ODD_COEFF_SPECS = (("a1", 1), ("a3", 3), ("a5", 5))
 
