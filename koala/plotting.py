@@ -634,8 +634,11 @@ def plot_wavelength_offset_summary(
     ax_data.set_ylim(bottom, top)
     for ax in (ax_data, ax_residual):
         ax.set_xlim(np.nanmin(x), np.nanmax(x))
-        ax.set_xlabel(f"Time from Mid-Transit [{unit}]")
         style_axis(ax)
+    # The residual panel is a third of the width, so it gets a short label and three ticks.
+    ax_data.set_xlabel(f"Time from Mid-Transit [{unit}]")
+    ax_residual.set_xlabel(f"Time [{unit}]")
+    ax_residual.xaxis.set_major_locator(MaxNLocator(nbins=3))
     ax_data.set_ylabel("Normalized Flux + Offset")
     ax_residual.tick_params(labelleft=False)
     add_instrument_stamp(ax_data, str(filename), fontsize=TITLE_SIZE)
