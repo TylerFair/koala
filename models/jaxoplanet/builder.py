@@ -1414,6 +1414,14 @@ def create_vectorized_model(
             else:
                 y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes,None,None))(
                     params,t,exp_trend)
+        elif 'gp_spectroscopic' in detrend_components and detrend_components & {
+                'spot_spectroscopic', '2spot_spectroscopic', 'linear_discontinuity_spectroscopic'}:
+            # spot and step templates under the GP template (models.gp.compute_lc_event_gp_spectroscopic)
+            y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None, None, None, None))(
+                params, t, gp_trend,
+                spot_trend if detrend_components & {'spot_spectroscopic', '2spot_spectroscopic'} else None,
+                spot_trend2 if '2spot_spectroscopic' in detrend_components else None,
+                jump_trend if 'linear_discontinuity_spectroscopic' in detrend_components else None)
         elif 'gp_spectroscopic' in detrend_components:
             y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes,None,None))(params,t,gp_trend)
         elif '2spot_spectroscopic' in detrend_components:

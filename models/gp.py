@@ -14,6 +14,7 @@ import numpy as np
 import tinygp
 
 from .common import compute_transit_model_auto, apply_systematics, safe_tau, exponential_systematic
+from .trends import _JUMP_WIDTH_DAYS, _soft_step, spot_crossing
 
 
 GP_MODEL_REVISION = "koala-gp-2026-09-08-tref-v1"
@@ -188,6 +189,32 @@ def compute_lc_explinear_gp_mean(params, t, t_ref=None):
     return apply_systematics(lc_transit, trend)
 
 
+def _event_terms(params, t, spots, jump):
+    """Gaussian spot bumps and the soft step, in observer time, as in the non-GP trend kernels."""
+    terms = 0.0
+    for suffix in spots:
+        terms = terms + spot_crossing(t, params[f"spot_amp{suffix}"], params[f"spot_mu{suffix}"],
+                                      params[f"spot_sigma{suffix}"])
+    if jump:
+        terms = terms + params["jump"] * _soft_step(t, params["t_jump"], params.get("width", _JUMP_WIDTH_DAYS))
+    return terms
+
+
+def _event_gp_mean(spots=(), jump=False):
+    """The mean function for a linear trend with spot crossings and/or a step, under a GP."""
+    def mean(params, t, t_ref=None):
+        lc_transit = _transit_signal(params, t)
+        trend = params["c"] + params["v"] * _time_offset(t, t_ref) + _event_terms(params, t, spots, jump)
+        return apply_systematics(lc_transit, trend)
+    return mean
+
+
+compute_lc_spot_gp_mean = _event_gp_mean(spots=("",))
+compute_lc_2spot_gp_mean = _event_gp_mean(spots=("", "2"))
+compute_lc_linear_discontinuity_gp_mean = _event_gp_mean(jump=True)
+compute_lc_spot_linear_discontinuity_gp_mean = _event_gp_mean(spots=("",), jump=True)
+
+
 GP_MEAN_FUNCTIONS = {
     "gp": compute_lc_gp_mean,
     "linear+gp": compute_lc_linear_gp_mean,
@@ -195,13 +222,30 @@ GP_MEAN_FUNCTIONS = {
     "cubic+gp": compute_lc_cubic_gp_mean,
     "quartic+gp": compute_lc_quartic_gp_mean,
     "explinear+gp": compute_lc_explinear_gp_mean,
+    # The GP on top of the trends that model discrete events (a spot crossing or a step), so that it cannot absorb
+    # them (they stay parametric and are passed to the channels as templates).
+    "spot+gp": compute_lc_spot_gp_mean,
+    "2spot+gp": compute_lc_2spot_gp_mean,
+    "linear_discontinuity+gp": compute_lc_linear_discontinuity_gp_mean,
+    "spot+linear_discontinuity+gp": compute_lc_spot_linear_discontinuity_gp_mean,
 }
+
+
+def _canonical_gp_type(table, detrend_type):
+    """The registered name of a GP mode whose components are given in any order ('gp+spot' -> 'spot+gp')."""
+    if detrend_type in table:
+        return detrend_type
+    try:
+        components = frozenset(str(detrend_type).split("+"))
+    except TypeError:
+        return detrend_type
+    return next((name for name in table if frozenset(name.split("+")) == components), detrend_type)
 
 
 def resolve_gp_mean_function(detrend_type):
     """Return the public mean function for a GP detrending mode."""
     try:
-        return GP_MEAN_FUNCTIONS[detrend_type]
+        return GP_MEAN_FUNCTIONS[_canonical_gp_type(GP_MEAN_FUNCTIONS, detrend_type)]
     except (KeyError, TypeError):
         raise ValueError(f"Unknown GP detrend type {detrend_type!r}") from None
 
@@ -259,6 +303,17 @@ def compute_lc_explinear_gp_spectroscopic(params, t, gp_trend, exp_trend=None):
         + exponential_systematic(params, t_norm, exp_trend)
     )
     return apply_systematics(lc_transit, trend + params["A_gp"] * gp_trend)
+
+
+def compute_lc_event_gp_spectroscopic(params, t, gp_trend, spot_trend=None, spot_trend2=None, jump_trend=None):
+    """A linear trend, the white-light spot and step templates (each with its own amplitude, as without the GP) and
+    the white-light GP template with its amplitude."""
+    lc_transit = compute_transit_model_auto(params, t)
+    trend = params["c"] + params.get("v", 0.0) * (t - jnp.min(t)) + params["A_gp"] * gp_trend
+    for template, amplitude in ((spot_trend, "A_spot"), (spot_trend2, "A_spot2"), (jump_trend, "A_jump")):
+        if template is not None:
+            trend = trend + params[amplitude] * template
+    return apply_systematics(lc_transit, trend)
 
 
 # --- GP BUILDERS AND TRAINING-POINT PREDICTION ---
@@ -342,12 +397,14 @@ GP_BUILDERS = {
     "quartic+gp": build_gp_quartic,
     "explinear+gp": build_gp_explinear,
 }
+for _name in ("spot+gp", "2spot+gp", "linear_discontinuity+gp", "spot+linear_discontinuity+gp"):
+    GP_BUILDERS[_name] = partial(build_gp_model, mean_function=GP_MEAN_FUNCTIONS[_name])
 
 
 def resolve_gp_builder(detrend_type):
     """Return the public builder for a GP detrending mode."""
     try:
-        return GP_BUILDERS[detrend_type]
+        return GP_BUILDERS[_canonical_gp_type(GP_BUILDERS, detrend_type)]
     except (KeyError, TypeError):
         raise ValueError(f"Unknown GP detrend type {detrend_type!r}") from None
 

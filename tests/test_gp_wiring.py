@@ -38,7 +38,8 @@ GP_TYPES = tuple(kgp.GP_BUILDERS)
 
 
 def _prior():
-    return {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1])}
+    return {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1]), "spot_guess": 1.02, "spot_guess2": 0.98,
+            "t_jump_guess": 1.05}
 
 
 def _substitutions(detrend_type):
@@ -57,6 +58,9 @@ def _substitutions(detrend_type):
         "log_tau": jnp.log(jnp.array(0.25)),
         "GP_log_sigma": jnp.log(jnp.array(0.01)),
         "GP_log_rho": jnp.log(jnp.array(0.08)),
+        "spot_amp": jnp.array(2e-3), "spot_mu": jnp.array(1.02), "spot_sigma": jnp.array(0.02),
+        "spot_amp2": jnp.array(1e-3), "spot_mu2": jnp.array(0.98), "spot_sigma2": jnp.array(0.01),
+        "jump": jnp.array(-1e-3), "t_jump": jnp.array(1.05),
     }
     return values
 

@@ -34,6 +34,7 @@ from .gp import (
     compute_lc_cubic_gp_spectroscopic,
     compute_lc_quartic_gp_spectroscopic,
     compute_lc_explinear_gp_spectroscopic,
+    compute_lc_event_gp_spectroscopic,
 )
 
 COMPUTE_KERNELS = {
@@ -58,6 +59,11 @@ COMPUTE_KERNELS = {
     'cubic+gp_spectroscopic': compute_lc_cubic_gp_spectroscopic,
     'quartic+gp_spectroscopic': compute_lc_quartic_gp_spectroscopic,
     'explinear+gp_spectroscopic': compute_lc_explinear_gp_spectroscopic,
+    # spot crossings and steps stay parametric under a GP (their white-light templates, as without the GP)
+    'spot_spectroscopic+gp_spectroscopic': compute_lc_event_gp_spectroscopic,
+    '2spot_spectroscopic+gp_spectroscopic': compute_lc_event_gp_spectroscopic,
+    'linear_discontinuity_spectroscopic+gp_spectroscopic': compute_lc_event_gp_spectroscopic,
+    'spot_spectroscopic+linear_discontinuity_spectroscopic+gp_spectroscopic': compute_lc_event_gp_spectroscopic,
     'spot_spectroscopic': compute_lc_spot_spectroscopic,
     '2spot_spectroscopic': compute_lc_2spot_spectroscopic,
     'quadratic+2spot_spectroscopic': compute_lc_quadratic_2spot_spectroscopic,

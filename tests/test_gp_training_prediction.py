@@ -85,7 +85,11 @@ def _base_params(**updates):
     params = dict(GP_log_rho=jnp.array(-0.7), GP_log_sigma=jnp.array(-1.5),
                   c=jnp.array(0.9), v=jnp.array(0.08), v2=jnp.array(-0.01),
                   v3=jnp.array(0.004), v4=jnp.array(-0.001),
-                  A=jnp.array(0.03), tau=jnp.array(0.4))
+                  A=jnp.array(0.03), tau=jnp.array(0.4),
+                  # spot crossings and the step, for the GP modes on top of them
+                  spot_amp=jnp.array(2e-3), spot_mu=jnp.array(1.02), spot_sigma=jnp.array(0.02),
+                  spot_amp2=jnp.array(1e-3), spot_mu2=jnp.array(0.98), spot_sigma2=jnp.array(0.01),
+                  jump=jnp.array(-1e-3), t_jump=jnp.array(1.05), width=jnp.array(0.01))
     params.update(updates)
     return params
 
