@@ -745,6 +745,17 @@ def _initialize_white_light(*, context, U_mu_wl, U_sigma_wl, _engine_wl_kw, geom
         hyper_params_wl['spot_guess2'] = context.spot_mu2
     elif 'spot' in context.detrending_type:
         hyper_params_wl['spot_guess'] = context.spot_mu
+    if 'spot' in context.detrending_type:
+        # flags.spot_shape: fixed holds each spot's center and width at spot_center/spot_width and fits only its
+        # amplitude. Use it when a GP sits on top of the spot: a free-shape spot and a GP on the same timescale
+        # explain the same bump and the white-light posterior becomes a funnel.
+        shape = str((getattr(context, 'cfg', None) or {}).get('flags', {}).get('spot_shape', 'free')).lower()
+        if shape not in {'free', 'fixed'}:
+            raise ValueError("flags.spot_shape must be 'free' or 'fixed'.")
+        hyper_params_wl['spot_shape'] = shape
+        hyper_params_wl['spot_width_guess'] = context.spot_sigma
+        if '2spot' in context.detrending_type:
+            hyper_params_wl['spot_width_guess2'] = context.spot_sigma2
     if 'linear_discontinuity' in context.detrending_type:
         hyper_params_wl['t_jump_guess'] = context.t_jump_guess if context.t_jump_guess is not None else 0.5 * (jnp.min(context.data.wl_time) + jnp.max(context.data.wl_time))
         hyper_params_wl['jump_guess'] = context.jump_guess
@@ -1239,10 +1250,10 @@ def _sample_white_light(
         from models.independent_nuts import prepare_laplace_metric
 
         preparation_start = time.perf_counter()
-        laplace_preparation = prepare_laplace_metric(
+        prepare = lambda start: prepare_laplace_metric(
             whitelight_model_for_run,
             context.key_master,
-            soln,
+            start,
             context.data.wl_time,
             context.data.wl_flux_err,
             model_kwargs={'y': context.data.wl_flux, 'prior_params': hyper_params_wl},
@@ -1265,6 +1276,12 @@ def _sample_white_light(
                 and int(context.data.wl_time.size) > 5000
             )),
         )
+        laplace_preparation = prepare(soln)
+        gp_start_diagnostics = {}
+        rho_sites = [name for name in soln if name.split('/')[-1] == 'GP_log_rho']
+        if rho_sites:
+            laplace_preparation, gp_start_diagnostics = _best_gp_length_scale_start(
+                prepare, soln, rho_sites, laplace_preparation)
         jitter_diagnostics = {}
         jitter_sites = getattr(context, 'jitter_metric_sites', None)
         if jitter_sites is None:
@@ -1312,6 +1329,7 @@ def _sample_white_light(
             ],
             **jitter_diagnostics,
             **geometry_diagnostics,
+            **gp_start_diagnostics,
         }
     chains = int(whitelight_mcmc_kwargs.get('num_chains', 1))
     if wl_run_init_params is not None and chains > 1:
@@ -1443,6 +1461,36 @@ def _sample_white_light(
 
 
 WHITELIGHT_RETRY_TARGET_ACCEPT = 0.99
+
+
+# A GP that is only weakly detected leaves a long ridge in (log sigma, log rho): from a long length-scale start
+# the MAP can stop on a saddle with a short-rho mode nearby, and a Laplace metric built there drives NUTS to its
+# maximum tree depth (WASP-69 b G395H NRS2, 2026-10-29). A second MAP from a short length scale costs one more
+# Laplace preparation; the lower-potential, positive-definite one is kept.
+_GP_SHORT_RHO_START_DAYS = 0.01
+
+
+def _best_gp_length_scale_start(prepare, soln, rho_sites, first):
+    """Laplace preparation from the configured GP start and from a short length scale; keep the better MAP."""
+    def score(preparation):
+        value = float(preparation.potential_fn(preparation.unconstrained_map))
+        saddle = not float(preparation.hessian_min_eigenvalue) > 0.0
+        return (saddle, value if np.isfinite(value) else np.inf)
+
+    alternative = dict(soln, **{name: jnp.asarray(np.log(_GP_SHORT_RHO_START_DAYS)) for name in rho_sites})
+    try:
+        second = prepare(alternative)
+    except Exception as error:  # the configured start stands
+        debug(f'WARNING: the short GP length-scale MAP failed and was skipped: {error}')
+        return first, {}
+    (saddle1, value1), (saddle2, value2) = score(first), score(second)
+    use_second = (saddle1, value1) > (saddle2, value2)
+    debug(f'GP length-scale starts: configured MAP potential {value1:.3f} (saddle {saddle1}), '
+          f'short-rho MAP {value2:.3f} (saddle {saddle2}); using the '
+          f"{'short-rho' if use_second else 'configured'} start.")
+    diagnostics = {'gp_start_potentials': [value1, value2], 'gp_start_saddle': [saddle1, saddle2],
+                   'gp_start_used': 'short_rho' if use_second else 'configured'}
+    return (second if use_second else first), diagnostics
 
 
 def _retry_laplace_with_smaller_steps(diagnostics, mass_matrix, target_accept):

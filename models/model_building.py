@@ -71,12 +71,18 @@ def sample_whitelight_trend(t, prior, components, parameterization, step_width_m
         # trend kernels floor it (``models.trends.safe_tau``) so tau -> 0 stays finite.
         params['tau'] = _configured_trend_site(trend_priors, 'tau', default_tau)
 
-    ordered = '2spot' in components and two_spot_ordering == 'ordered'
+    fixed_shape = prior.get('spot_shape', 'free') == 'fixed'
+    ordered = '2spot' in components and two_spot_ordering == 'ordered' and not fixed_shape
     spots = ('', '2') if '2spot' in components else ('',) if 'spot' in components else ()
     for suffix in spots:
         amp, mu, sigma = (f'spot_{name}{suffix}' for name in ('amp', 'mu', 'sigma'))
         guess = prior.get(f'spot_guess{suffix}', prior['spot_guess'])
         params[amp] = numpyro.sample(amp, dist.Uniform(0.0, 0.1))
+        if fixed_shape:
+            params[mu] = numpyro.deterministic(mu, jnp.asarray(guess, dtype=jnp.float64))
+            params[sigma] = numpyro.deterministic(sigma, jnp.asarray(prior[f'spot_width_guess{suffix}'],
+                                                                     dtype=jnp.float64))
+            continue
         # The second cadence width historically precedes its center draw.
         if parameterization == 'cadence' and suffix:
             width = numpyro.sample(f'{sigma}_cadences', dist.Uniform(1e-4 / cadence, 0.1 / cadence))

@@ -123,3 +123,24 @@ def test_white_light_model_builds_with_the_gp(name):
     for site in {"spot+gp": ["spot_amp"], "2spot+gp": ["spot_amp", "spot_amp2"],
                  "linear_discontinuity+gp": ["jump"], "spot+linear_discontinuity+gp": ["spot_amp", "jump"]}[name]:
         assert site in sites, site
+
+
+@pytest.mark.parametrize("name", ["spot+gp", "2spot+gp"])
+def test_fixed_spot_shape_samples_only_the_amplitude(name):
+    """flags.spot_shape: fixed holds the spot center and width at the configured values; only the amplitude is free."""
+    model = create_whitelight_model(detrend_type=name, ld_mode="fixed", ld_profile="quadratic", gp_solver="serial",
+                                    gp_assume_sorted=True, parameter_priors=SPECS)
+    t = jnp.linspace(0.9, 1.1, 64)
+    prior = {"period": jnp.array([3.0]), "u": jnp.array([0.2, 0.1]), "spot_guess": 1.0, "spot_guess2": 0.98,
+             "spot_shape": "fixed", "spot_width_guess": 0.006, "spot_width_guess2": 0.004}
+    sites = trace(seed(model, 3)).get_trace(t, jnp.full_like(t, 1e-3), y=jnp.ones_like(t), prior_params=prior)
+    suffixes = ("", "2") if name == "2spot+gp" else ("",)
+    for s in suffixes:
+        assert sites[f"spot_amp{s}"]["type"] == "sample"
+        assert sites[f"spot_mu{s}"]["type"] == "deterministic"
+        assert sites[f"spot_sigma{s}"]["type"] == "deterministic"
+    assert float(sites["spot_mu"]["value"]) == 1.0 and float(sites["spot_sigma"]["value"]) == 0.006
+    if name == "2spot+gp":
+        assert float(sites["spot_mu2"]["value"]) == 0.98 and float(sites["spot_sigma2"]["value"]) == 0.004
+    free = {n for n, s in sites.items() if s["type"] == "sample" and not s["is_observed"]}
+    assert not any(n.startswith(("spot_mu", "spot_sigma", "spot_center", "log_spot")) for n in free), free

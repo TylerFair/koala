@@ -177,7 +177,13 @@ def compose_joint_model(contexts, pieces, visits, shared_specs):
                         prior = pieces[owner][0]
                         guess = prior.get(f'spot_guess{suffix}', prior.get('spot_guess'))
                         cadence = jnp.median(jnp.diff(jnp.sort(t[owner])))
-                        if contexts[owner].whitelight_trend_parameterization == 'cadence':
+                        if prior.get('spot_shape', 'free') == 'fixed':
+                            spots[v, f'spot_mu{suffix}'] = numpyro.deterministic(
+                                f'spot_mu{suffix}', jnp.asarray(guess, dtype=jnp.float64))
+                            spots[v, f'spot_sigma{suffix}'] = numpyro.deterministic(
+                                f'spot_sigma{suffix}', jnp.asarray(prior[f'spot_width_guess{suffix}'],
+                                                                   dtype=jnp.float64))
+                        elif contexts[owner].whitelight_trend_parameterization == 'cadence':
                             offset = numpyro.sample(f'spot_mu{suffix}_offset_cadences',
                                 numpyro.distributions.Normal(0., .01 / cadence))
                             width = numpyro.sample(f'spot_sigma{suffix}_cadences',
