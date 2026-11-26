@@ -1150,6 +1150,66 @@ def _white_light_geometry_coordinates(preparation):
     ), True, diagnostics
 
 
+# A further Newton step shorter than this, in Laplace standard deviations,
+# leaves the metric unchanged for sampling purposes.
+WHITELIGHT_MAP_DECREMENT_LIMIT = 1.0e-2
+
+
+def _laplace_metric_is_usable(preparation, gradient_tolerance=1.0e-4):
+    """Whether the optimizer stopped at a converged maximum of the posterior.
+
+    A fixed Laplace metric is the local curvature of a mode. If the optimizer
+    ran out of iterations, or stopped where the Hessian has a non-positive
+    eigenvalue (a saddle or a ridge), that curvature does not describe the
+    posterior and the eigenvalue floor hides the problem. Such fits are sent
+    straight to adaptive NUTS instead of a fixed-metric run that fails its
+    gate first.
+    """
+    decrement = float(preparation.newton_decrement)
+    gradient = float(preparation.gradient_norm)
+    converged = bool(decrement <= WHITELIGHT_MAP_DECREMENT_LIMIT or gradient <= gradient_tolerance)
+    maximum = bool(float(preparation.hessian_min_eigenvalue) > 0.0)
+    return converged and maximum, converged, maximum
+
+
+def _laplace_scaled_coordinates(preparation):
+    """Divide every unconstrained coordinate by its Laplace standard deviation.
+
+    NumPyro's windowed adaptation, like Stan's, shrinks each estimated
+    variance toward 1e-3. Transit times, depths and baselines have posterior
+    variances many orders of magnitude below that, so in the original
+    coordinates the shrinkage inflates their steps and NUTS crawls. In these
+    coordinates every Laplace variance is one, so the same shrinkage only
+    stabilises the short early windows of a high-dimensional joint fit.
+
+    The map is a fixed positive rescaling: its constant Jacobian is kept in
+    the potential, the posterior is unchanged, and coordinate signs are kept,
+    so the folded-impact reflection remains valid.
+    """
+    from jax.flatten_util import ravel_pytree
+
+    _, unravel = ravel_pytree(preparation.unconstrained_map)
+    covariance = preparation.inverse_mass_matrix
+    scale_flat = jnp.sqrt(jnp.diag(covariance))
+    scale = unravel(scale_flat)
+    log_jacobian = jnp.sum(jnp.log(scale_flat))
+
+    def to_original(position):
+        return {name: value * scale[name] for name, value in position.items()}
+
+    def to_scaled(position):
+        return {name: value / scale[name] for name, value in position.items()}
+
+    def potential(position):
+        return preparation.potential_fn(to_original(position)) - log_jacobian
+
+    def postprocess(position):
+        return preparation.postprocess_fn(to_original(position))
+
+    scaled_covariance = covariance / scale_flat[:, None] / scale_flat[None, :]
+    return potential, postprocess, scaled_covariance, to_scaled
+
+
 class _FoldedImpactNUTS(numpyro.infer.NUTS):
     """Mix a Metropolis sign reflection with NUTS in the curved coordinates.
 
@@ -1288,19 +1348,32 @@ def _sample_white_light(
             wl_postprocess_kwargs['postprocess_fn'] = laplace_preparation.postprocess_fn
         laplace_preparation.inverse_mass_matrix.block_until_ready()
         preparation_wall = time.perf_counter() - preparation_start
-        wl_nuts_kwargs.update(
-            dense_mass=True, inverse_mass_matrix=laplace_preparation.inverse_mass_matrix,
-            adapt_mass_matrix=False,
-            target_accept_prob=context.whitelight_laplace_options['target_accept'],
-            max_tree_depth=context.whitelight_laplace_options['max_tree_depth'],
-        )
-        whitelight_mcmc_kwargs = {
-            **whitelight_mcmc_kwargs,
-            "num_warmup": context.whitelight_laplace_options["warmup"],
-        }
+        laplace_usable, map_converged, map_is_maximum = _laplace_metric_is_usable(laplace_preparation)
+        if laplace_usable:
+            wl_nuts_kwargs.update(
+                dense_mass=True, inverse_mass_matrix=laplace_preparation.inverse_mass_matrix,
+                adapt_mass_matrix=False,
+                target_accept_prob=context.whitelight_laplace_options['target_accept'],
+                max_tree_depth=context.whitelight_laplace_options['max_tree_depth'],
+            )
+            whitelight_mcmc_kwargs = {
+                **whitelight_mcmc_kwargs,
+                "num_warmup": context.whitelight_laplace_options["warmup"],
+            }
+        else:
+            debug(
+                "WARNING: the white-light optimizer did not reach a maximum of the "
+                f"posterior (converged={map_converged}, positive-definite Hessian="
+                f"{map_is_maximum}, Newton decrement {float(laplace_preparation.newton_decrement):.3g}, "
+                f"minimum Hessian eigenvalue {float(laplace_preparation.hessian_min_eigenvalue):.3g}); "
+                "sampling with adaptive NUTS instead of a fixed Laplace metric."
+            )
+            info('The white-light optimum is not a converged maximum; sampling with adaptive NUTS.')
         wl_run_init_params = laplace_preparation.unconstrained_map
         laplace_diagnostics = {
-            "mass_matrix": "laplace",
+            "mass_matrix": "laplace" if laplace_usable else "adaptive_unconverged_map",
+            "map_converged": map_converged,
+            "map_is_maximum": map_is_maximum,
             "laplace_preparation_wall_seconds": preparation_wall,
             "map_gradient_norm": float(laplace_preparation.gradient_norm),
             "map_newton_decrement": float(laplace_preparation.newton_decrement),
@@ -1322,10 +1395,6 @@ def _sample_white_light(
                              for name, value in start_diagnostics.items()}
         laplace_diagnostics.update(start_diagnostics)
         debug(f'White-light independent starts: {start_diagnostics}', flush=True)
-    mcmc = numpyro.infer.MCMC(
-        wl_nuts_type(wl_sampler_model, **wl_nuts_kwargs), progress_bar=True,
-        jit_model_args=True, **wl_postprocess_kwargs, **whitelight_mcmc_kwargs,
-    )
     sampling_start = time.perf_counter()
     wl_run_args = (context.data.wl_time, context.data.wl_flux_err)
     wl_run_kwargs = {
@@ -1334,10 +1403,34 @@ def _sample_white_light(
         "init_params": wl_run_init_params,
         "extra_fields": ('diverging', 'accept_prob', 'potential_energy', 'num_steps'),
     }
+
+    def adaptive_laplace_mcmc():
+        """Dense adaptive NUTS seeded by the Laplace covariance, in scaled coordinates."""
+        potential, postprocess, covariance, to_scaled = _laplace_scaled_coordinates(laplace_preparation)
+        nuts_kwargs = dict(
+            adaptive_wl_nuts_kwargs, potential_fn=potential, dense_mass=True,
+            inverse_mass_matrix=covariance, adapt_mass_matrix=True,
+            regularize_mass_matrix=True, target_accept_prob=0.9,
+        )
+        mcmc = numpyro.infer.MCMC(
+            wl_nuts_type(None, **nuts_kwargs), progress_bar=True, jit_model_args=True,
+            postprocess_fn=postprocess, **adaptive_wl_mcmc_kwargs,
+        )
+        return mcmc, dict(wl_run_kwargs, init_params=to_scaled(wl_run_init_params))
+
     heading = getattr(context, 'console_sampling_heading', None)
     info(heading or f'White light: {getattr(context, "surface_config", {}).get("model", "transit")} with a {getattr(context, "detrending_type", "linear")} trend, '
          f'{whitelight_mcmc_kwargs.get("num_chains", 1)} chains of {whitelight_mcmc_kwargs.get("num_samples", 1000)} draws')
-    mcmc.run(context.key_master, *wl_run_args, **wl_run_kwargs)
+    first_is_adaptive = laplace_diagnostics.get("mass_matrix") == "adaptive_unconverged_map"
+    if first_is_adaptive:
+        mcmc, first_run_kwargs = adaptive_laplace_mcmc()
+    else:
+        mcmc = numpyro.infer.MCMC(
+            wl_nuts_type(wl_sampler_model, **wl_nuts_kwargs), progress_bar=True,
+            jit_model_args=True, **wl_postprocess_kwargs, **whitelight_mcmc_kwargs,
+        )
+        first_run_kwargs = wl_run_kwargs
+    mcmc.run(context.key_master, *wl_run_args, **first_run_kwargs)
     jax.block_until_ready(next(iter(mcmc.get_samples().values())))
     laplace_diagnostics["initial_block_sampling_wall_seconds"] = (
         time.perf_counter() - sampling_start
@@ -1349,8 +1442,8 @@ def _sample_white_light(
         nuisance = set(mcmc.last_state.z) - set(science_sites.values())
         science_sites.update({name: name for name in nuisance})
     (wl_samples, wl_samples_grouped, wl_extra_fields, wl_quality_diagnostics) = _continue_mcmc_until_geometry_gate(
-        mcmc, context.key_master, wl_run_args, wl_run_kwargs, min_ess=400.0, max_divergences=0,
-        max_extra_blocks=3, failfast_ess=50.0, science_sites=science_sites,
+        mcmc, context.key_master, wl_run_args, first_run_kwargs, min_ess=400.0, max_divergences=0,
+        max_extra_blocks=3, failfast_ess=0.0 if first_is_adaptive else 50.0, science_sites=science_sites,
     )
     sampling_attempts = [dict(wl_quality_diagnostics)]
     laplace_diagnostics.update(wl_quality_diagnostics)
@@ -1389,22 +1482,11 @@ def _sample_white_light(
         )
         info('White-light convergence checks failed; retrying with adaptive NUTS.')
         _, adaptive_key = jax.random.split(context.key_master)
-        # Retain the validated MAP and initial covariance, then let each
-        # chain learn its own dense metric. Restarting from an identity
-        # diagonal metric discards the useful preparation on correlated
-        # geometry/limb-darkening posteriors.
-        adaptive_wl_nuts_kwargs.update(
-            dense_mass=True,
-            inverse_mass_matrix=laplace_preparation.inverse_mass_matrix,
-            adapt_mass_matrix=True,
-            target_accept_prob=0.9,
-        )
-        mcmc = numpyro.infer.MCMC(
-            wl_nuts_type(wl_sampler_model, **adaptive_wl_nuts_kwargs),
-            progress_bar=True, jit_model_args=True, **wl_postprocess_kwargs, **adaptive_wl_mcmc_kwargs,
-        )
-        adaptive_run_kwargs = dict(wl_run_kwargs)
-        adaptive_run_kwargs["init_params"] = wl_run_init_params
+        # Retain the MAP and its covariance, then let each chain learn its
+        # own dense metric. Restarting from an identity diagonal metric
+        # discards the useful preparation on correlated geometry and
+        # limb-darkening posteriors.
+        mcmc, adaptive_run_kwargs = adaptive_laplace_mcmc()
         mcmc.run(adaptive_key, *wl_run_args, **adaptive_run_kwargs)
         (wl_samples, wl_samples_grouped, wl_extra_fields, wl_quality_diagnostics) = _continue_mcmc_until_geometry_gate(
             mcmc, adaptive_key, wl_run_args, adaptive_run_kwargs, min_ess=400.0,

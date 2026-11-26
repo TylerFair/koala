@@ -135,9 +135,24 @@ def test_laplace_start_backtracking_handles_curved_posteriors():
                                   potential_fn=potential)
     starts, diagnostic = dispersed_laplace_starts(preparation, jax.random.PRNGKey(265), 4)
     energies = jax.vmap(potential)(starts)
-    assert np.all(np.isfinite(energies)) and np.all(energies <= 10.)
+    # d=2: 1.5 times the 99.9th percentile of chi-squared with 2 dof (~13.8).
+    assert np.all(np.isfinite(energies)) and np.all(energies <= 21.)
     assert np.max(diagnostic['chain_start_backtracks']) > 0
     assert len(np.unique(np.asarray(starts['x']))) == 4
+
+
+def test_laplace_starts_are_overdispersed_on_a_gaussian_posterior():
+    from types import SimpleNamespace
+    from models.independent_nuts import dispersed_laplace_starts
+    sd = jnp.array([1e-4, 1e-2, .3])
+    covariance = jnp.diag(sd**2)
+    preparation = SimpleNamespace(unconstrained_map={'x': jnp.zeros(3)}, inverse_mass_matrix=covariance,
+                                  potential_fn=lambda z: .5 * jnp.sum((z['x'] / sd)**2))
+    starts, diagnostic = dispersed_laplace_starts(preparation, jax.random.PRNGKey(3), 4000)
+    # Exactly Gaussian: only the ~0.1% beyond the chi-squared limit are
+    # shrunk, so the spread is sqrt(3) sigma.
+    assert np.mean(np.asarray(diagnostic['chain_start_backtracks']) > 0) < .005
+    np.testing.assert_allclose(np.std(starts['x'], axis=0) / sd, 3**.5, rtol=.04)
 
 
 def test_chain_identity_survives_device_copy_checkpoints_and_concatenation(tmp_path):

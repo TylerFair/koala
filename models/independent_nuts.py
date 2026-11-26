@@ -167,8 +167,14 @@ class LaplaceMetricPreparation:
     postprocess_fn: Any = None
 
 
-def dispersed_laplace_starts(preparation, rng_key, num_chains):
-    """Independent local starts, backtracked against the actual posterior.
+def dispersed_laplace_starts(preparation, rng_key, num_chains, covariance_scale=3.0):
+    """Overdispersed independent starts, backtracked against the actual posterior.
+
+    Each chain starts from a Gaussian centred on the MAP with
+    ``covariance_scale`` times the Laplace covariance. Starting wider than the
+    posterior lets split R-hat detect chains that have not converged
+    (Gelman & Rubin 1992); a fixed, well-matched metric reaches the typical
+    set within a few iterations from there.
 
     A covariance describes local curvature. On a curved posterior, a draw
     from its Gaussian approximation can have extremely low density. Shrink
@@ -178,11 +184,21 @@ def dispersed_laplace_starts(preparation, rng_key, num_chains):
     flat, unravel = ravel_pytree(preparation.unconstrained_map)
     values, vectors = jnp.linalg.eigh(preparation.inverse_mass_matrix)
     noise = jax.random.normal(rng_key, (num_chains, flat.size))
-    offsets = .5 * (noise * jnp.sqrt(jnp.maximum(values, 0.))) @ vectors.T
-    offsets /= jnp.maximum(1., jnp.max(jnp.abs(offsets), axis=1, keepdims=True))
+    offsets = covariance_scale**.5 * (noise * jnp.sqrt(jnp.maximum(values, 0.))) @ vectors.T
+    # Bound the largest unconstrained move (one unit at a quarter of the
+    # covariance, the earlier half-sigma starts) in proportion to the spread.
+    bound = 2. * covariance_scale**.5
+    offsets /= jnp.maximum(1., jnp.max(jnp.abs(offsets), axis=1, keepdims=True) / bound)
     potential = lambda point: preparation.potential_fn(unravel(point))
     reference = potential(flat)
-    limit = max(10, flat.size)
+    # On the Laplace Gaussian the potential rises by covariance_scale/2 times
+    # a chi-squared variable with d degrees of freedom. Shrink only offsets
+    # beyond its 99.9th percentile (Wilson-Hilferty), which the Gaussian
+    # does not explain.
+    dimension = flat.size
+    h = 2. / (9. * dimension)
+    quantile = dimension * (1. - h + 3.09 * h**.5)**3
+    limit = max(10., .5 * covariance_scale * quantile)
 
     def choose(offset):
         initial = potential(flat + offset)
